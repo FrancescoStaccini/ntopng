@@ -208,6 +208,7 @@ end
 
 --[[
 local tskey = _GET["tskey"] or host["tskey"]
+
 if tskey ~= hostkey_compact then
    -- Print the tskey
    print(string.format(" [LBD: %s]", visualTsKey(tskey)))
@@ -705,21 +706,30 @@ end
          print[[<tr><th width=30% >]] print("ARP Requests")
          print[[<a href="arp_matrix_graph.lua?host=]]print(host_ip)print[["> [See in Map]</a>]]
          print[[</th><td colspan=2 id="arp_req_td">
+
          <script>
+
          var printText = function(){
             $.getJSON("]]print (ntop.getHttpPrefix())print[[/lua/get_arp_matrix_data.lua?host=]]print(host_ip)print[[", function(data){
+
+
                if (data.talkers_num == 1)
                   $("#arp_req_td").text( "Sent "+ data.req_num+ " Requests to " + data.talkers_num +" Host" );
                else
                   $("#arp_req_td").text( "Sent "+ data.req_num+ " Requests to " + data.talkers_num +" different Hosts" );
+
                $("#arp_req_td").prop("href", "arp_matrix_graph.lua?host=]]print(host_ip)print[[");
             } );
          };
+
          printText();
+
          setInterval(function() {
             printText();
          }, 3000);
+
          </script>
+
          </td></tr>]]
       end
    end
@@ -767,6 +777,7 @@ end
 
    elseif((page == "packets")) then
       print [[
+
       <table class="table table-bordered table-striped">
 	 ]]
 
@@ -792,8 +803,10 @@ end
       hostinfo2json(host_info)
       print [[
       </table>
+
         <script type='text/javascript'>
 	       window.onload=function() {
+
 		   do_pie("#sizeSentDistro", ']]
 print (ntop.getHttpPrefix())
 print [[/lua/host_pkt_distro.lua', { distr: "size", direction: "sent", ifid: "]] print(ifId.."") print ('", '..hostinfo2json(host_info) .."}, \"\", refresh); \n")
@@ -814,12 +827,15 @@ macinfo["host"] = host["mac"]
 print (ntop.getHttpPrefix())
 print [[/lua/get_arp_data.lua', { ifid: "]] print(ifId.."") print ('", '..hostinfo2json(macinfo) .."}, \"\", refresh); \n")
 	print [[
+
 		}
+
 	    </script><p>
 	]]
 
    elseif((page == "ports")) then
       print [[
+
       <table class="table table-bordered table-striped">
 	 ]]
 
@@ -832,8 +848,10 @@ print [[/lua/get_arp_data.lua', { ifid: "]] print(ifId.."") print ('", '..hostin
       hostinfo2json(host_info)
       print [[
       </table>
+
         <script type='text/javascript'>
 	       window.onload=function() {
+
 		   do_pie("#clientPortsDistro", ']]
 print (ntop.getHttpPrefix())
 print [[/lua/iface_ports_list.lua', { clisrv: "client", ifid: "]] print(ifId.."") print ('", '..hostinfo2json(host_info) .."}, \"\", refresh); \n")
@@ -842,7 +860,9 @@ print [[/lua/iface_ports_list.lua', { clisrv: "client", ifid: "]] print(ifId..""
 print (ntop.getHttpPrefix())
 print [[/lua/iface_ports_list.lua', { clisrv: "server", ifid: "]] print(ifId.."") print ('", '..hostinfo2json(host_info) .."}, \"\", refresh); \n")
 	print [[
+
 		}
+
 	    </script><p>
 	]]
 
@@ -858,17 +878,20 @@ end
 
 if(found) then
    print [[
+
    <table border=0>
    <tr><td>
    <div id="chart-row-hosts">
        <strong>]] print(i18n("peers_page.top_peers_for_host",{hostkey=hostinfo2hostkey(host_info)})) print  [[</strong>
        <div class="clearfix"></div>
    </div>
+
    <div id="chart-ring-protocol">
        <strong>]] print(i18n("peers_page.top_peer_protocol")) print[[</strong>
        <div class="clearfix"></div>
    </div>
    </td></tr></table>
+
 <div class="row">
     <div>
     <table class="table table-hover dc-data-table">
@@ -881,9 +904,12 @@ if(found) then
         </thead>
     </table>
 </div>
+
+
 <script>
 var protocolChart = dc.pieChart("#chart-ring-protocol");
 var hostChart     = dc.rowChart("#chart-row-hosts");
+
 $.ajax({
       type: 'GET',]]
       print("url: '"..ntop.getHttpPrefix().."/lua/host_top_peers_protocols.lua?ifid="..ifId.."&host="..host_info["host"])
@@ -903,35 +929,43 @@ var ndx = crossfilter(content),
     trafficPerl7proto = protocolDim.group().reduceSum(function(d) {return +d.traffic;}),
     trafficPerhost = nameDim.group().reduceSum(function(d) {return +d.traffic;}),
     trafficHist    = trafficDim.group().reduceCount();
+
 protocolChart
     .width(400).height(300)
     .dimension(protocolDim)
     .group(trafficPerl7proto)
     .innerRadius(70);
+
 // Tooltip
 protocolChart.title(function(d){
       return d.key+": " + bytesToVolume(Math.pow(10, d.value));
       })
+
 hostChart
     .width(600).height(300)
     .dimension(nameDim)
     .group(trafficPerhost)
     .elasticX(true);
+
 // Tooltip
 hostChart.title(function(d){
       return "Host "+d.key+": " + bytesToVolume(Math.pow(10, d.value));
       })
+
 hostChart.xAxis().tickFormat(function(_v) {
   var v = Math.pow(10, _v);
+
   if(v < 1024)
     return(v.toFixed(2));
   else
     return bytesToVolume(v);
 });
+
   // dimension by full date
     var dateDimension = ndx.dimension(function (d) {
         return d.host;
     });
+
    dc.dataTable(".dc-data-table")
         .dimension(dateDimension)
         .group(function (d) { return d.name; })
@@ -958,9 +992,12 @@ hostChart.xAxis().tickFormat(function(_v) {
         .renderlet(function (table) {
             table.selectAll(".dc-table-group").classed("info", true);
         });
+
+
 dc.renderAll();
 }
 });
+
 </script>
    ]]
 
@@ -980,16 +1017,20 @@ end
 	print("<div class=\"alert alert-danger\"><img src=".. ntop.getHttpPrefix() .. "/img/warning.png> "..i18n("traffic_page.no_traffic_observed_message").."</div>")
      else
       print [[
+
       <table class="table table-bordered table-striped">
       	<tr><th class="text-left">]] print(i18n("traffic_page.l4_proto_overview")) print[[</th><td colspan=5><div class="pie-chart" id="topApplicationProtocols"></div></td></tr>
 	</div>
+
         <script type='text/javascript'>
 	       window.onload=function() {
+
 				   do_pie("#topApplicationProtocols", ']]
 print (ntop.getHttpPrefix())
 print [[/lua/host_l4_stats.lua', { ifid: "]] print(ifId.."") print('", '..hostinfo2json(host_info) .."}, \"\", refresh); \n")
   print [[
 				}
+
 	    </script><p>
 	]]
 
@@ -1031,6 +1072,7 @@ elseif((page == "ICMP")) then
      <tbody id="host_details_icmp_tbody">
      </tbody>
      </table>
+
 <script>
 function update_icmp_table() {
   $.ajax({
@@ -1047,9 +1089,12 @@ function update_icmp_table() {
     }
   });
 }
+
 update_icmp_table();
 setInterval(update_icmp_table, 5000);
+
 </script>
+
 ]]
 elseif((page == "ndpi")) then
    if(host["ndpi"] ~= nil) then
@@ -1131,6 +1176,7 @@ elseif((page == "ndpi")) then
 ]]
 
       print[[
+
 	<script type='text/javascript'>
 	       window.onload=function() {]]
 
@@ -1144,13 +1190,18 @@ elseif((page == "ndpi")) then
       print[[ do_pie("#topApplicationProtocols", ']]
       print (ntop.getHttpPrefix())
       print [[/lua/iface_ndpi_stats.lua', { ifid: "]] print(ifId.."") print ("\" , ") print(hostinfo2json(host_info)) print [[ }, "", refresh);
+
 				   do_pie("#topApplicationCategories", ']]
       print (ntop.getHttpPrefix())
       print [[/lua/iface_ndpi_stats.lua', { ndpi_category: "true", ifid: "]] print(ifId.."") print ("\" , ") print(hostinfo2json(host_info)) print [[ }, "", refresh);
+
 				   do_pie("#topApplicationBreeds", ']]
       print (ntop.getHttpPrefix())
       print [[/lua/iface_ndpi_stats.lua', { breed: "true", ifid: "]] print(ifId.."") print ("\" , ") print(hostinfo2json(host_info)) print [[ }, "", refresh);
+
+
 				}
+
 function update_ndpi_table() {
   $.ajax({
     type: 'GET',
@@ -1169,6 +1220,7 @@ function update_ndpi_table() {
 }
 update_ndpi_table();
 setInterval(update_ndpi_table, 5000);
+
 function update_ndpi_categories_table() {
   $.ajax({
     type: 'GET',
@@ -1185,6 +1237,7 @@ function update_ndpi_categories_table() {
 }
 update_ndpi_categories_table();
 setInterval(update_ndpi_categories_table, 5000);
+
 </script>
 ]]
 
@@ -1222,6 +1275,7 @@ setInterval(update_ndpi_categories_table, 5000);
 		     <tr><th>]] print(i18n("dns_page.dns_query_sent_distribution")) print[[</th><td colspan=5>
 		     <div class="pie-chart" id="dnsSent"></div>
 		     <script type='text/javascript'>
+
 					 do_pie("#dnsSent", ']]
 print (ntop.getHttpPrefix())
 print [[/lua/host_dns_breakdown.lua', { ]] print(hostinfo2json(host_info)) print [[, direction: "sent" }, "", refresh);
@@ -1241,6 +1295,7 @@ print [[
 	 <tr><th>DNS Rcvd Query Distribution</th><td colspan=5>
          <div class="pie-chart" id="dnsRcvd"></div>
          <script type='text/javascript'>
+
 	     do_pie("#dnsRcvd", ']]
 print (ntop.getHttpPrefix())
 print [[/lua/host_dns_breakdown.lua', { ]] print(hostinfo2json(host_info)) print [[, direction: "recv" }, "", refresh);
@@ -1274,6 +1329,7 @@ elseif(page == "ssl") then
      <tbody id="host_details_ja3_tbody">
      </tbody>
      </table>
+
 <script>
 function update_ja3_table() {
   $.ajax({
@@ -1290,8 +1346,10 @@ function update_ja3_table() {
     }
   });
 }
+
 update_ja3_table();
 setInterval(update_ja3_table, 5000);
+
 </script>
 ]]
 
@@ -1308,6 +1366,7 @@ elseif(page == "http") then
 print [[
          <div class="pie-chart" id="httpQueries"></div>
          <script type='text/javascript'>
+
 	     do_pie("#httpQueries", ']]
 print (ntop.getHttpPrefix())
 print [[/lua/host_http_breakdown.lua', { ]] print(hostinfo2json(host_info)) print [[, http_mode: "queries" }, "", refresh);
@@ -1326,6 +1385,7 @@ print [[/lua/host_http_breakdown.lua', { ]] print(hostinfo2json(host_info)) prin
 print [[
          <div class="pie-chart" id="httpResponses"></div>
          <script type='text/javascript'>
+
 	     do_pie("#httpResponses", ']]
 print (ntop.getHttpPrefix())
 print [[/lua/host_http_breakdown.lua', { ]] print(hostinfo2json(host_info)) print [[, http_mode: "responses" }, "", refresh);
@@ -1511,6 +1571,7 @@ if(show_vlan) then
                  css: {
               textAlign: 'center'
            }
+
          },
 ]]
 end
@@ -1556,6 +1617,7 @@ print [[
 	 	             css: {
 			        textAlign: 'right'
 			     }
+
 				 }
 			     ,{
                              title: "]] print(i18n("info")) print[[",
@@ -1575,6 +1637,7 @@ end
 
 print[[
        </script>
+
    ]]
 
 end
@@ -1643,12 +1706,14 @@ print [[
      <style type="text/css">
      #map-canvas { width: 800px; height: 480px; }
    </style>
+
 </center>
 ]]
 
 addGoogleMapsScript()
 
 print[[
+
     <script src="]] print(ntop.getHttpPrefix()) print [[/js/markerclusterer.js"></script>
 <div class="container-fluid">
   <div class="row-fluid">
@@ -1662,6 +1727,7 @@ print [[
 </div>
 </div>
 </div>
+
 <script type="text/javascript">
 /* IP Address to zoom */
   var zoomIP = "]] print('ifid='..ifId.."&"..hostinfo2url(host_info)) print [[ ";
@@ -1991,9 +2057,11 @@ if(page ~= "historical") and (host ~= nil) then
 
    print [[
    <script>
+
    $(document).ready(function() {
       $("#myTable").tablesorter();
    });
+
   ]]
    print("var last_pkts_sent = " .. host["packets.sent"] .. ";\n")
    print("var last_pkts_rcvd = " .. host["packets.rcvd"] .. ";\n")
@@ -2065,14 +2133,17 @@ if(page ~= "historical") and (host ~= nil) then
    			$('#pkts_rcvd').html(formatPackets(host["packets.rcvd"]));
    			$('#bytes_sent').html(bytesToVolume(host["bytes.sent"]));
    			$('#bytes_rcvd').html(bytesToVolume(host["bytes.rcvd"]));
+
    			$('#pkt_retransmissions_sent').html(formatPackets(host["tcpPacketStats.sent"]["retransmissions"]));
    			$('#pkt_ooo_sent').html(formatPackets(host["tcpPacketStats.sent"]["out_of_order"]));
    			$('#pkt_lost_sent').html(formatPackets(host["tcpPacketStats.sent"]["lost"]));
    			$('#pkt_keep_alive_sent').html(formatPackets(host["tcpPacketStats.sent"]["keep_alive"]));
+
    			$('#pkt_retransmissions_rcvd').html(formatPackets(host["tcpPacketStats.rcvd"]["retransmissions"]));
    			$('#pkt_ooo_rcvd').html(formatPackets(host["tcpPacketStats.rcvd"]["out_of_order"]));
    			$('#pkt_lost_rcvd').html(formatPackets(host["tcpPacketStats.rcvd"]["lost"]));
    			$('#pkt_keep_alive_rcvd').html(formatPackets(host["tcpPacketStats.rcvd"]["keep_alive"]));
+
    			if(!host["name"]) {
    			   $('#name').html(host["ip"]);
    			} else {
@@ -2099,7 +2170,9 @@ print [[
                           } else {
                             $('#trend_bridge_dropped_flows').html("<i class=\"fa fa-arrow-up\"></i>");
                           }
+
                           $('#bridge_dropped_flows').html(addCommas(host["flows.dropped"]));
+
                           $('#bridge_dropped_flows_tr').show();
                           last_dropped_flows = host["flows.dropped"];
                         } else {
@@ -2116,36 +2189,42 @@ print [[
    			   $('#dns_rcvd_num_queries').html(addCommas(host["dns"]["rcvd"]["num_queries"]));
    			   $('#dns_rcvd_num_replies_ok').html(addCommas(host["dns"]["rcvd"]["num_replies_ok"]));
    			   $('#dns_rcvd_num_replies_error').html(addCommas(host["dns"]["rcvd"]["num_replies_error"]));
+
    			   if(host["dns"]["sent"]["num_queries"] == last_dns_sent_num_queries) {
    			      $('#trend_sent_num_queries').html("<i class=\"fa fa-minus\"></i>");
    			   } else {
    			      last_dns_sent_num_queries = host["dns"]["sent"]["num_queries"];
    			      $('#trend_sent_num_queries').html("<i class=\"fa fa-arrow-up\"></i>");
    			   }
+
    			   if(host["dns"]["sent"]["num_replies_ok"] == last_dns_sent_num_replies_ok) {
    			      $('#trend_sent_num_replies_ok').html("<i class=\"fa fa-minus\"></i>");
    			   } else {
    			      last_dns_sent_num_replies_ok = host["dns"]["sent"]["num_replies_ok"];
    			      $('#trend_sent_num_replies_ok').html("<i class=\"fa fa-arrow-up\"></i>");
    			   }
+
    			   if(host["dns"]["sent"]["num_replies_error"] == last_dns_sent_num_replies_error) {
    			      $('#trend_sent_num_replies_error').html("<i class=\"fa fa-minus\"></i>");
    			   } else {
    			      last_dns_sent_num_replies_error = host["dns"]["sent"]["num_replies_error"];
    			      $('#trend_sent_num_replies_error').html("<i class=\"fa fa-arrow-up\"></i>");
    			   }
+
    			   if(host["dns"]["rcvd"]["num_queries"] == last_dns_rcvd_num_queries) {
    			      $('#trend_rcvd_num_queries').html("<i class=\"fa fa-minus\"></i>");
    			   } else {
    			      last_dns_rcvd_num_queries = host["dns"]["rcvd"]["num_queries"];
    			      $('#trend_rcvd_num_queries').html("<i class=\"fa fa-arrow-up\"></i>");
    			   }
+
    			   if(host["dns"]["rcvd"]["num_replies_ok"] == last_dns_rcvd_num_replies_ok) {
    			      $('#trend_rcvd_num_replies_ok').html("<i class=\"fa fa-minus\"></i>");
    			   } else {
    			      last_dns_rcvd_num_replies_ok = host["dns"]["rcvd"]["num_replies_ok"];
    			      $('#trend_rcvd_num_replies_ok').html("<i class=\"fa fa-arrow-up\"></i>");
    			   }
+
    			   if(host["dns"]["rcvd"]["num_replies_error"] == last_dns_rcvd_num_replies_error) {
    			      $('#trend_rcvd_num_replies_error').html("<i class=\"fa fa-minus\"></i>");
    			   } else {
@@ -2194,6 +2273,7 @@ print [[
 
    print [[
    			/* **************************************** */
+
 			$('#trend_as_active_client').html(drawTrend(host["active_flows.as_client"], last_active_flows_as_client, ""));
 			$('#trend_as_client').html(drawTrend(host["flows.as_client"], last_flows_as_client, ""));
 			$('#low_goodput_trend_as_client').html(drawTrend(host["low_goodput_flows.as_client"], last_low_goodput_flows_as_client, " style=\"color: #B94A48;\""));
@@ -2204,17 +2284,21 @@ print [[
 			$('#trend_anomalous_flows_as_client').html(drawTrend(host["anomalous_flows.as_client"], last_anomalous_flows_as_client, " style=\"color: #B94A48;\""));
 			$('#trend_unreachable_flows_as_server').html(drawTrend(host["unreachable_flows.as_server"], last_unreachable_flows_as_server, " style=\"color: #B94A48;\""));
 			$('#trend_unreachable_flows_as_client').html(drawTrend(host["unreachable_flows.as_client"], last_unreachable_flows_as_client, " style=\"color: #B94A48;\""));
+
 			$('#alerts_trend').html(drawTrend(host["num_alerts"], last_num_alerts, " style=\"color: #B94A48;\""));
 			$('#sent_trend').html(drawTrend(host["packets.sent"], last_pkts_sent, ""));
 			$('#rcvd_trend').html(drawTrend(host["packets.rcvd"], last_pkts_rcvd, ""));
+
 			$('#pkt_retransmissions_sent_trend').html(drawTrend(host["tcpPacketStats.sent"]["retransmissions"], last_sent_tcp_retransmissions, ""));
 			$('#pkt_ooo_sent_trend').html(drawTrend(host["tcpPacketStats.sent"]["out_of_order"], last_sent_tcp_ooo, ""));
  		        $('#pkt_lost_sent_trend').html(drawTrend(host["tcpPacketStats.sent"]["lost"], last_sent_tcp_lost, ""));
  		        $('#pkt_keep_alive_sent_trend').html(drawTrend(host["tcpPacketStats.sent"]["keep_alive"], last_sent_tcp_keep_alive, ""));
+
 			$('#pkt_retransmissions_rcvd_trend').html(drawTrend(host["tcpPacketStats.rcvd"]["retransmissions"], last_rcvd_tcp_retransmissions, ""));
 			$('#pkt_ooo_rcvd_trend').html(drawTrend(host["tcpPacketStats.rcvd"]["out_of_order"], last_rcvd_tcp_ooo, ""));
  		        $('#pkt_lost_rcvd_trend').html(drawTrend(host["tcpPacketStats.rcvd"]["lost"], last_rcvd_tcp_lost, ""));
  		        $('#pkt_keep_alive_rcvd_trend').html(drawTrend(host["tcpPacketStats.rcvd"]["keep_alive"], last_rcvd_tcp_keep_alive, ""));
+
    			last_num_alerts = host["num_alerts"];
    			last_pkts_sent = host["packets.sent"];
    			last_pkts_rcvd = host["packets.rcvd"];
@@ -2240,9 +2324,12 @@ print [[
 
 
    print [[
+
    			/* **************************************** */
+
    			/*
    			$('#throughput').html(rsp.throughput);
+
    			var values = thptChart.text().split(",");
    			values.shift();
    			values.push(rsp.throughput_raw);
@@ -2251,6 +2338,7 @@ print [[
    		     }
    	           });
    		 }, 3000);
+
    </script>
     ]]
 end

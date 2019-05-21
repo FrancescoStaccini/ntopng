@@ -720,6 +720,7 @@ local lang = {
     ["ssh_signature"] = "Firma SSH",
     ["ssl_certificate"] = "Certificato SSL",
     ["ssl_certificate_mismatch"] = "Il certificato SSL non corrisponde",
+    ["ssl_unsafe_ciphers"] = "Cifratura SSL non Sicura",
     ["suspicious_client_device_protocol"] = "Protocollo client \"%{proto}\" non permesso dalla <a href=\"%{url}\">politica del protocollo per %{devtype}</a> configurata",
     ["suspicious_server_device_protocol"] = "Protocollo server \"%{proto}\" non permesso dalla <a href=\"%{url}\">politica del protocollo per %{devtype}</a> configurata",
     ["suspicious_tcp_probing"] = "Probing TCP Sospetto",
@@ -1550,7 +1551,7 @@ local lang = {
     ["type_5_1_redirect_for_host"] = "Redirect for host",
     ["type_5_2_redirect_for_tos_and_network"] = "Redirect for TOS and network",
     ["type_5_3_redirect_for_tos_and_host"] = "Redirect for TOS and host",
-    ["type_8_0_echo_request_x"] = "Echo request x",
+    ["type_8_0_echo_request"] = "Echo request",
     ["type_9_0_router_advertisement"] = "Router advertisement",
   },
   ["icmp_v6_msgs"] = {

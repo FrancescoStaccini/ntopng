@@ -292,6 +292,7 @@ void Flow::dumpFlowAlert() {
     case status_slow_data_exchange: /* 3 */
     case status_low_goodput: /* 4 */
     case status_tcp_connection_issues: /* 6 - i.e. too many retransmission ooo... or similar */
+    case status_tcp_severe_connection_issues: /* 22 */
       /* Don't log them for the time being otherwise we'll have too many flows */
       do_dump = false;
       break;
@@ -309,6 +310,7 @@ void Flow::dumpFlowAlert() {
       break;
 
     case status_ssl_certificate_mismatch: /* 10 */
+    case status_ssl_unsafe_ciphers:       /* 23 */
       do_dump = ntop->getPrefs()->are_ssl_alerts_enabled();
       break;
 
@@ -343,6 +345,9 @@ void Flow::dumpFlowAlert() {
 
     case status_ids_alert:
       do_dump = ntop->getPrefs()->are_ids_alerts_enabled();
+      break;
+
+    case num_flow_status: /* nothing to do here */
       break;
     }
 
@@ -502,12 +507,17 @@ void Flow::processDetectedProtocol() {
 
     if((protos.ssl.ja3.client_hash == NULL) && (ndpiFlow->protos.stun_ssl.ssl.ja3_client[0] != '\0')) {
       protos.ssl.ja3.client_hash = strdup(ndpiFlow->protos.stun_ssl.ssl.ja3_client);
+      protos.ssl.ja3.client_unsafe_cipher = ndpiFlow->protos.stun_ssl.ssl.client_unsafe_cipher;
+      if(protos.ssl.ja3.client_unsafe_cipher != ndpi_cipher_safe) setFlowAlerted();
       updateJA3();
     }
     
-    if((protos.ssl.ja3.server_hash == NULL) && (ndpiFlow->protos.stun_ssl.ssl.ja3_server[0] != '\0'))
+    if((protos.ssl.ja3.server_hash == NULL) && (ndpiFlow->protos.stun_ssl.ssl.ja3_server[0] != '\0')) {
       protos.ssl.ja3.server_hash = strdup(ndpiFlow->protos.stun_ssl.ssl.ja3_server);    
-
+      protos.ssl.ja3.server_unsafe_cipher = ndpiFlow->protos.stun_ssl.ssl.server_unsafe_cipher;
+      if(protos.ssl.ja3.server_unsafe_cipher != ndpi_cipher_safe) setFlowAlerted();
+    }
+    
     if(check_tor) {
       char rsp[256];
 
@@ -1539,6 +1549,26 @@ void Flow::processLua(lua_State* vm, const ParsedeBPF * const pe, bool client) {
 
 /* *************************************** */
 
+const char* Flow::cipher_weakness2str(ndpi_cipher_weakness w) {
+  switch(w) {
+  case ndpi_cipher_safe:
+    return("safe");
+    break;
+    
+  case ndpi_cipher_weak:
+    return("weak");
+    break;
+    
+  case ndpi_cipher_insecure:
+    return("insecure");
+    break;
+  }
+
+  return(""); /* NOTREACHED */
+}
+
+/* *************************************** */
+
 void Flow::lua(lua_State* vm, AddressTree * ptree,
 	       DetailsLevel details_level, bool skipNewTable) {
   char buf[64];
@@ -1782,11 +1812,17 @@ void Flow::lua(lua_State* vm, AddressTree * ptree,
 	if(protos.ssl.server_certificate)
 	  lua_push_str_table_entry(vm, "protos.ssl.server_certificate", protos.ssl.server_certificate);
 
-	if(protos.ssl.ja3.client_hash)
+	if(protos.ssl.ja3.client_hash) {
 	  lua_push_str_table_entry(vm, "protos.ssl.ja3.client_hash", protos.ssl.ja3.client_hash);
-
-	if(protos.ssl.ja3.server_hash)
+	  lua_push_str_table_entry(vm, "protos.ssl.ja3.client_unsafe_cipher",
+				   cipher_weakness2str(protos.ssl.ja3.client_unsafe_cipher));
+	}
+	
+	if(protos.ssl.ja3.server_hash) {
 	  lua_push_str_table_entry(vm, "protos.ssl.ja3.server_hash", protos.ssl.ja3.server_hash);
+	  lua_push_str_table_entry(vm, "protos.ssl.ja3.server_unsafe_cipher",
+				   cipher_weakness2str(protos.ssl.ja3.server_unsafe_cipher));
+	}		  
       }
     }
 
@@ -1941,10 +1977,14 @@ bool Flow::isFlowPeer(char *numIP, u_int16_t vlanId) {
 
 /* *************************************** */
 
-void Flow::sumStats(nDPIStats *stats) {
+void Flow::sumStats(nDPIStats *stats, FlowStatusStats *status_stats) {
+  FlowStatus status = getFlowStatus();
+
   stats->incStats(0, ndpiDetectedProtocol.app_protocol,
 		  cli2srv_packets, cli2srv_bytes,
 		  srv2cli_packets, srv2cli_bytes);
+
+  status_stats->incStats(status);
 }
 
 /* *************************************** */
@@ -2641,14 +2681,6 @@ void Flow::incTcpBadStats(bool src2dst_direction,
   stats->pktRetr += retr_pkts;
   stats->pktOOO += ooo_pkts;
   stats->pktLost += lost_pkts;
-
-  /*host->incRetransmittedPkts(retr_pkts);
-  host->incOOOPkts(ooo_pkts);
-  host->incLostPkts(lost_pkts);
-
-  iface->incRetransmittedPkts(retr_pkts);
-  iface->incOOOPkts(ooo_pkts);
-  iface->incLostPkts(lost_pkts);*/
 }
 
 /* *************************************** */
@@ -2683,16 +2715,23 @@ void Flow::updateTcpSeqNum(const struct bpf_timeval *when,
 	   && (payload_Len == 0 || payload_Len == 1)
 	   && ((flags & (TH_SYN|TH_FIN|TH_RST)) == 0)) {
 	  if(debug) ntop->getTrace()->traceEvent(TRACE_WARNING, "[src2dst] Packet KeepAlive");
-	  tcp_stats_s2d.pktKeepAlive++, cli_host->incKeepAlivePkts(1);
+	  tcp_stats_s2d.pktKeepAlive++;
+	  cli_host->incKeepAliveSent(1), srv_host->incKeepAliveRcvd(1);
 	} else if(tcp_stats_s2d.last == seq_num) {
-	  tcp_stats_s2d.pktRetr++, cli_host->incRetransmittedPkts(1), iface->incRetransmittedPkts(1);
+	  tcp_stats_s2d.pktRetr++;
+	  cli_host->incRetxSent(1), srv_host->incRetxRcvd(1);
+	  iface->incRetransmittedPkts(1);
 	  if(debug) ntop->getTrace()->traceEvent(TRACE_WARNING, "[src2dst] Packet retransmission");
 	} else if((tcp_stats_s2d.last > seq_num)
 		  && (seq_num < tcp_stats_s2d.next)) {
-	  tcp_stats_s2d.pktLost++, cli_host->incLostPkts(1), iface->incLostPkts(1);
+	  tcp_stats_s2d.pktLost++;
+	  cli_host->incLostSent(1), srv_host->incLostRcvd(1);
+	  iface->incLostPkts(1);
 	  if(debug) ntop->getTrace()->traceEvent(TRACE_WARNING, "[src2dst] Packet lost [last: %u][act: %u]", tcp_stats_s2d.last, seq_num);
 	} else {
-	  tcp_stats_s2d.pktOOO++, cli_host->incOOOPkts(1), iface->incOOOPkts(1);
+	  tcp_stats_s2d.pktOOO++;
+	  cli_host->incOOOSent(1), srv_host->incOOORcvd(1);
+	  iface->incOOOPkts(1);
 
 	  update_last_seqnum = ((seq_num - 1) > tcp_stats_s2d.last) ? true : false;
 	  if(debug) ntop->getTrace()->traceEvent(TRACE_WARNING, "[src2dst] Packet OOO [last: %u][act: %u]", tcp_stats_s2d.last, seq_num);
@@ -2713,17 +2752,24 @@ void Flow::updateTcpSeqNum(const struct bpf_timeval *when,
 	   && (payload_Len == 0 || payload_Len == 1)
 	   && ((flags & (TH_SYN|TH_FIN|TH_RST)) == 0)) {
 	  if(debug) ntop->getTrace()->traceEvent(TRACE_WARNING, "[dst2src] Packet KeepAlive");
-	  tcp_stats_d2s.pktKeepAlive++, srv_host->incKeepAlivePkts(1);
+	  tcp_stats_d2s.pktKeepAlive++;
+	  cli_host->incKeepAliveRcvd(1), srv_host->incKeepAliveSent(1);
 	} else if(tcp_stats_d2s.last == seq_num) {
-	  tcp_stats_d2s.pktRetr++, srv_host->incRetransmittedPkts(1), iface->incRetransmittedPkts(1);
+	  tcp_stats_d2s.pktRetr++;
+	  cli_host->incRetxRcvd(1), srv_host->incRetxSent(1);
+	  iface->incRetransmittedPkts(1);
 	  if(debug) ntop->getTrace()->traceEvent(TRACE_WARNING, "[dst2src] Packet retransmission");
 	  // bytes
 	} else if((tcp_stats_d2s.last > seq_num)
 		  && (seq_num < tcp_stats_d2s.next)) {
-	  tcp_stats_d2s.pktLost++, srv_host->incLostPkts(1), iface->incLostPkts(1);
+	  tcp_stats_d2s.pktLost++;
+	  cli_host->incLostRcvd(1), srv_host->incLostSent(1);
+	  iface->incLostPkts(1);
 	  if(debug) ntop->getTrace()->traceEvent(TRACE_WARNING, "[dst2src] Packet lost [last: %u][act: %u]", tcp_stats_d2s.last, seq_num);
 	} else {
-	  tcp_stats_d2s.pktOOO++, srv_host->incOOOPkts(1), iface->incOOOPkts(1);
+	  tcp_stats_d2s.pktOOO++;
+	  cli_host->incOOORcvd(1), srv_host->incOOOSent(1);
+	  iface->incOOOPkts(1);
 	  update_last_seqnum = ((seq_num - 1) > tcp_stats_d2s.last) ? true : false;
 	  if(debug) ntop->getTrace()->traceEvent(TRACE_WARNING, "[dst2src] [last: %u][next: %u]", tcp_stats_d2s.last, tcp_stats_d2s.next);
 	  if(debug) ntop->getTrace()->traceEvent(TRACE_WARNING, "[dst2src] Packet OOO [last: %u][act: %u]", tcp_stats_d2s.last, seq_num);
@@ -3392,7 +3438,7 @@ bool Flow::isLowGoodput() {
 
 FlowStatus Flow::getFlowStatus() {
 #ifndef HAVE_NEDGE
-  u_int32_t threshold;
+  u_int32_t issues_count;
 #endif
   u_int16_t l7proto = ndpi_get_lower_proto(ndpiDetectedProtocol);
 
@@ -3419,13 +3465,21 @@ FlowStatus Flow::getFlowStatus() {
 
 #ifndef HAVE_NEDGE
   /* All flows */
-  threshold = cli2srv_packets / CONST_TCP_CHECK_ISSUES_RATIO;
-  if((tcp_stats_s2d.pktRetr + tcp_stats_s2d.pktOOO + tcp_stats_s2d.pktLost) > threshold)
-    return status_tcp_connection_issues;
+  issues_count = tcp_stats_s2d.pktRetr + tcp_stats_s2d.pktOOO + tcp_stats_s2d.pktLost;
+  if(issues_count > CONST_TCP_CHECK_ISSUES_THRESHOLD) {
+    if(issues_count > (cli2srv_packets / CONST_TCP_CHECK_SEVERE_ISSUES_RATIO))
+      return status_tcp_severe_connection_issues;
+    else if(issues_count > (cli2srv_packets / CONST_TCP_CHECK_ISSUES_RATIO))
+      return status_tcp_connection_issues;
+  }
 
-  threshold = srv2cli_packets / CONST_TCP_CHECK_ISSUES_RATIO;
-  if((tcp_stats_d2s.pktRetr + tcp_stats_d2s.pktOOO + tcp_stats_d2s.pktLost) > threshold)
-    return status_tcp_connection_issues;
+  issues_count = tcp_stats_d2s.pktRetr + tcp_stats_d2s.pktOOO + tcp_stats_d2s.pktLost;
+  if(issues_count > CONST_TCP_CHECK_ISSUES_THRESHOLD) {
+    if(issues_count > (srv2cli_packets / CONST_TCP_CHECK_SEVERE_ISSUES_RATIO))
+      return status_tcp_severe_connection_issues;
+    else if(issues_count > (srv2cli_packets / CONST_TCP_CHECK_ISSUES_RATIO))
+      return status_tcp_connection_issues;
+  }
 #endif
 
   if(iface->getIfType() == interface_type_ZMQ) {
@@ -3526,7 +3580,11 @@ FlowStatus Flow::getFlowStatus() {
    return(status_flow_when_interface_alerted);
 #endif
 
-  return status_normal;
+  if((protos.ssl.ja3.client_unsafe_cipher != ndpi_cipher_safe)
+     || (protos.ssl.ja3.server_unsafe_cipher != ndpi_cipher_safe))
+    return(status_ssl_unsafe_ciphers);
+  
+  return(status_normal);
 }
 
 /* ***************************************************** */

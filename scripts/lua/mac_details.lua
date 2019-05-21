@@ -398,13 +398,17 @@ elseif(page == "historical") then
       timeseries = table.merge({
          {schema="mac:traffic",                    label=i18n("traffic")},
 
-         {schema="mac:local_talkers",                    label="Local Talkers"}, --TODO: localize
-         {schema="mac:local_talkers_network_devices",    label="Local Talkers: Network Devices"}, --TODO: localize
-         {schema="mac:local_talkers_mobile_devices",     label="Local Talkers: Mobile Devices"}, --TODO: localize
-         {schema="mac:local_talkers_media_devices",      label="Local Talkers: Media Devices"}, --TODO: localize
-         {schema="mac:local_talkers_work_devices",       label="Local Talkers: Work Devices"}, --TODO: localize
-         {schema="mac:local_talkers_iot_devices",        label="Local Talkers: IoT Devices"}, --TODO: localize
-         {schema="mac:local_talkers_unknow_devices",     label="Local Talkers: Unknown Devices"}, --TODO: localize
+         io.write("\nOUT\n")
+         if (ntop.getPrefs()).is_arp_matrix_generation_enabled then --TODO & WIP: check if this work
+            io.write("\nIN\n")
+            {schema="mac:local_talkers",                    label="Local Talkers"}, --TODO: localize
+            {schema="mac:local_talkers_network_devices",    label="Local Talkers: Network Devices"}, --TODO: localize
+            {schema="mac:local_talkers_mobile_devices",     label="Local Talkers: Mobile Devices"}, --TODO: localize
+            {schema="mac:local_talkers_media_devices",      label="Local Talkers: Media Devices"}, --TODO: localize
+            {schema="mac:local_talkers_work_devices",       label="Local Talkers: Work Devices"}, --TODO: localize
+            {schema="mac:local_talkers_iot_devices",        label="Local Talkers: IoT Devices"}, --TODO: localize
+            {schema="mac:local_talkers_unknow_devices",     label="Local Talkers: Unknown Devices"}, --TODO: localize
+         end
 
       }, getDeviceCommonTimeseries())
    })

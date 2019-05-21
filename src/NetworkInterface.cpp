@@ -2575,7 +2575,6 @@ decode_packet_eth:
 	e = getArpHashMatrixElement(srcMac->get_mac(), dstMac->get_mac(),
 				    src, dst,
 				    &src2dst_element);
-  updateMacTalkers(srcMac, dstMac, ntohl(arpp->arp_spa), ntohl(arpp->arp_tpa), &src2dst_element, arp_opcode);
 
 	if(arp_opcode == 0x1 /* ARP request */) {
 	  arp_requests++;
@@ -5637,59 +5636,6 @@ ArpStatsMatrixElement* NetworkInterface::getArpHashMatrixElement(const u_int8_t 
   }
 
   return ret;
-}
-
-/* **************************************************** */
-
-void NetworkInterface::updateMacTalkers(Mac* srcMac, Mac* dstMac,
-								 const u_int32_t _src_ip, const u_int32_t _dst_ip,
-								 bool * const src2dst, u_int16_t arp_opcode) {
-  if(arp_hash_matrix == NULL) return;     
-  bool req, inc = false;
-  ArpStatsMatrixElement *e = NULL;
-  e = arp_hash_matrix->get(srcMac->get_mac(), _src_ip, _dst_ip, src2dst);
-  if (e == NULL) return;
-
-  if(arp_opcode == 0x1) //request
-    req = true;
-  else if(arp_opcode == 0x2) //reply
-    req = false;
-  else return ;
-
-  if ( *src2dst && ((e->getArpStats()->src2dst.requests + e->getArpStats()->src2dst.replies) == 0) ){ 
-    //srcMac --> dstMac
-    if (req) { // first request
-      srcMac->incTalkersAsClient();
-      dstMac->incTalkersAsServer();
-    }else{ // first reply
-      srcMac->incTalkersAsServer();
-      dstMac->incTalkersAsClient();
-    }
-    inc = true;
-  }else if ( !(*src2dst) && ((e->getArpStats()->dst2src.requests + e->getArpStats()->dst2src.replies) == 0) ){ 
-    //dstMAc --> srcMac
-    if (req) { //first request
-      dstMac->incTalkersAsClient();
-      srcMac->incTalkersAsServer();
-    }else{ // first reply
-      dstMac->incTalkersAsServer();
-      srcMac->incTalkersAsClient();
-    }
-    inc = true;
-  }  
-  if (inc){
-    srcMac->incDeviceCounter(dstMac->getDeviceType());
-    dstMac->incDeviceCounter(srcMac->getDeviceType()); 
-  }
-  #ifdef DEBUG_TALKERS
-  char buf1[32], buf2[32], buf3[32], buf4[32];
-    ntop->getTrace()->traceEvent(TRACE_NORMAL, "[SRC (IP:%s)(MAC:%s)(Type:%d) #asClient %d - #asServer %d] - [DST (ip:%s)(MAC:%s)(Type:%d) #asClient %d - #asServer %d] " ,
-            Utils::intoaV4(_src_ip, buf3, sizeof(buf3)),
-            Utils::formatMac(srcMac->get_mac(), buf1, sizeof(buf1)), (int)srcMac->getDeviceType(), srcMac->getNumTalkerAsClient(), srcMac->getNumTalkerAsServer(),
-            Utils::intoaV4(_dst_ip, buf4, sizeof(buf4)),
-            Utils::formatMac(dstMac->get_mac(), buf2, sizeof(buf1)), (int)dstMac->getDeviceType(), dstMac->getNumTalkerAsClient(), dstMac->getNumTalkerAsServer() 
-      );
-  #endif
 }
 
 /* **************************************************** */

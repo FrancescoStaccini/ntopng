@@ -532,8 +532,6 @@ class NetworkInterface : public Checkpointable {
 
   void runHousekeepingTasks();
   void runShutdownTasks();
-  void updateMacTalkers(Mac* srcMac, Mac* dstMac, const u_int32_t _src_ip, const u_int32_t _dst_ip,
-								 bool * const src2dst, u_int16_t arp_opcode);
   ArpStatsMatrixElement* getArpHashMatrixElement(const u_int8_t _src_mac[6], const u_int8_t _dst_mac[6],
 						 const u_int32_t _src_ip, const u_int32_t _dst_ip,
 						 bool * const src2dst);

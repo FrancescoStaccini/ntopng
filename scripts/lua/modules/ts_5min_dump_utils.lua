@@ -34,48 +34,60 @@ function ts_dump.l2_device_update_stats_rrds(when, devicename, device, ifstats, 
               request_packets_sent = device["arp_requests.sent"],
               reply_packets_rcvd = device["arp_replies.rcvd"]},
         when,verbose)
+  --WIP
+  --TODO: calcola qui al volo il numero dei vari dispositivi locali (talkers) 
+  --però non posso fare una lookup perogni mac
+  --IDEA:faccio fare una tabella al chiamante in cui uan entry è fatta: [mac : contatori vari]
 
-  ts_utils.append("mac:local_talkers", {ifid=ifstats.id, mac=devicename,
-              num_as_client = device["talkers.asClient"],
-              num_as_server = device["talkers.asServer"]},
-        when, verbose)
+  --TODO: metti il metodo in arp_matrix_utils
 
-  ts_utils.append("mac:local_talkers_network_devices", {ifid=ifstats.id, mac=devicename,
-              num_router_or_switch = device["talkers.network_devices.router_or_switch"],
-              num_wireless_network = device["talkers.network_devices.wireless_network"],
-              },
-   when, verbose)
+  --TODO: trova un nome più adatto di "talkers"
 
-  ts_utils.append("mac:local_talkers_mobile_devices", {ifid=ifstats.id, mac=devicename,
-              num_laptop = device["talkers.mobile_devices.laptop"],
-              num_tablet = device["talkers.mobile_devices.tablet"],
-              num_phone = device["talkers.mobile_devices.phone"],
-              },
-  when, verbose)
+  --TODO: scriptino anche per influxDB, altrimenti funziona solo con rrd
+  if (ntop.getPrefs()).is_arp_matrix_generation_enabled then 
 
-  ts_utils.append("mac:local_talkers_media_devices", {ifid=ifstats.id, mac=devicename,
-              num_video = device["talkers.media_devices.video"],
-              num_tv = device["talkers.media_devices.tv"],
-              num_multimedia = device["talkers.media_devices.multimedia"],
-              },
-  when, verbose)
+    ts_utils.append("mac:local_talkers", {ifid=ifstats.id, mac=devicename,
+                num_as_client = device["talkers.asClient"],
+                num_as_server = device["talkers.asServer"]},
+          when, verbose)
 
-  ts_utils.append("mac:local_talkers_work_devices", {ifid=ifstats.id, mac=devicename,
-              num_nas = device["talkers.work_devices.nas"],
-              num_printer = device["talkers.work_devices.printer"],
-              num_computer = device["talkers.work_devices.computer"],
-              },
-  when, verbose)
-
-  ts_utils.append("mac:local_talkers_iot_devices", {ifid=ifstats.id, mac=devicename,
-              num_iot = device["talkers.iot_devices"],
-              },
-  when, verbose)  
-
-  ts_utils.append("mac:local_talkers_unknow_devices", {ifid=ifstats.id, mac=devicename,
-                num_unknow = device["talkers.unknown_devices"],
+    ts_utils.append("mac:local_talkers_network_devices", {ifid=ifstats.id, mac=devicename,
+                num_router_or_switch = device["talkers.network_devices.router_or_switch"],
+                num_wireless_network = device["talkers.network_devices.wireless_network"],
                 },
-  when, verbose)
+    when, verbose)
+
+    ts_utils.append("mac:local_talkers_mobile_devices", {ifid=ifstats.id, mac=devicename,
+                num_laptop = device["talkers.mobile_devices.laptop"],
+                num_tablet = device["talkers.mobile_devices.tablet"],
+                num_phone = device["talkers.mobile_devices.phone"],
+                },
+    when, verbose)
+
+    ts_utils.append("mac:local_talkers_media_devices", {ifid=ifstats.id, mac=devicename,
+                num_video = device["talkers.media_devices.video"],
+                num_tv = device["talkers.media_devices.tv"],
+                num_multimedia = device["talkers.media_devices.multimedia"],
+                },
+    when, verbose)
+
+    ts_utils.append("mac:local_talkers_work_devices", {ifid=ifstats.id, mac=devicename,
+                num_nas = device["talkers.work_devices.nas"],
+                num_printer = device["talkers.work_devices.printer"],
+                num_computer = device["talkers.work_devices.computer"],
+                },
+    when, verbose)
+
+    ts_utils.append("mac:local_talkers_iot_devices", {ifid=ifstats.id, mac=devicename,
+                num_iot = device["talkers.iot_devices"],
+                },
+    when, verbose)  
+
+    ts_utils.append("mac:local_talkers_unknow_devices", {ifid=ifstats.id, mac=devicename,
+                  num_unknow = device["talkers.unknown_devices"],
+                  },
+    when, verbose)
+  end
 end
 
 -- ########################################################
@@ -457,6 +469,15 @@ function ts_dump.run_5min_dump(_ifname, ifstats, config, when, time_threshold, s
         if config.l2_device_ndpi_timeseries_creation == "per_category" then
           ts_dump.l2_device_update_categories_rrds(when, devicename, device, ifstats, verbose)
         end
+
+        --WIP: qui vado a creare la tabella dei talkers e la passoqui sotto
+        local talkers--[[ = createTalkersTable() ]]
+
+        if (ntop.getPrefs()).is_arp_matrix_generation_enabled then 
+          ts_dump.l2_device_update_talkers_type(when, devicename, device, ifstats, verbose, talkers[devicename])
+        end
+
+
       end)
 
       if not in_time then

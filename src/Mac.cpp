@@ -32,7 +32,6 @@ Mac::Mac(NetworkInterface *_iface, u_int8_t _mac[6])
   memset(&names, 0, sizeof(names));
   device_type = device_unknown, os = os_unknown;
   host_pool_id = NO_HOST_POOL_ID;
-  talkers.as_client = 0; talkers.as_server = 0;
 #ifdef NTOPNG_PRO
   captive_portal_notified = 0;
 #endif

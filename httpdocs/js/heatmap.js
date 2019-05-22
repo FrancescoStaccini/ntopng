@@ -430,6 +430,8 @@ var map = (function () {
 
     //########################################################################################  
 
+    //TODO: fix squares size when there are few elements
+
     //the calling order of the functions is important (most variable are global)
     var buildMap = function(data) {
 

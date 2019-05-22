@@ -5,7 +5,9 @@ local host_pools_utils = require "host_pools_utils"
 local callback_utils = require "callback_utils"
 local ts_utils = require "ts_utils_core"
 local format_utils = require "format_utils"
+local arp_matrix_utils = require "arp_matrix_utils"
 require "ts_5min"
+
 
 local ts_custom
 if ntop.exists(dirs.installdir .. "/scripts/lua/modules/timeseries/custom/ts_5min_custom.lua") then
@@ -34,62 +36,56 @@ function ts_dump.l2_device_update_stats_rrds(when, devicename, device, ifstats, 
               request_packets_sent = device["arp_requests.sent"],
               reply_packets_rcvd = device["arp_replies.rcvd"]},
         when,verbose)
-  --WIP
-  --TODO: calcola qui al volo il numero dei vari dispositivi locali (talkers) 
-  --però non posso fare una lookup perogni mac
-  --IDEA:faccio fare una tabella al chiamante in cui uan entry è fatta: [mac : contatori vari]
-
-  --TODO: metti il metodo in arp_matrix_utils
-
-  --TODO: trova un nome più adatto di "talkers"
-
-  --TODO: scriptino anche per influxDB, altrimenti funziona solo con rrd
-  if (ntop.getPrefs()).is_arp_matrix_generation_enabled then 
-
-    ts_utils.append("mac:local_talkers", {ifid=ifstats.id, mac=devicename,
-                num_as_client = device["talkers.asClient"],
-                num_as_server = device["talkers.asServer"]},
-          when, verbose)
-
-    ts_utils.append("mac:local_talkers_network_devices", {ifid=ifstats.id, mac=devicename,
-                num_router_or_switch = device["talkers.network_devices.router_or_switch"],
-                num_wireless_network = device["talkers.network_devices.wireless_network"],
-                },
-    when, verbose)
-
-    ts_utils.append("mac:local_talkers_mobile_devices", {ifid=ifstats.id, mac=devicename,
-                num_laptop = device["talkers.mobile_devices.laptop"],
-                num_tablet = device["talkers.mobile_devices.tablet"],
-                num_phone = device["talkers.mobile_devices.phone"],
-                },
-    when, verbose)
-
-    ts_utils.append("mac:local_talkers_media_devices", {ifid=ifstats.id, mac=devicename,
-                num_video = device["talkers.media_devices.video"],
-                num_tv = device["talkers.media_devices.tv"],
-                num_multimedia = device["talkers.media_devices.multimedia"],
-                },
-    when, verbose)
-
-    ts_utils.append("mac:local_talkers_work_devices", {ifid=ifstats.id, mac=devicename,
-                num_nas = device["talkers.work_devices.nas"],
-                num_printer = device["talkers.work_devices.printer"],
-                num_computer = device["talkers.work_devices.computer"],
-                },
-    when, verbose)
-
-    ts_utils.append("mac:local_talkers_iot_devices", {ifid=ifstats.id, mac=devicename,
-                num_iot = device["talkers.iot_devices"],
-                },
-    when, verbose)  
-
-    ts_utils.append("mac:local_talkers_unknow_devices", {ifid=ifstats.id, mac=devicename,
-                  num_unknow = device["talkers.unknown_devices"],
-                  },
-    when, verbose)
-  end
 end
 
+--WIP
+function ts_dump.host_update_talkers_stats_rrds( when, hostname, host, ifstats, verbose, talkers)
+  
+  --TODO: scriptino anche per influxDB, altrimenti funziona solo con rrd (??)
+  ts_utils.append("host:local_talkers", {ifid=ifstats.id, host=hostname,
+              num_talkers = arp_matrix_utils.talkersTot(talkers),
+              },
+        when, verbose)
+
+  ts_utils.append("host:local_talkers_network_devices", {ifid=ifstats.id, host=hostname,
+              num_router_or_switch = ternary(talkers["Router/Switch"], talkers["Router/Switch"], 0),
+              num_wireless_network = ternary(talkers["Wireless Network"], talkers["Wireless Network"], 0),
+              },
+  when, verbose)
+
+  ts_utils.append("host:local_talkers_mobile_devices", {ifid=ifstats.id, host=hostname,
+              num_laptop = ternary(talkers["Laptop"], talkers["Laptop"], 0),
+              num_tablet = ternary(talkers["Tablet"], talkers["Tablet"], 0),
+              num_phone = ternary(talkers["Phone"], talkers["Phone"], 0),
+              },
+  when, verbose)
+
+  ts_utils.append("host:local_talkers_media_devices", {ifid=ifstats.id, host=hostname,
+              num_video = ternary(talkers["Video"], talkers["Video"], 0),
+              num_tv = ternary(talkers["TV"], talkers["TV"], 0),
+              num_multimedia = ternary(talkers["Multimedia"], talkers["Multimedia"], 0),
+              },
+  when, verbose)
+
+  ts_utils.append("host:local_talkers_work_devices", {ifid=ifstats.id, host=hostname,
+              num_nas = ternary(talkers["NAS"], talkers["NAS"], 0),
+              num_printer = ternary(talkers["Printer"], talkers["Printer"], 0),
+              num_computer = ternary(talkers["Computer"], talkers["Computer"], 0),
+              },
+  when, verbose)
+
+  ts_utils.append("host:local_talkers_iot_devices", {ifid=ifstats.id, host=hostname,
+              num_iot = ternary(talkers["IoT"], talkers["IoT"], 0),
+              },
+  when, verbose)  
+
+  ts_utils.append("host:local_talkers_unknow_devices", {ifid=ifstats.id, host=hostname,
+                num_unknow = ternary(talkers["Unknown"], talkers["Unknown"], 0),
+                },
+  when, verbose)
+
+  io.write(" host: " .. hostname.." dumped\n")
+end
 -- ########################################################
 
 function ts_dump.asn_update_rrds(when, ifstats, verbose)
@@ -213,6 +209,8 @@ function ts_dump.getConfig()
   config.country_rrd_creation = ntop.getPref("ntopng.prefs.country_rrd_creation")
   config.vlan_rrd_creation = ntop.getPref("ntopng.prefs.vlan_rrd_creation")
   config.tcp_retr_ooo_lost_rrd_creation = ntop.getPref("ntopng.prefs.tcp_retr_ooo_lost_rrd_creation")
+  --WIP
+  config.arp_matrix_timseries_rrd_creation = ntop.getPref("ntopng.prefs.is_arp_matrix_generation_enabled")
 
   -- ########################################################
   -- Populate some defaults
@@ -414,6 +412,17 @@ function ts_dump.run_5min_dump(_ifname, ifstats, config, when, time_threshold, s
 
   -- Save hosts stats (if enabled from the preferences)
   if (is_rrd_creation_enabled and (config.host_rrd_creation ~= "0")) or are_alerts_enabled then
+
+---------------WIP & TODO: put outside the callback function
+
+    --also, i can't put this inside host_update_rrd(...), i don't want call getLocalTalkersDeviceType() for each host
+    if config.arp_matrix_timseries_rrd_creation then
+      talkers_table = arp_matrix_utils.getLocalTalkersDeviceType()
+      io.write("\ntalkers_table populated\n")
+    end 
+
+---------------------------------------------
+
     local in_time = callback_utils.foreachLocalRRDHost(_ifname, time_threshold, is_rrd_creation_enabled, function (hostname, host_ts)
       if are_alerts_enabled then
         -- Check alerts first
@@ -443,8 +452,28 @@ function ts_dump.run_5min_dump(_ifname, ifstats, config, when, time_threshold, s
             ts_dump.host_update_rrd(instant, host_key, host_point, ifstats, verbose, config)
           end
         end
-      end
 
+            -------------------------WIP---------------------------
+        if config.arp_matrix_timseries_rrd_creation then
+              io.write("\nhost: "..hostname)
+          local host_talkers = {}
+
+          
+          if talkers_table and talkers_table[hostname] then 
+            io.write(" added. talker_devices: \n")
+            host_talkers = talkers_table[hostname].talkersDevices
+            tprint(host_talkers)
+            io.write("\n")
+            ts_dump.host_update_talkers_stats_rrds( when, hostname, host_point, ifstats, verbose, host_talkers)
+          else
+            io.write(" host "..hostname.." not added\n")
+           -- tprint(talkers_table[hostname].talkersDevices)
+            io.write("\n")
+          end
+        end
+        -------------------------------
+
+      end
       num_processed_hosts = num_processed_hosts + 1
     end)
 
@@ -462,24 +491,14 @@ function ts_dump.run_5min_dump(_ifname, ifstats, config, when, time_threshold, s
   --tprint("Dump of ".. num_processed_hosts .. " hosts: completed in " .. (os.time() - dump_tstart) .. " seconds")
 
   if is_rrd_creation_enabled then
-    if config.l2_device_rrd_creation ~= "0" then
+    if config.l2_device_rrd_creation ~= "0" then    
       local in_time = callback_utils.foreachDevice(_ifname, time_threshold, function (devicename, device)
         ts_dump.l2_device_update_stats_rrds(when, devicename, device, ifstats, verbose)
 
         if config.l2_device_ndpi_timeseries_creation == "per_category" then
           ts_dump.l2_device_update_categories_rrds(when, devicename, device, ifstats, verbose)
         end
-
-        --WIP: qui vado a creare la tabella dei talkers e la passoqui sotto
-        local talkers--[[ = createTalkersTable() ]]
-
-        if (ntop.getPrefs()).is_arp_matrix_generation_enabled then 
-          ts_dump.l2_device_update_talkers_type(when, devicename, device, ifstats, verbose, talkers[devicename])
-        end
-
-
       end)
-
       if not in_time then
         traceError(TRACE_ERROR, TRACE_CONSOLE, i18n("error_rrd_cannot_complete_dump"))
         return false

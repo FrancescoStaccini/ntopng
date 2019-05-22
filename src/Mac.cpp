@@ -228,21 +228,21 @@ void Mac::lua(lua_State* vm, bool show_details, bool asListElement) {
 
   lua_push_uint64_table_entry(vm, "pool", get_host_pool());
 
-  lua_push_uint64_table_entry(vm, "talkers.asClient", getNumTalkerAsClient());
-  lua_push_uint64_table_entry(vm, "talkers.asServer", getNumTalkerAsServer());
-  lua_push_uint64_table_entry(vm, "talkers.network_devices.router_or_switch", getDeviceTypeCounters()->networking );
-  lua_push_uint64_table_entry(vm, "talkers.network_devices.wireless_network", getDeviceTypeCounters()->wifi );
-  lua_push_uint64_table_entry(vm, "talkers.mobile_devices.laptop", getDeviceTypeCounters()->laptop );
-  lua_push_uint64_table_entry(vm, "talkers.mobile_devices.tablet", getDeviceTypeCounters()->tablet );
-  lua_push_uint64_table_entry(vm, "talkers.mobile_devices.phone", getDeviceTypeCounters()->phone );
-  lua_push_uint64_table_entry(vm, "talkers.media_devices.video", getDeviceTypeCounters()->video );
-  lua_push_uint64_table_entry(vm, "talkers.media_devices.tv", getDeviceTypeCounters()->tv );
-  lua_push_uint64_table_entry(vm, "talkers.media_devices.multimedia", getDeviceTypeCounters()->multimedia );
-  lua_push_uint64_table_entry(vm, "talkers.work_devices.computer", getDeviceTypeCounters()->workstation );
-  lua_push_uint64_table_entry(vm, "talkers.work_devices.printer", getDeviceTypeCounters()->printer );
-  lua_push_uint64_table_entry(vm, "talkers.work_devices.nas", getDeviceTypeCounters()->nas );
-  lua_push_uint64_table_entry(vm, "talkers.iot_devices", getDeviceTypeCounters()->iot );
-  lua_push_uint64_table_entry(vm, "talkers.unknown_devices", getDeviceTypeCounters()->unknown );
+  // lua_push_uint64_table_entry(vm, "talkers.asClient", getNumTalkerAsClient());
+  // lua_push_uint64_table_entry(vm, "talkers.asServer", getNumTalkerAsServer());
+  // lua_push_uint64_table_entry(vm, "talkers.network_devices.router_or_switch", getDeviceTypeCounters()->networking );
+  // lua_push_uint64_table_entry(vm, "talkers.network_devices.wireless_network", getDeviceTypeCounters()->wifi );
+  // lua_push_uint64_table_entry(vm, "talkers.mobile_devices.laptop", getDeviceTypeCounters()->laptop );
+  // lua_push_uint64_table_entry(vm, "talkers.mobile_devices.tablet", getDeviceTypeCounters()->tablet );
+  // lua_push_uint64_table_entry(vm, "talkers.mobile_devices.phone", getDeviceTypeCounters()->phone );
+  // lua_push_uint64_table_entry(vm, "talkers.media_devices.video", getDeviceTypeCounters()->video );
+  // lua_push_uint64_table_entry(vm, "talkers.media_devices.tv", getDeviceTypeCounters()->tv );
+  // lua_push_uint64_table_entry(vm, "talkers.media_devices.multimedia", getDeviceTypeCounters()->multimedia );
+  // lua_push_uint64_table_entry(vm, "talkers.work_devices.computer", getDeviceTypeCounters()->workstation );
+  // lua_push_uint64_table_entry(vm, "talkers.work_devices.printer", getDeviceTypeCounters()->printer );
+  // lua_push_uint64_table_entry(vm, "talkers.work_devices.nas", getDeviceTypeCounters()->nas );
+  // lua_push_uint64_table_entry(vm, "talkers.iot_devices", getDeviceTypeCounters()->iot );
+  // lua_push_uint64_table_entry(vm, "talkers.unknown_devices", getDeviceTypeCounters()->unknown );
 
   if(asListElement) {
     lua_pushstring(vm, m);

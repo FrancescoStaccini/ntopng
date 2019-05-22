@@ -163,7 +163,8 @@ void Host::initialize(Mac *_mac, u_int16_t _vlanId, bool init_all) {
   memset(&names, 0, sizeof(names));
   asn = 0, asname = NULL;
   as = NULL, country = NULL;
-  blacklisted_host = false, reloadHostBlacklist();
+  blacklisted_host = false;
+  reloadHostBlacklist();
   is_dhcp_host = false;
 
   num_alerts_detected = 0;
@@ -1276,11 +1277,6 @@ bool Host::statsResetRequested() {
 /* *************************************** */
 
 void Host::updateStats(struct timeval *tv) {
-  if(stats_shadow) {
-    delete stats_shadow;
-    stats_shadow = NULL;
-  }
-
   checkDataReset();
   checkStatsReset();
   checkBroadcastDomain();
@@ -1306,6 +1302,11 @@ void Host::updateStats(struct timeval *tv) {
 /* *************************************** */
 
 void Host::checkStatsReset() {
+  if(stats_shadow) {
+    delete stats_shadow;
+    stats_shadow = NULL;
+  }
+
   if(statsResetRequested()) {
     HostStats *new_stats = allocateStats();
     stats_shadow = stats;

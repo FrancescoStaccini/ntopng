@@ -162,6 +162,38 @@ schema:addTag("ifid")
 schema:addTag("asn")
 schema:addMetric("millis_rtt")
 
+-- ##############################################
+
+schema = ts_utils.newSchema("asn:tcp_retransmissions", {step=300})
+schema:addTag("ifid")
+schema:addTag("asn")
+schema:addMetric("packets_sent")
+schema:addMetric("packets_rcvd")
+
+-- ##############################################
+
+schema = ts_utils.newSchema("asn:tcp_out_of_order", {step=300})
+schema:addTag("ifid")
+schema:addTag("asn")
+schema:addMetric("packets_sent")
+schema:addMetric("packets_rcvd")
+
+-- ##############################################
+
+schema = ts_utils.newSchema("asn:tcp_lost", {step=300})
+schema:addTag("ifid")
+schema:addTag("asn")
+schema:addMetric("packets_sent")
+schema:addMetric("packets_rcvd")
+
+-- ##############################################
+
+schema = ts_utils.newSchema("asn:tcp_keep_alive", {step=300})
+schema:addTag("ifid")
+schema:addTag("asn")
+schema:addMetric("packets_sent")
+schema:addMetric("packets_rcvd")
+
 -------------------------------------------------------
 -- COUNTRIES SCHEMAS
 -------------------------------------------------------
@@ -233,6 +265,13 @@ schema:addTag("device")
 schema:addTag("if_index")
 schema:addMetric("bytes_sent")
 schema:addMetric("bytes_rcvd")
+
+schema = ts_utils.newSchema("snmp_if:errors", {step=300, rrd_heartbeat=3000})
+schema:addTag("ifid")
+schema:addTag("device")
+schema:addTag("if_index")
+schema:addMetric("packets_disc")
+schema:addMetric("packets_err")
 
 -------------------------------------------------------
 -- HOSTS SCHEMAS

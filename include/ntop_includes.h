@@ -190,6 +190,7 @@ using namespace std;
 #include "CustomAppMaps.h"
 #include "CustomAppStats.h"
 #endif
+#include "TcpPacketStats.h"
 #include "GenericTrafficElement.h"
 #include "ContainerStats.h"
 #include "ParsedFlowCore.h"
@@ -235,7 +236,6 @@ using namespace std;
 #include "Grouper.h"
 #include "FlowGrouper.h"
 #include "PacketStats.h"
-#include "TcpPacketStats.h"
 #include "EthStats.h"
 
 #include "LocalTrafficStats.h"

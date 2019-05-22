@@ -93,6 +93,8 @@ ZMQParserInterface::ZMQParserInterface(const char *endpoint, const char *custom_
   addMapping("HTTP_SITE", HTTP_SITE, NTOP_PEN);
   addMapping("SSL_SERVER_NAME", SSL_SERVER_NAME, NTOP_PEN);
   addMapping("BITTORRENT_HASH", BITTORRENT_HASH, NTOP_PEN);
+  addMapping("SRC_FRAGMENTS", SRC_FRAGMENTS, NTOP_PEN);
+  addMapping("DST_FRAGMENTS", DST_FRAGMENTS, NTOP_PEN);
 }
 
 /* **************************************************** */
@@ -504,7 +506,6 @@ bool ZMQParserInterface::parsePENZeroField(ParsedFlow * const flow, u_int32_t fi
     if(strcmp(value, "0.0.0.0"))
       return false;
     break;
-
   default:
     return false;
   }
@@ -587,6 +588,12 @@ bool ZMQParserInterface::parsePENNtopField(ParsedFlow * const flow, u_int32_t fi
     /* Do not override EXPORTER_IPV4_ADDRESS */
     if(flow->deviceIP == 0 && (flow->deviceIP = ntohl(inet_addr(value))))
       return false;
+    break;
+  case SRC_FRAGMENTS:
+    flow->in_fragments = atol(value);
+    break;
+  case DST_FRAGMENTS:
+    flow->out_fragments = atol(value);
     break;
   default:
     return false;

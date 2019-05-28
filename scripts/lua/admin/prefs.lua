@@ -12,6 +12,7 @@ require "alert_utils"
 local template = require "template_utils"
 local callback_utils = require "callback_utils"
 local lists_utils = require "lists_utils"
+local telemetry_utils = require "telemetry_utils"
 local alert_consts = require "alert_consts"
 local slack_utils = require("slack")
 local webhook_utils = require("webhook")
@@ -21,6 +22,8 @@ local page_utils = require("page_utils")
 local ts_utils = require("ts_utils")
 local influxdb = require("influxdb")
 local nindex_utils = nil
+
+local email_peer_pattern = [[^(([A-Za-z0-9._%+-]|\s)+<)?[A-Za-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,4}>?$]]
 
 if(ntop.isPro()) then
   package.path = dirs.installdir .. "/scripts/lua/pro/?.lua;" .. package.path
@@ -270,6 +273,12 @@ function printInterfaces()
 	field = "toggle_src_with_post_nat_src",
 	default = "0",
 	pref = "override_src_with_post_nat_src",
+  })
+
+  prefsToggleButton(subpage_active, {
+	field = "toggle_src_and_dst_using_ports",
+	default = "0",
+	pref = "use_ports_to_determine_src_and_dst",
   })
 
   print('<tr><th colspan=2 style="text-align:right;"><button type="submit" class="btn btn-primary" style="width:115px" disabled="disabled">'..i18n("save")..'</button></th></tr>')
@@ -571,8 +580,6 @@ function printExternalAlertsReport()
 				 alert_sev_labels, alert_sev_values, "error", "primary", "email_notification_severity_preference",
 				 getAlertNotificationModuleSeverityKey("email"), nil, nil, nil, nil, showElements and showEmailNotificationPrefs)
 
-  local email_peer_pattern = [[^(([A-Za-z0-9._%+-]|\s)+<)?[A-Za-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,4}>?$]]
-
 	prefsInputFieldPrefs(subpage_active.entries["email_notification_server"].title, subpage_active.entries["email_notification_server"].description,
 			     "ntopng.prefs.alerts.", "smtp_server",
 			     "", nil, showElements and showEmailNotificationPrefs, false, true, {attributes={spellcheck="false"}, required=true, pattern="^(smtp://)?[a-zA-Z0-9-.]*(:[0-9]+)?$"})
@@ -869,6 +876,44 @@ function printNetworkDiscovery()
 
    prefsInputFieldPrefs(subpage_active.entries["network_discovery_interval"].title, subpage_active.entries["network_discovery_interval"].description,
     "ntopng.prefs.", "network_discovery_interval", interval, "number", showNetworkDiscoveryInterval, nil, nil, {min=60 * 15, tformat="mhd"})
+
+   print('<tr><th colspan=2 style="text-align:right;"><button type="submit" class="btn btn-primary" style="width:115px" disabled="disabled">'..i18n("save")..'</button></th></tr>')
+
+   print('</table>')
+  print [[<input name="csrf" type="hidden" value="]] print(ntop.getRandomCSRFValue()) print [[" />
+    </form>]]
+end
+
+
+-- ================================================================================
+
+function printTelemetry()
+   print('<form method="post">')
+   print('<table class="table">')
+
+   print('<tr><th colspan=2 class="info">'..i18n("prefs.telemetry")..'</th></tr>')
+
+   local t_labels = {i18n("prefs.telemetry_do_not_contribute")..' <i class="fa fa-frown-o"></i>',
+		     i18n("prefs.telemetry_contribute")..' <i class="fa fa-heart"></i>'}
+   local t_values = {"0", "1"}
+   local elementToSwitch = {"telemetry_email"}
+   local showElementArray = {false, true}
+
+   multipleTableButtonPrefs(subpage_active.entries["toggle_send_telemetry_data"].title,
+			    subpage_active.entries["toggle_send_telemetry_data"].description,
+			    t_labels, t_values,
+			    "", -- leave the default empty so one is forced to either chose opt-in or opt-out
+			    "primary", "toggle_send_telemetry_data", "ntopng.prefs.send_telemetry_data", nil,
+			    elementToSwitch, showElementArray, javascriptAfterSwitch, true--[[show]])
+
+   prefsInputFieldPrefs(subpage_active.entries["telemetry_email"].title,
+			subpage_active.entries["telemetry_email"].description,
+		       "ntopng.prefs.",
+		       "telemetry_email",
+		       "",
+		       false,
+		       telemetry_utils.telemetry_enabled(),
+		       nil, nil,  {attributes={spellcheck="false"}, pattern=email_peer_pattern, required=false})
 
    print('<tr><th colspan=2 style="text-align:right;"><button type="submit" class="btn btn-primary" style="width:115px" disabled="disabled">'..i18n("save")..'</button></th></tr>')
 
@@ -1653,6 +1698,13 @@ function printSnmp()
   })
 
   prefsToggleButton(subpage_active, {
+    field = "toggle_snmp_alerts_port_duplexstatus_change",
+    default = "1",
+    pref = "alerts.snmp_port_duplexstatus_change",
+    disabled = not info["version.enterprise_edition"],
+  })
+
+  prefsToggleButton(subpage_active, {
     field = "toggle_snmp_alerts_port_errors",
     default = "1",
     pref = "alerts.snmp_port_errors",
@@ -1819,6 +1871,10 @@ end
 
 if(tab == "discovery") then
    printNetworkDiscovery()
+end
+
+if(tab == "telemetry") then
+   printTelemetry()
 end
 
 if(tab == "recording") then

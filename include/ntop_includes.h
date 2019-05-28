@@ -224,6 +224,7 @@ using namespace std;
 #include "Prefs.h"
 #include "ProtoStats.h"
 #include "Utils.h"
+#include "SerializableElement.h"
 #include "CommunityIdFlowHash.h"
 #include "DnsStats.h"
 #include "NetworkStats.h"
@@ -268,6 +269,7 @@ using namespace std;
 #include "TimeseriesRing.h"
 #include "HostTimeseriesPoint.h"
 #include "SPSCQueue.h"
+#include "L4Stats.h"
 #include "NetworkInterfaceTsPoint.h"
 #include "NetworkInterface.h"
 #ifndef HAVE_NEDGE

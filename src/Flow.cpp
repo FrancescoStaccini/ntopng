@@ -508,8 +508,6 @@ void Flow::processDetectedProtocol() {
 
     if((protos.ssl.ja3.client_hash == NULL) && (ndpiFlow->protos.stun_ssl.ssl.ja3_client[0] != '\0')) {
       protos.ssl.ja3.client_hash = strdup(ndpiFlow->protos.stun_ssl.ssl.ja3_client);
-      protos.ssl.ja3.client_unsafe_cipher = ndpiFlow->protos.stun_ssl.ssl.client_unsafe_cipher;
-      if(protos.ssl.ja3.client_unsafe_cipher != ndpi_cipher_safe) setFlowAlerted();
       updateJA3();
     }
     
@@ -517,6 +515,7 @@ void Flow::processDetectedProtocol() {
       protos.ssl.ja3.server_hash = strdup(ndpiFlow->protos.stun_ssl.ssl.ja3_server);    
       protos.ssl.ja3.server_unsafe_cipher = ndpiFlow->protos.stun_ssl.ssl.server_unsafe_cipher;
       if(protos.ssl.ja3.server_unsafe_cipher != ndpi_cipher_safe) setFlowAlerted();
+      protos.ssl.ja3.server_cipher = ndpiFlow->protos.stun_ssl.ssl.server_cipher;
     }
     
     if(check_tor) {
@@ -1103,7 +1102,8 @@ void Flow::update_hosts_stats(struct timeval *tv, bool dump_alert) {
       cli_network_stats = cli_host->getNetworkStats(cli_network_id);
       cli_host->incStats(tv->tv_sec, protocol, stats_protocol, custom_app,
 			 diff_sent_packets, diff_sent_bytes, diff_sent_goodput_bytes,
-			 diff_rcvd_packets, diff_rcvd_bytes, diff_rcvd_goodput_bytes);
+			 diff_rcvd_packets, diff_rcvd_bytes, diff_rcvd_goodput_bytes,
+			 srv_host->get_ip()->isNonEmptyUnicastAddress());
 
       // update per-subnet byte counters
       if(cli_network_stats) { // only if the network is known and local
@@ -1125,7 +1125,8 @@ void Flow::update_hosts_stats(struct timeval *tv, bool dump_alert) {
       srv_network_stats = srv_host->getNetworkStats(srv_network_id);
       srv_host->incStats(tv->tv_sec, protocol, stats_protocol, custom_app,
 			 diff_rcvd_packets, diff_rcvd_bytes, diff_rcvd_goodput_bytes,
-			 diff_sent_packets, diff_sent_bytes, diff_sent_goodput_bytes);
+			 diff_sent_packets, diff_sent_bytes, diff_sent_goodput_bytes,
+			 cli_host->get_ip()->isNonEmptyUnicastAddress());
 
       if(srv_network_stats) {
 	// local and known server network
@@ -1196,9 +1197,10 @@ void Flow::update_hosts_stats(struct timeval *tv, bool dump_alert) {
        && srv_host->get_ip()->isNonEmptyUnicastAddress()
        && ntop->getPrefs()->are_remote_to_remote_alerts_enabled()
        && !cli_host->setRemoteToRemoteAlerts()) {
-      json_object *jo = cli_host->getJSONObject(details_normal);
+      json_object *jo;
 
-      if(jo) {
+      if((jo = json_object_new_object()) != NULL) {
+	cli_host->serialize(jo, details_normal);
       	ntop->getRedis()->rpush(CONST_ALERT_HOST_REMOTE_TO_REMOTE, json_object_to_json_string(jo), CONST_REMOTE_TO_REMOTE_MAX_QUEUE);
 
       	json_object_put(jo);
@@ -1816,16 +1818,15 @@ void Flow::lua(lua_State* vm, AddressTree * ptree,
 	if(protos.ssl.server_certificate)
 	  lua_push_str_table_entry(vm, "protos.ssl.server_certificate", protos.ssl.server_certificate);
 
-	if(protos.ssl.ja3.client_hash) {
+	if(protos.ssl.ja3.client_hash)
 	  lua_push_str_table_entry(vm, "protos.ssl.ja3.client_hash", protos.ssl.ja3.client_hash);
-	  lua_push_str_table_entry(vm, "protos.ssl.ja3.client_unsafe_cipher",
-				   cipher_weakness2str(protos.ssl.ja3.client_unsafe_cipher));
-	}
 	
 	if(protos.ssl.ja3.server_hash) {
 	  lua_push_str_table_entry(vm, "protos.ssl.ja3.server_hash", protos.ssl.ja3.server_hash);
 	  lua_push_str_table_entry(vm, "protos.ssl.ja3.server_unsafe_cipher",
 				   cipher_weakness2str(protos.ssl.ja3.server_unsafe_cipher));
+	  lua_push_int32_table_entry(vm, "protos.ssl.ja3.server_cipher",
+				     protos.ssl.ja3.server_cipher);
 	}		  
       }
     }
@@ -2679,8 +2680,8 @@ void Flow::incTcpBadStats(bool src2dst_direction,
   int16_t cli_network_id = -1, srv_network_id = -1;
   u_int32_t cli_asn = (u_int32_t)-1, srv_asn = (u_int32_t)-1;
   AutonomousSystem *cli_as, *srv_as;
-  NetworkStats *cli_network_stats, *srv_network_stats;
-  bool cli_and_srv_in_same_subnet = false, cli_and_srv_in_same_as;
+  NetworkStats *cli_network_stats = NULL, *srv_network_stats = NULL;
+  bool cli_and_srv_in_same_subnet = false, cli_and_srv_in_same_as = false;
 
   if(src2dst_direction)
     stats = &tcp_stats_s2d;
@@ -3644,8 +3645,7 @@ FlowStatus Flow::getFlowStatus() {
    return(status_flow_when_interface_alerted);
 #endif
 
-  if((protos.ssl.ja3.client_unsafe_cipher != ndpi_cipher_safe)
-     || (protos.ssl.ja3.server_unsafe_cipher != ndpi_cipher_safe))
+  if(protos.ssl.ja3.server_unsafe_cipher != ndpi_cipher_safe)
     return(status_ssl_unsafe_ciphers);
   
   return(status_normal);
@@ -3693,12 +3693,12 @@ void Flow::setPacketsBytes(time_t now, u_int32_t s2d_pkts, u_int32_t d2s_pkts,
   */
   last_conntrack_update = now;
 
-  iface->_incStats(isIngress2EgressDirection(), now, eth_proto, ndpiDetectedProtocol.app_protocol,
+  iface->_incStats(isIngress2EgressDirection(), now, eth_proto, ndpiDetectedProtocol.app_protocol, protocol,
 		   nf_existing_flow ? s2d_bytes - cli2srv_bytes : s2d_bytes,
 		   nf_existing_flow ? s2d_pkts - cli2srv_packets : s2d_pkts,
 		   overhead);
 
-  iface->_incStats(!isIngress2EgressDirection(), now, eth_proto, ndpiDetectedProtocol.app_protocol,
+  iface->_incStats(!isIngress2EgressDirection(), now, eth_proto, ndpiDetectedProtocol.app_protocol, protocol,
 		  nf_existing_flow ? d2s_bytes - srv2cli_bytes : d2s_bytes,
 		  nf_existing_flow ? d2s_pkts - srv2cli_packets : d2s_pkts,
 		  overhead);

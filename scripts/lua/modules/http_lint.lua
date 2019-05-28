@@ -1182,6 +1182,7 @@ local known_parameters = {
    ["toggle_tcp_retr_ooo_lost_rrds"]               = validateBool,
    ["toggle_dst_with_post_nat_dst"]                = validateBool,
    ["toggle_src_with_post_nat_src"]                = validateBool,
+   ["toggle_src_and_dst_using_ports"]              = validateBool,
    ["toggle_device_activation_alert"]              = validateBool,
    ["toggle_device_first_seen_alert"]              = validateBool,
    ["toggle_pool_activation_alert"]                = validateBool,
@@ -1197,6 +1198,7 @@ local known_parameters = {
    ["toggle_webhook_notification"]                 = validateBool,
    ["toggle_auth_session_midnight_expiration"]     = validateBool,
    ["toggle_client_x509_auth"]                     = validateBool,
+   ["toggle_snmp_alerts_port_duplexstatus_change"] = validateBool,
    ["toggle_snmp_alerts_port_status_change"]       = validateBool,
    ["toggle_snmp_alerts_port_errors"]              = validateBool,
    ["toggle_midnight_stats_reset"]                 = validateBool,
@@ -1279,6 +1281,8 @@ local known_parameters = {
    ["ts_high_resolution"]                          = validateNumber,
    ["lbd_hosts_as_macs"]                           = validateBool,
    ["toggle_arp_matrix_generation"]                = validateBool,
+   ["toggle_send_telemetry_data"]                  = validateBool,
+   ["telemetry_email"]                             = validateSingleWord,
 
    -- Other
    ["flush_alerts_data"]                           = validateEmpty,

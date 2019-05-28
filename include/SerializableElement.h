@@ -19,28 +19,21 @@
  *
  */
 
-#ifndef _FINGERPRINT_H_
-#define _FINGERPRINT_H_
+#ifndef _SERIALIZABLE_ELEMENT_H_
 
-#include "ntop_includes.h"
+class SerializableElement {
+ protected:
+  static json_object* deserializeJson(const char *key);
 
-typedef struct {
-  std::string app_name; /* NetLink/eBPF-like only */
-  u_int32_t num_uses;
-} FingerprintStats;
+  /* Virtual */
+  virtual char* getSerializationKey(char *buf, uint bufsize) = 0;
+  virtual void deserialize(json_object *obj) = 0;
+  virtual void serialize(json_object *obj, DetailsLevel details_level) = 0;
 
-class Fingerprint {
- private:
-  Mutex m;
-  std::map<std::string /* fingerprint */, FingerprintStats> fp;
-
-  void prune();
-  
  public:
-  Fingerprint() { ; }
-
-  void update(char *fp, char *app_name);
-  void lua(const char *key, lua_State* vm);
+  bool serializeToRedis();
+  bool deserializeFromRedis();
+  bool deleteRedisSerialization();
 };
 
-#endif /* _FINGERPRINT_H_ */
+#endif

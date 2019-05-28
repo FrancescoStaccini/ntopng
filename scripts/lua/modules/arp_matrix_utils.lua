@@ -59,24 +59,102 @@ function arpMatrixModule.arpCheck(host_ip)
     return false
 end
 
- function addType(t,addr) --t è la tabella t[mac].talkersDevices
+--  function addType(t,addr) --t è la tabella t[mac].talkersDevices
+--     local typeName = "Unknown"
+--     local type = 0
+--     --NOTE: this is for the "mac_ts" version------------------------------------------------
+--     -- local macInfo = interface.getMacInfo(addr)
+--     -- if macInfo then type = macInfo["devtype"] end
+--     -- if type then typeName = discover.devtype2string(type) else typeName = "Unknown" end
+--     -------------------------------------------------------------------------------------
+--     local hostInfo = interface.getHostInfo(addr, nil)
+--     if hostInfo then
+--         type = hostInfo["devtype"]
+--         io.write("addType - host: "..addr.." OK \n")
+--     else 
+--         io.write("addType - host: "..addr.." got nil \n")
+--     end
+--     if type then typeName = discover.devtype2string(type) end
+
+--     if t[typeName] then
+--         t[typeName] = t[typeName] + 1
+--     else
+--         t[typeName] = 1
+--     end
+--     --io.write("addr: "..addr.." type: "..type..", typename:"..typeName.."; TOT: "..t[typeName].."\n")
+
+--     return t
+--  end
+
+--  --NOTE & TODO: come faccio a capire se il talker è server o client? 
+--  --             nella matrice src e dst sono fittizi, vengono decisi in base ad una comparazione di bit
+
+--  --funzione che crea, per ogni mac, l'elenco dei talkers ed i loro dispositivi
+-- function arpMatrixModule.getLocalTalkersDeviceType()
+--     local matrix = interface.getArpStatsMatrixInfo()
+--     if not matrix then return false end
+--     local tmp
+--     local t = {}
+
+--     for _, m_elem in pairs(matrix) do
+--         for i, stats in pairs(m_elem)do
+--             tmp = split(i,"-")
+--             src_ip = tmp[1]
+--             dst_ip = tmp[2]
+--             src_mac = stats["src_mac"]
+--             dst_mac = stats["dst_mac"]
+    
+--             if stats["src2dst.requests"] + stats["src2dst.replies"] > 0 then 
+--                 if debug then io.write("src2dst: [ src:"..src_mac.." - dst:"..dst_mac.." ] ENTERING\n") end
+--                 if not t[src_ip] then
+--                     t[src_ip] = {}
+--                     t[src_ip].talkersDevices = {}
+--                     -- t[src_mac].talkersAsClient = 0
+--                     -- t[src_mac].talkersAsServer = 0
+--                     if debug then io.write("src2dst: [ src:"..src_mac.." - dst:"..dst_mac.." ] new elem added\n") end
+--                 end
+--                 t[src_ip].talkersDevices = addType(t[src_ip].talkersDevices, dst_ip ) 
+--             end
+            
+--             if stats["dst2src.requests"] + stats["dst2src.replies"] > 0 then 
+--                 if debug then io.write("dst2src: [ src:"..src_mac.." - dst:"..dst_mac.." ] ENTERING \n") end
+--                 if not t[dst_ip] then
+--                     t[dst_ip] = {}
+--                     t[dst_ip].talkersDevices = {}
+--                     -- t[dst_mac].talkersAsClient = 0
+--                     -- t[dst_mac].talkersAsServer = 0
+--                     if debug then io.write("dst2src: [ src:"..src_mac.." - dst:"..dst_mac.." ] new elem added\n") end
+--                 end
+--                 t[dst_ip].talkersDevices = addType(t[dst_ip].talkersDevices, src_ip ) 
+--                 if debug then io.write("\n") end
+--             end
+--         end
+--     end
+--     return t
+-- end
+
+
+function addType(t,addr) --t è la tabella t[mac].talkersDevices
     local typeName = "Unknown"
     local type = 0
     --NOTE: this is for the "mac_ts" version
-    -- local macInfo = interface.getMacInfo(addr)
-    -- if macInfo then type = macInfo["devtype"] end
-    -- if type then typeName = discover.devtype2string(type) else typeName = "Unknown" end
+    local macInfo = interface.getMacInfo(addr)
+    if macInfo then type = macInfo["devtype"] end
+    if type then typeName = discover.devtype2string(type) else typeName = "Unknown" end
 
-    local hostInfo = interface.getHostInfo(addr, nil)
-    if hostInfo then type = hostInfo["devtype"] end
-    if type then typeName = discover.devtype2string(type) end
+    --NOTE: for host version
+    -- local hostInfo = interface.getHostInfo(addr, nil)
+    -- tprint(hostInfo)
+    -- if hostInfo then type = hostInfo["devtype"] end
+    -- if type then typeName =  discover.devtype2string(type) end
 
     if t[typeName] then
         t[typeName] = t[typeName] + 1
     else
         t[typeName] = 1
     end
-    --io.write("addr: "..addr.." type: "..type..", typename:"..typeName.."; TOT: "..t[typeName].."\n")
+
+    --io.write("["..addr.."] type: "..type..", typename:"..typeName.."; TOT: "..t[typeName].."\n")
 
     return t
  end
@@ -101,32 +179,34 @@ function arpMatrixModule.getLocalTalkersDeviceType()
     
             if stats["src2dst.requests"] + stats["src2dst.replies"] > 0 then 
                 if debug then io.write("src2dst: [ src:"..src_mac.." - dst:"..dst_mac.." ] ENTERING\n") end
-                if not t[src_ip] then
-                    t[src_ip] = {}
-                    t[src_ip].talkersDevices = {}
+                if not t[src_mac] then
+                    t[src_mac] = {}
+                    t[src_mac].talkersDevices = {}
                     -- t[src_mac].talkersAsClient = 0
                     -- t[src_mac].talkersAsServer = 0
                     if debug then io.write("src2dst: [ src:"..src_mac.." - dst:"..dst_mac.." ] new elem added\n") end
                 end
-                t[src_ip].talkersDevices = addType(t[src_ip].talkersDevices, dst_ip ) 
+                t[src_mac].talkersDevices = addType(t[src_mac].talkersDevices, dst_mac ) 
             end
             
             if stats["dst2src.requests"] + stats["dst2src.replies"] > 0 then 
                 if debug then io.write("dst2src: [ src:"..src_mac.." - dst:"..dst_mac.." ] ENTERING \n") end
-                if not t[dst_ip] then
-                    t[dst_ip] = {}
-                    t[dst_ip].talkersDevices = {}
+                if not t[dst_mac] then
+                    t[dst_mac] = {}
+                    t[dst_mac].talkersDevices = {}
                     -- t[dst_mac].talkersAsClient = 0
                     -- t[dst_mac].talkersAsServer = 0
                     if debug then io.write("dst2src: [ src:"..src_mac.." - dst:"..dst_mac.." ] new elem added\n") end
                 end
-                t[dst_ip].talkersDevices = addType(t[dst_ip].talkersDevices, src_ip ) 
+                t[dst_mac].talkersDevices = addType(t[dst_mac].talkersDevices, src_mac ) 
                 if debug then io.write("\n") end
             end
         end
     end
     return t
 end
+
+
 
 function arpMatrixModule.talkersTot(t)
     if not (t) then return 0 end

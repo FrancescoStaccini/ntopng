@@ -2051,9 +2051,12 @@ drawGraphs(ifId, schema, tags, _GET["zoom"], url, selected_epoch, {
       {schema="host:1d_delta_flows",           label="1 Day Active Flows Delta"}, -- TODO localize
       {schema="host:1d_delta_contacts",        label="1 Day Active Host Contacts Delta"}, -- TODO localize
       --WIP
+ --  },getDeviceCommonTimeseries() ),
    },table.merge(getDeviceCommonTimeseries(), getDeviceArpMatrixTimeseries()) ),
+
    device_timeseries_mac = host["mac"],
 })
+
 
 elseif(page == "traffic_report") then
    dofile(dirs.installdir .. "/pro/scripts/lua/enterprise/traffic_report.lua")

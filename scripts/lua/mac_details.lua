@@ -397,9 +397,8 @@ elseif(page == "historical") then
       top_categories = "top:mac:ndpi_categories",
       timeseries = table.merge({
          {schema="mac:traffic",                    label=i18n("traffic")},
-         --WIP sembra funzionarese attiva, prova a disattivare l'arp matrix 
- --     }, table.merge(getDeviceCommonTimeseries(), getDeviceArpMatrixTimeseries()) )
-         }, getDeviceCommonTimeseries())
+         --WIP sembra funzionare se attiva, prova a disattivare l'arp matrix 
+      }, table.merge(getDeviceCommonTimeseries(), getDeviceArpMatrixTimeseries()) )
    })
 
 elseif(page == "config") then

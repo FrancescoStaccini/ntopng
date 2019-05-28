@@ -1302,15 +1302,24 @@ end
 -- #################################################
 
 function getDeviceArpMatrixTimeseries()
-   if (ntop.getPrefs()).is_arp_matrix_generation_enabled then --TODO & WIP: check if this work
+   if ntop.getPref("ntopng.prefs.is_arp_matrix_generation_enabled") then --TODO & WIP: check if this work
+      -- return {
+      --    {schema="host:local_talkers",                    label="Local Talkers Tot"}, --TODO: localize ALL
+      --    {schema="host:local_talkers_network_devices",    label="Local Talkers: Network Devices"},
+      --    {schema="host:local_talkers_mobile_devices",     label="Local Talkers: Mobile Devices"},
+      --    {schema="host:local_talkers_media_devices",      label="Local Talkers: Media Devices"},
+      --    {schema="host:local_talkers_work_devices",       label="Local Talkers: Work Devices"},
+      --    {schema="host:local_talkers_iot_devices",        label="Local Talkers: IoT Devices"},
+      --    {schema="host:local_talkers_unknow_devices",     label="Local Talkers: Unknown Devices"},
+      -- }
       return {
-         {schema="host:local_talkers",                    label="Local Talkers Tot"}, --TODO: localize ALL
-         {schema="host:local_talkers_network_devices",    label="Local Talkers: Network Devices"},
-         {schema="host:local_talkers_mobile_devices",     label="Local Talkers: Mobile Devices"},
-         {schema="host:local_talkers_media_devices",      label="Local Talkers: Media Devices"},
-         {schema="host:local_talkers_work_devices",       label="Local Talkers: Work Devices"},
-         {schema="host:local_talkers_iot_devices",        label="Local Talkers: IoT Devices"},
-         {schema="host:local_talkers_unknow_devices",     label="Local Talkers: Unknown Devices"},
+         {schema="mac:local_talkers",                    label="Local Talkers Tot"}, --TODO: localize ALL
+         {schema="mac:local_talkers_network_devices",    label="Local Talkers: Network Devices"},
+         {schema="mac:local_talkers_mobile_devices",     label="Local Talkers: Mobile Devices"},
+         {schema="mac:local_talkers_media_devices",      label="Local Talkers: Media Devices"},
+         {schema="mac:local_talkers_work_devices",       label="Local Talkers: Work Devices"},
+         {schema="mac:local_talkers_iot_devices",        label="Local Talkers: IoT Devices"},
+         {schema="mac:local_talkers_unknow_devices",     label="Local Talkers: Unknown Devices"},
       }
    else
       return {}

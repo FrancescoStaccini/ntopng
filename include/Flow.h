@@ -99,6 +99,7 @@ class Flow : public GenericHashEntry {
     } ssh;
 
     struct {
+      u_int16_t ssl_version;
       char *certificate, *server_certificate;
       /* Certificate dissection */
       char *certificate_buf_leftover;
@@ -116,6 +117,7 @@ class Flow : public GenericHashEntry {
     struct {
       u_int8_t icmp_type, icmp_code;
       u_int16_t icmp_echo_id;
+      bool has_long_icmp_payload;
     } icmp;
   } protos;
 
@@ -265,6 +267,7 @@ class Flow : public GenericHashEntry {
   u_int32_t getFatherPid(bool client);
   u_int32_t get_uid(bool client) const;
   char* get_proc_name(bool client);
+  char* get_user_name(bool client);
   u_int32_t getNextTcpSeq(u_int8_t tcpFlags, u_int32_t tcpSeqNum, u_int32_t payloadLen) ;
   double toMs(const struct timeval *t);
   void timeval_diff(struct timeval *begin, const struct timeval *end, struct timeval *result, u_short divide_by_two);
@@ -350,6 +353,8 @@ class Flow : public GenericHashEntry {
   inline Host* get_cli_host()                     { return(cli_host);                        };
   inline Host* get_srv_host()                     { return(srv_host);                        };
   inline char* get_json_info()			  { return(json_info);                       };
+  inline void set_long_icmp_payload()             { protos.icmp.has_long_icmp_payload = true; }
+  inline bool has_long_icmp_payload()             { return(protos.icmp.has_long_icmp_payload); }
   inline ndpi_protocol_breed_t get_protocol_breed() const {
     return(ndpi_get_proto_breed(iface->get_ndpi_struct(), isDetectionCompleted() ? ndpiDetectedProtocol.app_protocol : NDPI_PROTOCOL_UNKNOWN));
   };

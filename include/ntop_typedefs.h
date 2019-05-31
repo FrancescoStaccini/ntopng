@@ -211,6 +211,7 @@ typedef enum {
 typedef struct {
   u_int32_t pid, father_pid;
   char *process_name, *father_process_name;
+  char *uid_name, *father_uid_name;
   u_int32_t uid /* User Id */, gid; /* Group Id */
   u_int32_t father_uid /* User Id */, father_gid; /* Group Id */
   u_int32_t actual_memory, peak_memory;
@@ -334,6 +335,8 @@ typedef enum {
   status_ids_alert /* 21 */,
   status_tcp_severe_connection_issues /* 22 - higher severity than status_tcp_connection_issues */,
   status_ssl_unsafe_ciphers /* 23 */,
+  status_data_exfiltration /* 24 */,
+  status_ssl_old_protocol_version /* 25 */,
   num_flow_status,
 } FlowStatus;
 

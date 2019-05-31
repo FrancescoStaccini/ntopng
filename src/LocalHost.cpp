@@ -48,6 +48,7 @@ LocalHost::~LocalHost() {
     checkStatsReset();
     serializeToRedis();
   }
+  if(initial_ts_point) delete(initial_ts_point);
 
   freeLocalHostData();
 }
@@ -85,6 +86,11 @@ void LocalHost::initialize() {
     }
   }
   PROFILING_SUB_SECTION_EXIT(iface, 16);
+
+  /* Clone the initial point. It will be written to the timeseries DB to
+   * address the first point problem (https://github.com/ntop/ntopng/issues/2184). */
+  initial_ts_point = new HostTimeseriesPoint(stats);
+  initialization_time = time(NULL);
 
   char host[96];
   char *strIP = ip.print(buf, sizeof(buf));
@@ -143,8 +149,7 @@ void LocalHost::deserialize(json_object *o) {
       ntop->getTrace()->traceEvent(TRACE_WARNING, "Internal error: NULL mac. Are you running out of memory or MAC hash is full?");
   }
 
-  if(json_object_object_get_ex(o, "seen.first", &obj)) first_seen = json_object_get_int64(obj);
-  if(json_object_object_get_ex(o, "seen.last", &obj))  last_seen  = json_object_get_int64(obj);
+  GenericHashEntry::deserialize(o);
   if(json_object_object_get_ex(o, "last_stats_reset", &obj)) last_stats_reset = json_object_get_int64(obj);
   if(json_object_object_get_ex(o, "broadcastDomainHost", &obj) && json_object_get_boolean(obj))
     setBroadcastDomainHost();
@@ -264,6 +269,19 @@ void LocalHost::tsLua(lua_State* vm) {
   stats->tsLua(vm);
 
   lua_push_str_table_entry(vm, "tskey", get_tskey(buf_id, sizeof(buf_id)));
+  if(initial_ts_point) {
+    lua_push_uint64_table_entry(vm, "initial_point_time", initialization_time);
+
+    /* Dump the initial host timeseries */
+    lua_newtable(vm);
+    initial_ts_point->lua(vm, iface);
+    lua_pushstring(vm, "initial_point");
+    lua_insert(vm, -2);
+    lua_settable(vm, -3);
+
+    delete(initial_ts_point);
+    initial_ts_point = NULL;
+  }
 
   host_id = get_hostkey(buf_id, sizeof(buf_id));
   lua_pushstring(vm, host_id);

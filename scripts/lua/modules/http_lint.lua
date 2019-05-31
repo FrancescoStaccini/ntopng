@@ -1148,6 +1148,7 @@ local known_parameters = {
    ["toggle_elephant_flows_alerts"]                = validateBool,
    ["toggle_ip_reassignment_alerts"]               = validateBool,
    ["toggle_longlived_flows_alerts"]               = validateBool,
+   ["toggle_data_exfiltration"]                    = validateBool,
    ["toggle_flow_db_dump_export"]                  = validateBool,
    ["toggle_alert_syslog"]                         = validateBool,
    ["toggle_slack_notification"]                   = validateBool,
@@ -1201,6 +1202,7 @@ local known_parameters = {
    ["toggle_snmp_alerts_port_duplexstatus_change"] = validateBool,
    ["toggle_snmp_alerts_port_status_change"]       = validateBool,
    ["toggle_snmp_alerts_port_errors"]              = validateBool,
+   ["snmp_port_load_threshold"]                    = validateNumber,
    ["toggle_midnight_stats_reset"]                 = validateBool,
 
    -- Input fields
@@ -1471,6 +1473,7 @@ local known_parameters = {
    ["dhcp_ranges"]             = validateListOfTypeInline(validateIpRange),
    ["icmp_type"]               = validateNumber,
    ["icmp_cod"]                = validateNumber,
+   ["hosts_only"]              = validateBool,
 
    -- Containers
    ["pod"]                     = validateSingleWord,

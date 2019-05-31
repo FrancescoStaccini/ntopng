@@ -259,6 +259,9 @@ local menu_subpages = {
     }, elephant_flow_remote_to_local_bytes = {
       title       = i18n("prefs.elephant_flow_remote_to_local_bytes_title"),
       description = i18n("prefs.elephant_flow_remote_to_local_bytes_description"),
+    }, toggle_data_exfiltration = {
+      title       = i18n("prefs.toggle_data_exfiltration_title"),
+      description = i18n("prefs.toggle_data_exfiltration_description"),
     }, max_num_alerts_per_entity = {
       title       = i18n("prefs.max_num_alerts_per_entity_title"),
       description = i18n("prefs.max_num_alerts_per_entity_description"),
@@ -409,6 +412,9 @@ local menu_subpages = {
     }, toggle_snmp_alerts_port_errors = {
        title       = i18n("prefs.toggle_snmp_alerts_port_errors_title"),
        description = i18n("prefs.toggle_snmp_alerts_port_errors_description"),
+    }, snmp_port_load_threshold = {
+      title       = i18n("prefs.snmp_port_load_threshold_title"),
+      description = i18n("prefs.snmp_port_load_threshold_description"),
     },
   }}, {id="discovery",     label=i18n("prefs.network_discovery"), advanced=false,  pro_only=false,   hidden=false, entries={
     toggle_network_discovery = {

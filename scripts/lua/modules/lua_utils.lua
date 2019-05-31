@@ -2683,6 +2683,8 @@ function getFlowStatusTypes()
    [21] = i18n("alerts_dashboard.ids_alert"),
    [22] = i18n("flow_details.tcp_severe_connection_issues"),
    [23] = i18n("flow_details.ssl_unsafe_ciphers"),
+   [24] = i18n("flow_details.data_exfiltration"),
+   [25] = i18n("flow_details.ssl_old_protocol_version"),
    }
 
    return entries
@@ -2702,6 +2704,7 @@ function getFlowStatus(status, flowstatus_info, alert, no_icon)
    elseif(status == 19) then res = warn_sign..formatLongLivedFlowAlert(flowstatus_info)
    elseif(status == 21) then res = warn_sign..i18n("flow_details.ids_alert", { signature=(flowstatus_info.ids_alert and flowstatus_info.ids_alert.signature), severity=(flowstatus_info.ids_alert and flowstatus_info.ids_alert.severity)} )
    elseif(status == 22) then res = warn_sign..i18n("flow_details.tcp_severe_connection_issues")
+   elseif(status == 0) then res = types[0]
    elseif(types[status] ~= nil) then res = warn_sign..types[status]
    end
 

@@ -291,6 +291,22 @@ local ssl_cipher_suites = {
    SSL2_RC4_64_WITH_MD5=0x080080,
 }
 
+function sslVersion2Str(v)
+   if(v == 768) then
+      return("SSL v3")
+   elseif(v == 769) then
+      return("TLS v1");
+   elseif(v == 770) then
+      return("TLS v1.1");
+   elseif(v == 771) then
+      return("TLS v1.2");
+   elseif(v == 772) then
+      return("TLS v1.3");
+   else
+      return("SSL "..flow["protos.ssl_version"])
+   end
+end
+
 local function cipher2str(c)
    for s,v in pairs(ssl_cipher_suites) do
       if(v == c) then
@@ -513,7 +529,7 @@ local function displayProc(proc, label)
    print("<tr><th width=30%>"..i18n("flow_details.user_name").."</th><td colspan=2><A HREF=\""..ntop.getHttpPrefix().."/lua/username_details.lua?uid=" .. proc.uid .. "&username=".. proc.user_name .."&".. hostinfo2url(flow,"cli").."\">".. proc.user_name .."</A></td></tr>\n")
    print("<tr><th width=30%>"..i18n("flow_details.process_pid_name").."</th><td colspan=2><A HREF=\""..ntop.getHttpPrefix().."/lua/process_details.lua?pid=".. proc.pid .."&pid_name=".. proc.name .. "&" .. hostinfo2url(flow,"srv").. "\">".. proc.name .. " [pid: "..proc.pid.."]</A>")
    if proc.father_pid then
-      print(" "..i18n("flow_details.son_of_father_process",{url=ntop.getHttpPrefix().."/lua/get_process_info.lua?pid="..proc.father_pid, proc_father_pid = proc.father_pid, proc_father_name = proc.father_name}).."</td></tr>\n")
+      print(" "..i18n("flow_details.son_of_father_process",{url=ntop.getHttpPrefix().."/lua/process_details.lua?pid="..proc.father_pid .. "&pid_name=".. proc.father_name .. "&" .. hostinfo2url(flow,"srv"), proc_father_pid = proc.father_pid, proc_father_name = proc.father_name}).."</td></tr>\n")
    end
 
    if((proc.actual_memory ~= nil) and (proc.actual_memory > 0)) then
@@ -601,6 +617,15 @@ else
    if(flow["verdict.pass"] == false) then print("</strike>") end
    historicalProtoHostHref(ifid, flow["cli.ip"], nil, flow["proto.ndpi_id"], flow["protos.ssl.certificate"])
 
+   if((flow["protos.ssl_version"] ~= nil)
+      and (flow["protos.ssl_version"] ~= 0)) then
+      print(" [ "..sslVersion2Str(flow["protos.ssl_version"]).." ]")
+      if(tonumber(flow["protos.ssl_version"]) < 771) then
+	 print(' <i class="fa fa-warning" aria-hidden=true style="color: orange;"></i> ')
+	 print(i18n("flow_details.ssl_old_protocol_version"))
+      end
+   end
+   
    if(ifstats.inline) then
       if(flow["verdict.pass"]) then
 	 print('<form class="form-inline pull-right" style="margin-bottom: 0px;" method="post">')

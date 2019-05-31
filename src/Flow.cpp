@@ -312,6 +312,7 @@ void Flow::dumpFlowAlert() {
 
     case status_ssl_certificate_mismatch: /* 10 */
     case status_ssl_unsafe_ciphers:       /* 23 */
+    case status_ssl_old_protocol_version: /* 24 */
       do_dump = ntop->getPrefs()->are_ssl_alerts_enabled();
       break;
 
@@ -342,6 +343,10 @@ void Flow::dumpFlowAlert() {
 
     case status_longlived:
       do_dump = ntop->getPrefs()->are_longlived_flows_alerts_enabled();
+      break;
+
+    case status_data_exfiltration:
+      do_dump = ntop->getPrefs()->are_exfiltration_alerts_enabled();
       break;
 
     case status_ids_alert:
@@ -485,6 +490,8 @@ void Flow::processDetectedProtocol() {
 
   case NDPI_PROTOCOL_TOR:
   case NDPI_PROTOCOL_SSL:
+    protos.ssl.ssl_version = ndpiFlow->protos.stun_ssl.ssl.ssl_version;
+    
 #if 0
     ntop->getTrace()->traceEvent(TRACE_NORMAL, "-> [client: %s][server: %s]",
 				 ndpiFlow->protos.stun_ssl.ssl.client_certificate,
@@ -1490,8 +1497,6 @@ bool Flow::clientLessThanServer() const {
 /* *************************************** */
 
 void Flow::processLua(lua_State* vm, const ParsedeBPF * const pe, bool client) {
-#ifndef WIN32
-  struct passwd * pwd;
   const ProcessInfo * proc;
   const ContainerInfo * cont;
   const TcpInfo * tcp;
@@ -1507,9 +1512,7 @@ void Flow::processLua(lua_State* vm, const ParsedeBPF * const pe, bool client) {
     lua_push_uint64_table_entry(vm, "gid", proc->gid);
     lua_push_uint64_table_entry(vm, "actual_memory", proc->actual_memory);
     lua_push_uint64_table_entry(vm, "peak_memory", proc->peak_memory);
-    /* TODO: improve code efficiency */
-    pwd = getpwuid(proc->uid);
-    lua_push_str_table_entry(vm, "user_name", pwd ? pwd->pw_name : "");
+    lua_push_str_table_entry(vm, "user_name", proc->uid_name);
 
     if(proc->father_pid > 0) {
       lua_push_uint64_table_entry(vm, "father_pid", proc->father_pid);
@@ -1518,16 +1521,12 @@ void Flow::processLua(lua_State* vm, const ParsedeBPF * const pe, bool client) {
       lua_push_str_table_entry(vm, "father_name", proc->father_process_name);
       lua_push_uint64_table_entry(vm, "actual_memory", proc->actual_memory);
       lua_push_uint64_table_entry(vm, "peak_memory", proc->peak_memory);
-
-      /* TODO: this is wrong for remote probe */
-      pwd = getpwuid(proc->father_uid);
-      lua_push_str_table_entry(vm, "father_user_name", pwd ? pwd->pw_name : "");
+      lua_push_str_table_entry(vm, "father_user_name", proc->father_uid_name);
     }
 
     lua_pushstring(vm, client ? "client_process" : "server_process");
     lua_insert(vm, -2);
     lua_settable(vm, -3);
-#endif
   }
 
   if(pe->container_info_set && (cont = &pe->container_info)) {
@@ -1812,6 +1811,8 @@ void Flow::lua(lua_State* vm, AddressTree * ptree,
       }
 
       if(isSSL()) {
+	lua_push_int32_table_entry(vm, "protos.ssl_version", protos.ssl.ssl_version);
+	
 	if(protos.ssl.certificate)
 	  lua_push_str_table_entry(vm, "protos.ssl.certificate", protos.ssl.certificate);
 
@@ -2901,6 +2902,18 @@ char* Flow::get_proc_name(bool client) {
 
 /* *************************************** */
 
+char* Flow::get_user_name(bool client) {
+  if(client && cli_ebpf && cli_ebpf->process_info_set)
+    return cli_ebpf->process_info.uid_name;
+
+  if(!client && srv_ebpf && srv_ebpf->process_info_set)
+    return srv_ebpf->process_info.uid_name;
+
+  return NULL;
+}
+
+/* *************************************** */
+
 bool Flow::match(AddressTree *ptree) {
   if((cli_host && cli_host->match(ptree))
      || (srv_host && srv_host->match(ptree)))
@@ -3570,13 +3583,17 @@ FlowStatus Flow::getFlowStatus() {
 	/* 3WH is over */
 	switch(l7proto) {
 	case NDPI_PROTOCOL_SSL:
+	  /*
+	    CNs are NOT case sensitive as per RFC 5280
+	    so we use ...case... functions to do the comparisions
+	  */
 	  if(protos.ssl.certificate
 	     && protos.ssl.server_certificate
 	     && !protos.ssl.subject_alt_name_match) {
 	    if(protos.ssl.server_certificate[0] == '*') {
-	      if(!strstr(protos.ssl.certificate, &protos.ssl.server_certificate[1]))
+	      if(!strcasestr(protos.ssl.certificate, &protos.ssl.server_certificate[1]))
 		return status_ssl_certificate_mismatch;
-	    } else if(strcmp(protos.ssl.certificate, protos.ssl.server_certificate))
+	    } else if(strcasecmp(protos.ssl.certificate, protos.ssl.server_certificate))
 	      return status_ssl_certificate_mismatch;
 	  }
 	  break;
@@ -3634,6 +3651,9 @@ FlowStatus Flow::getFlowStatus() {
       return status_elephant_remote_to_local;
   }
 
+  if(isICMP() && has_long_icmp_payload())
+    return status_data_exfiltration;
+
 #ifdef HAVE_NEDGE
   /* Leave this at the end. A more specific status should be returned above if avaialble. */
   if(!isPassVerdict())
@@ -3645,7 +3665,9 @@ FlowStatus Flow::getFlowStatus() {
    return(status_flow_when_interface_alerted);
 #endif
 
-  if(protos.ssl.ja3.server_unsafe_cipher != ndpi_cipher_safe)
+  if(protos.ssl.ssl_version && (protos.ssl.ssl_version < 0x303 /* TLSv1.2 */))
+    return(status_ssl_old_protocol_version);
+  else if(protos.ssl.ja3.server_unsafe_cipher != ndpi_cipher_safe)
     return(status_ssl_unsafe_ciphers);
   
   return(status_normal);
@@ -3878,9 +3900,12 @@ void Flow::dissectSSL(char *payload, u_int16_t payload_len) {
 		  ntop->getTrace()->traceEvent(TRACE_NORMAL, "%s [Len %u][sizeof(buf): %u][ssl cert: %s]", buf, len, sizeof(buf), getSSLCertificate());
 #endif
 
+		  /*
+		    CNs are NOT case sensitive as per RFC 5280
+		  */
 		  if(protos.ssl.certificate
-		     && ((buf[0] != '*' && !strncmp(protos.ssl.certificate, buf, sizeof(buf)))
-			 || (buf[0] == '*' && strstr(protos.ssl.certificate, &buf[1])))) {
+		     && ((buf[0] != '*' && !strncasecmp(protos.ssl.certificate, buf, sizeof(buf)))
+			 || (buf[0] == '*' && strcasestr(protos.ssl.certificate, &buf[1])))) {
 		    protos.ssl.subject_alt_name_match = true;
 		    protos.ssl.dissect_certificate = false;
 		    break;

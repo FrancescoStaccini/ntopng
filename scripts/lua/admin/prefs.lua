@@ -319,7 +319,8 @@ function printAlerts()
 			   "row_toggle_ssl_alerts", "row_toggle_dns_alerts", "row_toggle_remote_to_remote_alerts",
 			   "row_toggle_ip_reassignment_alerts", "row_toggle_dropped_flows_alerts", "row_alerts_informative_header",
 			   "row_toggle_device_first_seen_alert", "row_toggle_device_activation_alert", "row_toggle_pool_activation_alert", "row_toggle_quota_exceeded_alert", "row_toggle_mining_alerts", "row_toggle_device_protocols_alerts",
-			   "row_toggle_longlived_flows_alerts", "longlived_flow_duration", "row_toggle_elephant_flows_alerts", "elephant_flow_local_to_remote_bytes", "elephant_flow_remote_to_local_bytes"
+			   "row_toggle_longlived_flows_alerts", "longlived_flow_duration", "row_toggle_elephant_flows_alerts", "elephant_flow_local_to_remote_bytes", "elephant_flow_remote_to_local_bytes",
+         "row_toggle_data_exfiltration",
 			}
  
  if not subpage_active.entries["toggle_mysql_check_open_files_limit"].hidden then
@@ -459,6 +460,13 @@ function printAlerts()
      subpage_active.entries["elephant_flow_remote_to_local_bytes"].description,
     "ntopng.prefs.", "elephant_flow_remote_to_local_bytes", prefs.elephant_flow_remote_to_local_bytes, 
     "number", showElements, nil, nil, {min=1024, format_spec = FMT_TO_DATA_BYTES, tformat="kmg"})
+
+  prefsToggleButton(subpage_active, {
+    field = "toggle_data_exfiltration",
+    pref = "data_exfiltration_alerts",
+    default = "1",
+    hidden = not showElements,
+  })
 
   print('<tr id="row_alerts_informative_header" ')
   if (showElements == false) then print(' style="display:none;"') end
@@ -1465,9 +1473,10 @@ function printStatsTimeseries()
 				    "ntopng.prefs.ts_high_resolution", has_custom_housekeeping,
 				    nil, nil, nil, influx_active)
 
+  local default_influx_retention = 365
   prefsInputFieldPrefs(subpage_active.entries["influxdb_storage"].title, subpage_active.entries["influxdb_storage"].description .. "<br>" ..
-      i18n("prefs.influxdb_storage_note", {interval=influxdb.getShardGroupDuration(tonumber(_POST["influx_retention"] or ntop.getPref("ntopng.prefs.influx_retention"))), url="https://docs.influxdata.com/influxdb/v1.7/query_language/database_management/#description-of-syntax-1"}),
-      "ntopng.prefs.", "influx_retention", 365, "number", influx_active, nil, nil, {min=0, max=365*10})
+      i18n("prefs.influxdb_storage_note", {interval=influxdb.getShardGroupDuration(tonumber(_POST["influx_retention"] or ntop.getPref("ntopng.prefs.influx_retention")) or default_influx_retention), url="https://docs.influxdata.com/influxdb/v1.7/query_language/database_management/#description-of-syntax-1"}),
+      "ntopng.prefs.", "influx_retention", default_influx_retention, "number", influx_active, nil, nil, {min=0, max=365*10})
 
   prefsInputFieldPrefs(subpage_active.entries["rrd_files_retention"].title, subpage_active.entries["rrd_files_retention"].description,
 		       "ntopng.prefs.", "old_rrd_files_retention", 365, "number",
@@ -1710,6 +1719,12 @@ function printSnmp()
     pref = "alerts.snmp_port_errors",
     disabled = not info["version.enterprise_edition"],
   })
+
+  prefsInputFieldPrefs(subpage_active.entries["snmp_port_load_threshold"].title, 
+                       subpage_active.entries["snmp_port_load_threshold"].description,
+                       "ntopng.prefs.alerts.", 
+                       "snmp_port_load_threshold", 
+                       "100", "number", nil, false, nil, {min=0})
 
   print('<tr><th colspan=2 style="text-align:right;"><button type="submit" class="btn btn-primary" style="width:115px" disabled="disabled">'..i18n("save")..'</button></th></tr>')
 

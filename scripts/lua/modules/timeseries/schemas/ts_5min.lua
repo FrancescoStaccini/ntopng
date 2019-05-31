@@ -435,6 +435,17 @@ schema:addMetric("bytes_sent")
 schema:addMetric("bytes_rcvd")
 
 -- ##############################################
+
+schema = ts_utils.newSchema("host:dropbox_shared_files", {step=300, metrics_type=ts_utils.metrics.gauge})
+schema:addTag("ifid")
+schema:addTag("host")
+schema:addMetric("num_dropbox_shared_files")
+
+
+-- ##############################################
+
+--
+
 --WIP migrating ts from devices to host
 -- if ntop.getPref("ntopng.prefs.is_arp_matrix_generation_enabled") then 
 

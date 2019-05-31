@@ -392,13 +392,15 @@ elseif(page == "historical") then
       mac = mac,
       category = _GET["category"],
    }
+   --WIP
+   local am_ts = getDeviceArpMatrixTimeseries(tags.mac, tags)
 
    drawGraphs(ifId, schema, tags, _GET["zoom"], url, selected_epoch, {
       top_categories = "top:mac:ndpi_categories",
       timeseries = table.merge({
          {schema="mac:traffic",                    label=i18n("traffic")},
-         --WIP sembra funzionare se attiva, prova a disattivare l'arp matrix 
-      }, table.merge(getDeviceCommonTimeseries(), getDeviceArpMatrixTimeseries()) )
+      }, getDeviceCommonTimeseries() ),
+      local_talkers = not table.empty(am_ts),
    })
 
 elseif(page == "config") then

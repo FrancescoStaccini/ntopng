@@ -502,6 +502,26 @@ function printSeries(options, tags, start_time, base_url, params)
       end
    end
 
+
+   -----------------WIP----------- //TODO: host_detail.lua don't work
+   --TODO: sistema dopo la correzione per farlo andare anche sugli host
+   -- ARP Local Talkers
+   if options.local_talkers then
+      local mac = ternary(tags.mac, tags.mac, options.device_timeseries_mac) --TEST: non sono sicuo
+      local schemas = getDeviceArpMatrixTimeseries(mac, tags)
+   
+      if not table.empty(schemas) then
+         graphMenuDivider()
+         graphMenuHeader("Local Talkers")  --TODO:localize
+
+         for _,s in pairs(schemas) do
+            populateGraphMenuEntry(s.label, base_url, table.merge(params, {ts_schema=s.schema}))
+         end
+      end
+  end
+   ---------------------
+
+
    -- L4 protocols
    if options.l4_protocols then
       local schema = options.l4_protocols
@@ -1301,29 +1321,75 @@ end
 
 -- #################################################
 
-function getDeviceArpMatrixTimeseries()
-   if ntop.getPref("ntopng.prefs.is_arp_matrix_generation_enabled") then --TODO & WIP: check if this work
-      -- return {
-      --    {schema="host:local_talkers",                    label="Local Talkers Tot"}, --TODO: localize ALL
-      --    {schema="host:local_talkers_network_devices",    label="Local Talkers: Network Devices"},
-      --    {schema="host:local_talkers_mobile_devices",     label="Local Talkers: Mobile Devices"},
-      --    {schema="host:local_talkers_media_devices",      label="Local Talkers: Media Devices"},
-      --    {schema="host:local_talkers_work_devices",       label="Local Talkers: Work Devices"},
-      --    {schema="host:local_talkers_iot_devices",        label="Local Talkers: IoT Devices"},
-      --    {schema="host:local_talkers_unknow_devices",     label="Local Talkers: Unknown Devices"},
-      -- }
-      return {
-         {schema="mac:local_talkers",                    label="Local Talkers Tot"}, --TODO: localize ALL
-         {schema="mac:local_talkers_network_devices",    label="Local Talkers: Network Devices"},
-         {schema="mac:local_talkers_mobile_devices",     label="Local Talkers: Mobile Devices"},
-         {schema="mac:local_talkers_media_devices",      label="Local Talkers: Media Devices"},
-         {schema="mac:local_talkers_work_devices",       label="Local Talkers: Work Devices"},
-         {schema="mac:local_talkers_iot_devices",        label="Local Talkers: IoT Devices"},
-         {schema="mac:local_talkers_unknow_devices",     label="Local Talkers: Unknown Devices"},
-      }
+function getDeviceArpMatrixTimeseries(mac, tags)
+   --tprint(mac)
+   --tprint(tags)
+   if mac and tags and ntop.getPref("ntopng.prefs.is_arp_matrix_generation_enabled") then 
+      local res = {}
+      local schema,label
+      local ts = { --TODO: localize ALL
+            {schema="mac:local_talkers",                    label="Total"},
+            {schema="mac:local_talkers_network_devices",    label="Network Devices"},
+            {schema="mac:local_talkers_mobile_devices",     label="Mobile Devices"},
+            {schema="mac:local_talkers_media_devices",      label="Media Devices"},
+            {schema="mac:local_talkers_work_devices",       label="Work Devices"},
+            {schema="mac:local_talkers_iot_devices",        label="IoT Devices"},
+            {schema="mac:local_talkers_unknow_devices",     label="Unknown Devices"},
+         }
+      for _,v in pairs(ts) do
+
+         if not table.empty( ts_utils.listSeries(v.schema, {ifid = tags.ifid, mac = mac}, 0) ) then 
+            --tprint(v)
+            table.insert(res,{schema = v.schema, label = v.label}) 
+               -- tprint(res)
+               -- io.write("--\n")
+         end
+         
+      end
+      --io.write("------------------------\n")
+      --tprint(res)
+      return res
+
    else
       return {}
    end
 end
+
+--[[  codice accantonato
+
+      local ts = { --TODO: localize ALL
+            {schema="mac:local_talkers",                    label="Local Talkers Tot"},
+            {schema="mac:local_talkers_network_devices",    label="Local Talkers: Network Devices"},
+            {schema="mac:local_talkers_mobile_devices",     label="Local Talkers: Mobile Devices"},
+            {schema="mac:local_talkers_media_devices",      label="Local Talkers: Media Devices"},
+            {schema="mac:local_talkers_work_devices",       label="Local Talkers: Work Devices"},
+            {schema="mac:local_talkers_iot_devices",        label="Local Talkers: IoT Devices"},
+            {schema="mac:local_talkers_unknow_devices",     label="Local Talkers: Unknown Devices"},
+         }
+
+
+      -- if ts_utils.exists("mac:local_talkers", {ifid = tags.ifid, mac = mac}) then 
+      --    res = table.merge(res,{schema="mac:local_talkers", label="Local Talkers Tot"})
+      -- end
+      -- if ts_utils.exists("mac:local_talkers_network_devices", {ifid = tags.ifid, mac = mac}) then 
+      --    res = table.merge(res,{schema="mac:local_talkers_network_devices", label="Local Talkers: Network Devices"})
+      -- end
+      -- if ts_utils.exists("mac:local_talkers_mobile_devices", {ifid = tags.ifid, mac = mac}) then 
+      --    res = table.merge(res,{schema="mac:local_talkers_mobile_devices",label="Local Talkers: Mobile Devices"})
+      -- end
+      -- if ts_utils.exists("mac:local_talkers_media_devices", {ifid = tags.ifid, mac = mac}) then 
+      --    res = table.merge(res,{schema="mac:local_talkers_media_devices", label="Local Talkers: Media Devices"})
+      -- end
+      -- if ts_utils.exists("mac:local_talkers_work_devices", {ifid = tags.ifid, mac = mac}) then 
+      --    res = table.merge(res,{schema="mac:local_talkers_work_devices", label="Local Talkers: Work Devices"})
+      -- end
+      -- if ts_utils.exists("mac:local_talkers_iot_devices", {ifid = tags.ifid, mac = mac}) then 
+      --    res = table.merge(res,{schema="mac:local_talkers_iot_devices", label="Local Talkers: IoT Devices"})
+      -- end
+      -- if ts_utils.exists("mac:local_talkers_unknow_devices", {ifid = tags.ifid, mac = mac}) then 
+      --    res = table.merge(res,{schema="mac:local_talkers_unknow_devices", label="Local Talkers: Unknown Devices"})
+      -- end
+
+]]
 
 -- #################################################

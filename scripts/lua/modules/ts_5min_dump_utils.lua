@@ -53,6 +53,8 @@ function ts_dump.l2_device_update_talkers_stats_rrds( when, devicename, device, 
   --    end
   -- end
 
+  --TODO: i vari ternary() credo non siano necessari, c'è l'if che controlla l'esestenza della entry
+
   if arp_matrix_utils.talkersTot(talkers) > 0 then 
     ts_utils.append("mac:local_talkers", {ifid=ifstats.id, mac=devicename,
                 num_talkers = arp_matrix_utils.talkersTot(talkers),
@@ -390,30 +392,29 @@ function ts_dump.host_update_stats_rrds(when, hostname, host, ifstats, verbose)
       -- L2 host
       --io.write("Discarding "..k.."@"..hostname.."\n")
     end
-
-    --WIP dropbox shared file
-       --WIP_TEST
-    --tprint( interface.getHostInfo(hostname).has_dropbox_shares )
-  --  local dropbox = require("dropbox_utils")
-  --  tprint(dropbox.getHostNamespaces(host.ip))
-  --  tprint(table.len(dropbox.getHostNamespaces(host.ip)) )
-  -- tprint(hostname)
-  -- tprint(host)
-  -- io.write("-----------------------------\n")
-  -- tprint(interface.getHostInfo(hostname)) --STA QUI L'INFO has_dropbox_shares!
-  -- io.write("-----------------------------\n\n")
-
-    local more_info = interface.getHostInfo(hostname)
-    if more_info and more_info.has_dropbox_shares then 
-      local n = table.len(dropbox.getHostNamespaces(hostname))
-      tprint(hostname)
-      tprint(n)
-      io.write("-----------------------------\n")
-      ts_utils.append("host:dropbox_shared_files", {ifid=ifstats.id, host=hostname,
-            num_dropbox_shared_files = n}, when, verbose)
-    end
-
   end
+
+  --WIP dropbox shared file
+
+  --DA ERRORE ALLA RIPRESA DELLO STANDBY E ALTRE VOLTE APPARENTEMENTE RANDOM
+
+  --local more_info = interface.getHostInfo(hostname)
+  --if more_info and more_info.has_dropbox_shares then 
+
+    -- next attempt: get all the dropbox host before the callback and here just check the table
+    local n = table.len(dropbox.getHostNamespaces(hostname)) 
+    io.write("" .. os.date("%m/%d/%Y %I:%M %p"))
+    io.write(" +[ "..hostname.." ]+ \n")
+
+    if n > 0 then 
+
+      io.write("append will be called on hostname: "..hostname.." n: "..n.."\n")
+      io.write(" -----------------------------\n")
+      ts_utils.append("host:dropbox_shares", {ifid=ifstats.id, host=hostname,
+            num_dropbox_shares = n}, when, verbose)
+  
+    end
+  ---------------------------------------------------------
 
   -- UDP breakdown
   ts_utils.append("host:udp_sent_unicast", {ifid=ifstats.id, host=hostname,
@@ -496,8 +497,7 @@ function ts_dump.run_5min_dump(_ifname, ifstats, config, when, time_threshold, s
   if (is_rrd_creation_enabled and (config.host_rrd_creation ~= "0")) or are_alerts_enabled then
 
 
----------------WIP & TODO: put outside the callback function
-    --also, i can't put this inside host_update_rrd(...), i don't want call getLocalTalkersDeviceType() for each host
+---------------WIP----leave outside the callback function
     if config.arp_matrix_timseries_rrd_creation then
       talkers_table = arp_matrix_utils.getLocalTalkersDeviceType()
     end 
@@ -524,18 +524,12 @@ function ts_dump.run_5min_dump(_ifname, ifstats, config, when, time_threshold, s
             ts_dump.host_update_rrd(instant, host_key, host_point, ifstats, verbose, config)
           end
         end
-<<<<<<< HEAD
-=======
 
         -- mark the host as dumped
         dumped_hosts[host_key] = true
       end
->>>>>>> 61ec9af4f28c6779745be2961ec5c595494435e0
 
-            -------------------------WIP---------------------------
-
-            --PROBLEMA PRINCIPALE: LE TS HOST SONO STRANE, QUASI LA TOTALITA DELLE V4 (IN HOST_DETAILS)NON OFFRE LAPOSSIBILITÀ DI VEDERE I PLOT
-            --PERÒ SE VAI A VEDERE A MANO I RRD DA TERMINALE CI SONO SOLO QUELLI V4, MENTRE POI IN REALTÀ VENGONO PLOTTATI SOLOI V6
+      -------------------------WIP---------------------------test
             
         -- if config.arp_matrix_timseries_rrd_creation then
         --       io.write("host: "..hostname)
@@ -555,10 +549,8 @@ function ts_dump.run_5min_dump(_ifname, ifstats, config, when, time_threshold, s
         --    -- tprint(talkers_table[hostname].talkersDevices)
         --   end
         -- end
-        -------------------------------
-
-
-      end
+      ------------------------------
+      
       num_processed_hosts = num_processed_hosts + 1
     end)
 
@@ -586,25 +578,19 @@ function ts_dump.run_5min_dump(_ifname, ifstats, config, when, time_threshold, s
         if config.l2_device_ndpi_timeseries_creation == "per_category" then
           ts_dump.l2_device_update_categories_rrds(when, devicename, device, ifstats, verbose)
         end
-
-
-
         ------------WIP---------------------------------------------
+        --TODO: re-test (and put the series also in host_details.lua) after the next, upcoming, ts name fix
         if config.arp_matrix_timseries_rrd_creation then
           local device_talkers = {}
           if talkers_table and talkers_table[devicename] then
-          --  io.write("mac: "..devicename.." ")
             device_talkers = talkers_table[devicename].talkersDevices
-
-          --  tprint(talkers_table[devicename].talkersDevices)
-          --  io.write("dumped\n")
-
           end
           ts_dump.l2_device_update_talkers_stats_rrds( when, devicename, device, ifstats, verbose, device_talkers )
         end
-
-
         -------------------------------------------------------------
+        --WIP: potrei mettere qui la funzione per dumpare l'arpmatrix
+
+        -----------------------------------------------------------------
       end)
 
       if not in_time then

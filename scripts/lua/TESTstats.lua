@@ -196,7 +196,7 @@ end
 
 local json = require("dkjson")
 --print( json.encode(createStats(matrix), {indent = true} ) )
-print( json.encode( matrix, {indent = true} ) )
+-----print( json.encode( matrix, {indent = true} ) )
 
 -- tprint(interface.getMacInfo("00:86:9C:77:5C:4C" ) )
 --print( json.encode( interface.getMacsInfo(), {indent = true}) )
@@ -207,7 +207,12 @@ print( json.encode( matrix, {indent = true} ) )
 --print( json.encode( interface.getMacDeviceTypes(), {indent = true}) )
 
 
-print( json.encode( arp_matrix_utils.getLocalTalkersDeviceType(), {indent = true} ) )
+--print( json.encode( arp_matrix_utils.getLocalTalkersDeviceType(), {indent = true} ) )
+
+--test tocheck dropbox namespaces
+-- local dropbox = require "dropbox_utils"
+-- tprint(  dropbox.getNamespaces() )
+
 
 --[[ MAC INFO
 

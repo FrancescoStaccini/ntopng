@@ -2053,7 +2053,7 @@ drawGraphs(ifId, schema, tags, _GET["zoom"], url, selected_epoch, {
       {schema="host:1d_delta_contacts",        label="1 Day Active Host Contacts Delta"}, -- TODO localize
 
       --WIP
-      {schema="host:dropbox_shared_files",   label="Dropbox Shared Files"}, -- TODO localize
+      {schema="host:dropbox_shares",   label="Dropbox Shares"}, -- TODO localize
 
    }, getDeviceCommonTimeseries() ),
 

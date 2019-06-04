@@ -436,10 +436,10 @@ schema:addMetric("bytes_rcvd")
 
 -- ##############################################
 
-schema = ts_utils.newSchema("host:dropbox_shared_files", {step=300, metrics_type=ts_utils.metrics.gauge})
+schema = ts_utils.newSchema("host:dropbox_shares", {step=300, metrics_type=ts_utils.metrics.gauge})
 schema:addTag("ifid")
 schema:addTag("host")
-schema:addMetric("num_dropbox_shared_files")
+schema:addMetric("num_dropbox_shares")
 
 
 -- ##############################################

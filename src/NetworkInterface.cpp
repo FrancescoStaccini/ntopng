@@ -46,6 +46,8 @@ NetworkInterface::NetworkInterface(const char *name,
   char _ifname[MAX_INTERFACE_NAME_LEN], buf[MAX_INTERFACE_NAME_LEN];
   /* We need to do it as isView() is not yet initialized */
   char pcap_error_buffer[PCAP_ERRBUF_SIZE];
+  ndpi_port_range d_port[MAX_DEFAULT_PORTS];
+  u_int16_t no_master[2] = { NDPI_PROTOCOL_NO_MASTER_PROTO, NDPI_PROTOCOL_NO_MASTER_PROTO };
 
   init();
   customIftype = custom_interface_type, flowHashingMode = flowhashing_none, tsExporter = NULL;
@@ -142,10 +144,30 @@ NetworkInterface::NetworkInterface(const char *name,
     }
   }
 
-  if(id >= 0) {
-    ndpi_port_range d_port[MAX_DEFAULT_PORTS];
-    u_int16_t no_master[2] = { NDPI_PROTOCOL_NO_MASTER_PROTO, NDPI_PROTOCOL_NO_MASTER_PROTO };
+  // init global detection structure
+  ndpi_struct = ndpi_init_detection_module();
+  if(ndpi_struct == NULL) {
+    ntop->getTrace()->traceEvent(TRACE_ERROR, "Unable to initialize nDPI");
+    exit(-1);
+  }
 
+  if(ntop->getCustomnDPIProtos() != NULL)
+    ndpi_load_protocols_file(ndpi_struct, ntop->getCustomnDPIProtos());
+
+  ndpi_set_detection_preferences(ndpi_struct, ndpi_pref_http_dont_dissect_response, 1);
+  ndpi_set_detection_preferences(ndpi_struct, ndpi_pref_dns_dont_dissect_response,  1);
+  ndpi_set_detection_preferences(ndpi_struct, ndpi_pref_enable_category_substring_match, 1);
+
+  memset(d_port, 0, sizeof(d_port));
+  ndpi_set_proto_defaults(ndpi_struct, NDPI_PROTOCOL_UNRATED, NTOPNG_NDPI_OS_PROTO_ID,
+			  0, no_master, no_master, (char*)"Operating System",
+			  NDPI_PROTOCOL_CATEGORY_SYSTEM_OS, d_port, d_port);
+
+  // enable all protocols
+  NDPI_BITMASK_SET_ALL(all);
+  ndpi_set_protocol_detection_bitmask2(ndpi_struct, &all);
+
+  if(id >= 0) {
     num_hashes = max_val(4096, ntop->getPrefs()->get_max_num_flows()/4);
     flows_hash = new FlowHash(this, num_hashes, ntop->getPrefs()->get_max_num_flows());
 
@@ -170,29 +192,6 @@ NetworkInterface::NetworkInterface(const char *name,
     else
       arp_hash_matrix = NULL;
 
-    // init global detection structure
-    ndpi_struct = ndpi_init_detection_module();
-    if(ndpi_struct == NULL) {
-      ntop->getTrace()->traceEvent(TRACE_ERROR, "Unable to initialize nDPI");
-      exit(-1);
-    }
-
-    if(ntop->getCustomnDPIProtos() != NULL)
-      ndpi_load_protocols_file(ndpi_struct, ntop->getCustomnDPIProtos());
-
-    ndpi_set_detection_preferences(ndpi_struct, ndpi_pref_http_dont_dissect_response, 1);
-    ndpi_set_detection_preferences(ndpi_struct, ndpi_pref_dns_dont_dissect_response,  1);
-    ndpi_set_detection_preferences(ndpi_struct, ndpi_pref_enable_category_substring_match, 1);
-
-    memset(d_port, 0, sizeof(d_port));
-    ndpi_set_proto_defaults(ndpi_struct, NDPI_PROTOCOL_UNRATED, NTOPNG_NDPI_OS_PROTO_ID,
-			    0, no_master, no_master, (char*)"Operating System",
-			    NDPI_PROTOCOL_CATEGORY_SYSTEM_OS, d_port, d_port);
-
-    // enable all protocols
-    NDPI_BITMASK_SET_ALL(all);
-    ndpi_set_protocol_detection_bitmask2(ndpi_struct, &all);
-
     last_pkt_rcvd = last_pkt_rcvd_remote = 0, pollLoopCreated = false,
       bridge_interface = false;
     next_idle_flow_purge = next_idle_host_purge = 0;
@@ -206,11 +205,12 @@ NetworkInterface::NetworkInterface(const char *name,
     checkIdle();
     ifSpeed = Utils::getMaxIfSpeed(name);
     ifMTU = Utils::getIfMTU(name), mtuWarningShown = false;
+    reloadDhcpRanges();
   } else /* id < 0 */ {
     flows_hash = NULL, hosts_hash = NULL;
     macs_hash = NULL, ases_hash = NULL, vlans_hash = NULL;
     countries_hash = NULL, arp_hash_matrix = NULL;
-    ndpi_struct = NULL, db = NULL, ifSpeed = 0;
+    db = NULL, ifSpeed = 0;
   }
 
   networkStats = NULL;
@@ -230,7 +230,6 @@ NetworkInterface::NetworkInterface(const char *name,
 
   loadScalingFactorPrefs();
   loadPacketsDropsAlertPrefs();
-  reloadDhcpRanges();
 
   statsManager = NULL, alertsManager = NULL;
 
@@ -1240,9 +1239,12 @@ void NetworkInterface::processFlow(ParsedFlow *zflow, bool zmq_flow) {
     flow->setFlowApplLatency(zflow->tcp.applLatencyMsec);
 
   /* Update process and container info */
-  if(zflow->hasParsedeBPF())
+  if(zflow->hasParsedeBPF()) {
     flow->setParsedeBPFInfo(zflow,
 			    src2dst_direction /* FIX: direction also depends on the type of event. */);
+    /* Now refresh the flow last seen so it will stay active as long as we keep receiving updates */
+    flow->updateSeen();
+  }
 
   /* Update flow device stats */
   if(!flow->setFlowDevice(zflow->deviceIP,
@@ -2642,8 +2644,13 @@ void NetworkInterface::pollQueuedeBPFEvents() {
 #if 0
 	char buf[128];
 	flow->print(buf, sizeof(buf));
-	ntop->getTrace()->traceEvent(TRACE_NORMAL, "Updating flow process info: [src2dst_direction: %u] %s", src2dst_direction ? 1 : 0, buf);
+	ntop->getTrace()->traceEvent(TRACE_NORMAL, "Updating flow process info: [new flow: %u][src2dst_direction: %u] %s",
+				     new_flow ? 1 : 0,
+				     src2dst_direction ? 1 : 0, buf);
 #endif
+
+	if(new_flow)
+	  flow->updateSeen();
 
 	flow->setParsedeBPFInfo(dequeued, src2dst_direction);
       }
@@ -3705,7 +3712,11 @@ static bool flow_matches(Flow *f, struct flowHostRetriever *retriever) {
   u_int32_t deviceIP;
   u_int16_t inIndex, outIndex;
   u_int8_t icmp_type, icmp_code;
+#ifdef NTOPNG_PRO
+#ifndef HAVE_NEDGE
   char *traffic_profile_filter;
+#endif
+#endif
   char *container_filter, *pod_filter;
 #ifdef HAVE_NEDGE
   bool filtered_flows;

@@ -191,6 +191,7 @@ Ntop::~Ntop() {
   }
 
   delete []iface;
+  delete system_interface;
 
   if(udp_socket != -1) closesocket(udp_socket);
 
@@ -284,7 +285,9 @@ void Ntop::registerPrefs(Prefs *_prefs, bool quick_registration) {
 #endif
 
   if(quick_registration) return;
-  
+
+  system_interface = new NetworkInterface(SYSTEM_INTERFACE_NAME, SYSTEM_INTERFACE_NAME);
+
   /* License check could have increased the number of interfaces available */
   resetNetworkInterfaces();
 
@@ -411,6 +414,8 @@ void Ntop::start() {
   loadLocalInterfaceAddress();
   
   address->startResolveAddressLoop();
+
+  system_interface->allocateNetworkStats();
 
   for(int i=0; i<num_defined_interfaces; i++)
     iface[i]->allocateNetworkStats();  
@@ -1916,6 +1921,9 @@ void Ntop::setLocalNetworks(char *_nets) {
 /* ******************************************* */
 
 NetworkInterface* Ntop::getInterfaceById(int if_id) {
+  if(if_id == -1)
+    return(system_interface);
+
   for(int i=0; i<num_defined_interfaces; i++) {
     if(iface[i] && iface[i]->get_id() == if_id)
       return(iface[i]);
@@ -1940,7 +1948,7 @@ bool Ntop::isExistingInterface(const char * const name) const {
 
 /* ******************************************* */
 
-NetworkInterface* Ntop::getNetworkInterface(lua_State* vm, const char *name) {
+NetworkInterface* Ntop::getNetworkInterface(const char *name, lua_State* vm) {
   char allowed_ifname[MAX_INTERFACE_NAME_LEN] = {0};
 
   if(vm && getInterfaceAllowed(vm, allowed_ifname)) {
@@ -1955,6 +1963,9 @@ NetworkInterface* Ntop::getNetworkInterface(lua_State* vm, const char *name) {
   /* This method accepts both interface names or Ids */
   int if_id = atoi(name);
   char str[8];
+
+  if((if_id == SYSTEM_INTERFACE_ID) || !strcmp(name, SYSTEM_INTERFACE_NAME))
+    return(getSystemInterface());
 
   snprintf(str, sizeof(str), "%d", if_id);
   if (strcmp(name, str) == 0) {
@@ -1978,7 +1989,7 @@ NetworkInterface* Ntop::getNetworkInterface(lua_State* vm, const char *name) {
 /* ******************************************* */
 
 int Ntop::getInterfaceIdByName(lua_State *vm, const char * const name) {
-  NetworkInterface * res = getNetworkInterface(vm, name);
+  NetworkInterface * res = getNetworkInterface(name, vm);
 
   if(res)
     return res->get_id();

@@ -73,9 +73,6 @@ print [[
       <li><a href="]]
 print(ntop.getHttpPrefix())
 print [[/lua/about.lua"><i class="fa fa-question-circle"></i> ]] print(i18n("about.about_ntopng")) print[[</a></li>
-      <li><a href="]]
-print(ntop.getHttpPrefix())
-print [[/lua/runtime.lua"><i class="fa fa-hourglass-start"></i> ]] print(i18n("about.runtime_status")) print[[</a></li>
       <li><a href="]] print(ntop.getHttpPrefix()) print[[/lua/telemetry.lua"><i class="fa fa-rss"></i> ]] print(i18n("telemetry")) print[[</a></li>
       <li><a href="http://blog.ntop.org/" target="_blank"><i class="fa fa-bullhorn"></i> ]] print(i18n("about.ntop_blog")) print[[ <i class="fa fa-external-link"></i></a></li>
       <li><a href="https://t.me/ntop_community" target="_blank"><i class="fa fa-telegram"></i> ]] print(i18n("about.telegram")) print[[ <i class="fa fa-external-link"></i></a></li>
@@ -392,8 +389,9 @@ print [[
 ]]
 end
 
+local show_flowdevs = (ifs["type"] == "zmq")
 
-if ntop.isEnterprise() then
+if ntop.isEnterprise() and (isAllowedSystemInterface() or show_flowdevs) then
    if active_page == "devices_stats" then
      print [[ <li class="dropdown active"> ]]
    else
@@ -407,8 +405,10 @@ if ntop.isEnterprise() then
    ]]
 
    if(info["version.enterprise_edition"] == true) then
-      print('<li><a href="'..ntop.getHttpPrefix()..'/lua/pro/enterprise/snmpdevices_stats.lua">') print(i18n("prefs.snmp")) print('</a></li>')
-      if ifs["type"] == "zmq" then
+      if isAllowedSystemInterface() then
+         print('<li><a href="'..ntop.getHttpPrefix()..'/lua/pro/enterprise/snmpdevices_stats.lua">') print(i18n("prefs.snmp")) print('</a></li>')
+      end
+      if show_flowdevs then
          if _ifstats.has_seen_ebpf_events then
             print('<li><a href="'..ntop.getHttpPrefix()..'/lua/pro/enterprise/event_exporters.lua ">') print(i18n("event_exporters.event_exporters")) print('</a></li>')
          else
@@ -428,7 +428,17 @@ if ntop.isEnterprise() then
 
 end
 
-
+if isAllowedSystemInterface() then
+   if active_page == "system" then
+     print [[ <li class="dropdown active"> ]]
+   else
+     print [[ <li class="dropdown"> ]]
+   end
+   print [[
+      <a href="]] print(ntop.getHttpPrefix()) print[[/lua/system_stats.lua">]] print(i18n("system")) print[[</a>
+   </li>
+   ]]
+end
 
 -- Admin
 if active_page == "admin" then

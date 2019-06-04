@@ -37,67 +37,6 @@ schema:addTag("mac")
 schema:addTag("category")
 schema:addMetric("bytes")
 
--- ##############################################
-
---TODO: sposta da qualche parte "più opzionale"
-if ntop.getPref("ntopng.prefs.is_arp_matrix_generation_enabled") then 
-
-    schema = ts_utils.newSchema("mac:local_talkers", {step=300, metrics_type=ts_utils.metrics.gauge} ) 
-    schema:addTag("ifid")
-    schema:addTag("mac")
-    schema:addMetric("num_talkers")
-    -- schema:addMetric("num_as_client")
-    -- schema:addMetric("num_as_server") 
-
-    -- ##############################################
-
-    schema = ts_utils.newSchema("mac:local_talkers_network_devices", {step=300, metrics_type=ts_utils.metrics.gauge} ) 
-    schema:addTag("ifid")
-    schema:addTag("mac")
-    schema:addMetric("num_router_or_switch")
-    schema:addMetric("num_wireless_network") 
-
-    -- ##############################################
-
-    schema = ts_utils.newSchema("mac:local_talkers_mobile_devices", {step=300, metrics_type=ts_utils.metrics.gauge} ) 
-    schema:addTag("ifid")
-    schema:addTag("mac")
-    schema:addMetric("num_laptop")
-    schema:addMetric("num_tablet") 
-    schema:addMetric("num_phone") 
-
-    -- ##############################################
-
-    schema = ts_utils.newSchema("mac:local_talkers_media_devices", {step=300, metrics_type=ts_utils.metrics.gauge} ) 
-    schema:addTag("ifid")
-    schema:addTag("mac")
-    schema:addMetric("num_video")
-    schema:addMetric("num_tv")
-    schema:addMetric("num_multimedia") 
-
-    -- ##############################################
-
-    schema = ts_utils.newSchema("mac:local_talkers_work_devices", {step=300, metrics_type=ts_utils.metrics.gauge} ) 
-    schema:addTag("ifid")
-    schema:addTag("mac")
-    schema:addMetric("num_computer")
-    schema:addMetric("num_printer") 
-    schema:addMetric("num_nas") 
-
-    -- ##############################################
-
-    schema = ts_utils.newSchema("mac:local_talkers_iot_devices", {step=300, metrics_type=ts_utils.metrics.gauge} ) 
-    schema:addTag("ifid")
-    schema:addTag("mac")
-    schema:addMetric("num_iot")
-
-    -- ##############################################
-
-    schema = ts_utils.newSchema("mac:local_talkers_unknow_devices", {step=300, metrics_type=ts_utils.metrics.gauge} ) 
-    schema:addTag("ifid")
-    schema:addTag("mac")
-    schema:addMetric("num_unknow")
-end
 -------------------------------------------------------
 -- HOST POOLS SCHEMAS
 -------------------------------------------------------
@@ -435,74 +374,13 @@ schema:addMetric("bytes_sent")
 schema:addMetric("bytes_rcvd")
 
 -- ##############################################
-
+--WIP
 schema = ts_utils.newSchema("host:dropbox_shares", {step=300, metrics_type=ts_utils.metrics.gauge})
 schema:addTag("ifid")
 schema:addTag("host")
 schema:addMetric("num_dropbox_shares")
 
-
 -- ##############################################
-
---
-
---WIP migrating ts from devices to host
--- if ntop.getPref("ntopng.prefs.is_arp_matrix_generation_enabled") then 
-
---     schema = ts_utils.newSchema("host:local_talkers", {step=300, metrics_type=ts_utils.metrics.gauge} ) 
---     schema:addTag("ifid")
---     schema:addTag("host")
---     schema:addMetric("num_talkers")
-
---     -- ##############################################
-
---     schema = ts_utils.newSchema("host:local_talkers_network_devices", {step=300, metrics_type=ts_utils.metrics.gauge} ) 
---     schema:addTag("ifid")
---     schema:addTag("host")
---     schema:addMetric("num_router_or_switch")
---     schema:addMetric("num_wireless_network") 
-
---     -- ##############################################
-
---     schema = ts_utils.newSchema("host:local_talkers_mobile_devices", {step=300, metrics_type=ts_utils.metrics.gauge} ) 
---     schema:addTag("ifid")
---     schema:addTag("host")
---     schema:addMetric("num_laptop")
---     schema:addMetric("num_tablet") 
---     schema:addMetric("num_phone") 
-
---     -- ##############################################
-
---     schema = ts_utils.newSchema("host:local_talkers_media_devices", {step=300, metrics_type=ts_utils.metrics.gauge} ) 
---     schema:addTag("ifid")
---     schema:addTag("host")
---     schema:addMetric("num_video")
---     schema:addMetric("num_tv")
---     schema:addMetric("num_multimedia") 
-
---     -- ##############################################
-
---     schema = ts_utils.newSchema("host:local_talkers_work_devices", {step=300, metrics_type=ts_utils.metrics.gauge} ) 
---     schema:addTag("ifid")
---     schema:addTag("host")
---     schema:addMetric("num_computer")
---     schema:addMetric("num_printer") 
---     schema:addMetric("num_nas") 
-
---     -- ##############################################
-
---     schema = ts_utils.newSchema("host:local_talkers_iot_devices", {step=300, metrics_type=ts_utils.metrics.gauge} ) 
---     schema:addTag("ifid")
---     schema:addTag("host")
---     schema:addMetric("num_iot")
-
---     -- ##############################################
-
---     schema = ts_utils.newSchema("host:local_talkers_unknow_devices", {step=300, metrics_type=ts_utils.metrics.gauge} ) 
---     schema:addTag("ifid")
---     schema:addTag("host")
---     schema:addMetric("num_unknow")
--- end
 
 -- NOTE: these are "virtual" schema, they do not correspond to actual timeseries
 schema = ts_utils.newSchema("local_senders", {step=300})

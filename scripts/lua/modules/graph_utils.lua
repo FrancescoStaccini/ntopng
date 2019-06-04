@@ -503,11 +503,15 @@ function printSeries(options, tags, start_time, base_url, params)
    end
 
 
-   -----------------WIP----------- //TODO: host_detail.lua don't work
-   --TODO: sistema dopo la correzione per farlo andare anche sugli host
+   -----------------WIP----------- 
+
+
+   --TODO:make it work for hosts --> "host_detail.lua"
    -- ARP Local Talkers
+
+
    if options.local_talkers then
-      local mac = ternary(tags.mac, tags.mac, options.device_timeseries_mac) --TEST: non sono sicuo
+      local mac = ternary(tags.mac, tags.mac, options.device_timeseries_mac) --TODO: more tests
       local schemas = getDeviceArpMatrixTimeseries(mac, tags)
    
       if not table.empty(schemas) then
@@ -519,6 +523,8 @@ function printSeries(options, tags, start_time, base_url, params)
          end
       end
   end
+
+
    ---------------------
 
 

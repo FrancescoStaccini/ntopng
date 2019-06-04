@@ -392,6 +392,7 @@ elseif(page == "historical") then
       mac = mac,
       category = _GET["category"],
    }
+   
    --WIP
    local am_ts = getDeviceArpMatrixTimeseries(tags.mac, tags)
 

@@ -504,12 +504,7 @@ function printSeries(options, tags, start_time, base_url, params)
 
 
    -----------------WIP----------- 
-
-
-   --TODO:make it work for hosts --> "host_detail.lua"
    -- ARP Local Talkers
-
-
    if options.local_talkers then
       local mac = ternary(tags.mac, tags.mac, options.device_timeseries_mac) --TODO: more tests
       local schemas = getDeviceArpMatrixTimeseries(mac, tags)
@@ -523,8 +518,6 @@ function printSeries(options, tags, start_time, base_url, params)
          end
       end
   end
-
-
    ---------------------
 
 

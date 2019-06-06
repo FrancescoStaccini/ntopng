@@ -43,13 +43,9 @@ end
 
 --WIP
 function ts_dump.l2_device_update_talkers_stats_rrds( when, devicename, device, ifstats, verbose, talkers)
-  io.write("- ")
   local tt = arp_matrix_utils.talkersTot(talkers)
-  io.write("[update talker] devicename= "..devicename.." tt: "..tt.."\n")
+
   if tt > 0 then 
-
-    --io.write("[update talker] devicename= "..devicename.." tt: "..tt.."\n")
-
     ts_utils.append("mac:local_talkers", {ifid=ifstats.id, mac=devicename,
                 num_talkers = tt,
                 },
@@ -465,10 +461,7 @@ function ts_dump.run_5min_dump(_ifname, ifstats, config, when, time_threshold, s
   end
 
   local dump_tstart = os.time()
-
-  
   local dumped_hosts = {}
-
 
   -- Save hosts stats (if enabled from the preferences)
   if (is_rrd_creation_enabled and (config.host_rrd_creation ~= "0")) or are_alerts_enabled then
@@ -516,19 +509,23 @@ function ts_dump.run_5min_dump(_ifname, ifstats, config, when, time_threshold, s
 
   if is_rrd_creation_enabled then
     if config.l2_device_rrd_creation ~= "0" then 
-      --WIP---
-      --TODO&NOTE if"talkers_table"is local don't work (looks empty on check)
+
+      --WIP outside the callback the heavy stuff
       if config.arp_matrix_timseries_rrd_creation then
+        arp_matrix_utils.loadSchemas()
         talkers_table = arp_matrix_utils.getLocalTalkersDeviceType()
+        arp_matrix_utils.dumpArpMatrix(_ifname)
       end
-      ----------  
+      ----------  ----------------------------------------------------
       local in_time = callback_utils.foreachDevice(_ifname, time_threshold, function (devicename, device)
         ts_dump.l2_device_update_stats_rrds(when, devicename, device, ifstats, verbose)
 
         if config.l2_device_ndpi_timeseries_creation == "per_category" then
           ts_dump.l2_device_update_categories_rrds(when, devicename, device, ifstats, verbose)
         end
-        ------------WIP---------------------------------------------
+
+
+        ---WIP inside the callback the particular stuff
         if config.arp_matrix_timseries_rrd_creation then
           local device_talkers = {}
           if talkers_table and talkers_table[devicename] then
@@ -536,10 +533,7 @@ function ts_dump.run_5min_dump(_ifname, ifstats, config, when, time_threshold, s
           end
           ts_dump.l2_device_update_talkers_stats_rrds( when, devicename, device, ifstats, verbose, device_talkers )
         end
-        -------------------------------------------------------------
-        --WIP: "arpmatrix dump" here
-
-        -----------------------------------------------------------------
+        -----------
       end)
 
       if not in_time then

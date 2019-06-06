@@ -196,7 +196,8 @@ end
 
 local json = require("dkjson")
 --print( json.encode(createStats(matrix), {indent = true} ) )
-print( json.encode( matrix, {indent = true} ) )
+--print( json.encode( matrix, {indent = true} ) )
+print( json.encode( interface.getStats(), {indent = true} ) )
 
 -- tprint(interface.getMacInfo("00:86:9C:77:5C:4C" ) )
 --print( json.encode( interface.getMacsInfo(), {indent = true}) )

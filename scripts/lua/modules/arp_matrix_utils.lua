@@ -6,6 +6,7 @@ local dirs = ntop.getDirs()
 package.path = dirs.installdir .. "/scripts/lua/modules/?.lua;" .. package.path
 require "lua_utils"
 local discover = require "discover_utils"
+local ts_utils = require "ts_utils_core"
 
 local arpMatrixModule = {}
 local debug = false
@@ -30,6 +31,34 @@ function arpMatrixModule.matrixWalk(callback)
         end
     end
     return t
+end
+
+--return the number of dumped element
+function arpMatrixModule.dumpArpMatrix(ifnm)
+    local matrix = interface.getArpStatsMatrixInfo()
+    if not matrix then return 0 end
+    local src_ip, dst_ip, src_mac, dst_mac, tot, id, ifn
+    local cont = 0
+
+    for _, m_elem in pairs(matrix) do
+        for i, stats in pairs(m_elem)do
+            tmp = split(i,"-")
+            src_ip = tmp[1]
+            dst_ip = tmp[2]
+            src_mac = stats["src_mac"]
+            dst_mac = stats["dst_mac"]
+
+            tot = stats["src2dst.requests"] + stats["src2dst.replies"] + stats["dst2src.requests"] + stats["dst2src.replies"]
+            id = src_ip.."-"..dst_ip.."-"..src_mac.."-"..dst_mac 
+            ifn = getInterfaceId(ifnm)
+    
+            ts_utils.append("host_pair:arp_communication", {ifid = ifn, protocol = "arp", id = id, num_packets = tot}, when, verbose)
+            cont = cont + 1
+
+            io.write(cont.." - if: ".. ifn .." id: "..id.." - "..tot.."\n")
+        end
+    end
+    return cont
 end
 
 --check if that host have sent some pkts
@@ -61,7 +90,7 @@ function addType(t, mac, ip)
     local typeName = "Unknown"
     local type = 0
 
-    if ip then 
+    if ip then --first "getHostInfo()". it seems to be more effective
         local hostInfo = interface.getHostInfo(ip)
         if hostInfo then type = hostInfo["devtype"] end
         if type then typeName = discover.devtype2string(type) end
@@ -136,8 +165,16 @@ function arpMatrixModule.talkersTot(t)
 end
 
 function arpMatrixModule.loadSchemas()
-    local ts_utils = require "ts_utils_core"
     local schema
+
+    schema = ts_utils.newSchema("host_pair:arp_communication", {step = 300, metrics_type=ts_utils.metrics.gauge})
+    schema:addTag("ifid")
+    schema:addTag("protocol")
+    schema:addTag("id")
+    schema:addMetric("num_packets")
+
+    -- ##############################################
+
 
     schema = ts_utils.newSchema("mac:local_talkers", {step=300, metrics_type=ts_utils.metrics.gauge} ) 
     schema:addTag("ifid")

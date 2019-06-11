@@ -1,6 +1,6 @@
 /*
  *
- * (C) 2013-19 - ntop.org
+ * (C) 2019 - ntop.org
  *
  *
  * This program is free software; you can redistribute it and/or modify
@@ -19,19 +19,32 @@
  *
  */
 
-#include "ntop_includes.h"
+#ifndef _PING_H_
+#define _PING_H_
 
-/* **************************************** */
+#ifndef WIN32
 
-NtopGlobals::NtopGlobals() {
-  start_time = time(NULL);
-  file_id = 0;
-  trace = new Trace();  
-  is_shutdown = shutdown_requested = false, do_decode_tunnels = true;
+class Ping {
+ private:
+  int pid;
+  int sd;
+  u_int8_t cnt;
+  bool running;
+  pthread_t resultPoller;
+  Mutex m;
+  std::map<u_int32_t /* IP */, float /* RTT */> results;
+  
+  u_int16_t checksum(void *b, int len);
+  float ms_timeval_diff(struct timeval *begin, struct timeval *end);
+  
+ public:
+  Ping();
+  ~Ping();
+  
+  int  ping(char *_addr);
+  void pollResults();
+  void collectResponses(lua_State* vm);    
 };
 
-/* **************************************** */
-
-NtopGlobals::~NtopGlobals() {
-  if(trace) { delete trace; trace = NULL; }
-};
+#endif /* WIN32    */
+#endif /* _PING_H_ */

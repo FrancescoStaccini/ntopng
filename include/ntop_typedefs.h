@@ -461,11 +461,11 @@ typedef struct {
   void *items[QUEUE_ITEMS];
 } spsc_queue_t;
 
-typedef struct {
-  char *key, *value;
+class StringCache {
+ public:
+  std::string value;
   time_t expire;
-  UT_hash_handle hh; /* makes this structure hashable */
-} StringCache_t;
+};
 
 PACK_ON
 
@@ -563,6 +563,7 @@ struct ntopngLuaContext {
   struct mg_connection *conn;
   AddressTree *allowedNets;
   NetworkInterface *iface;
+  Ping *ping;
 #ifndef HAVE_NEDGE
   SNMP *snmp;
 #endif
@@ -664,5 +665,10 @@ typedef struct dhcp_range {
   IpAddress first_ip;
   IpAddress last_ip;
 } dhcp_range;
+
+typedef struct cpu_load_stats {
+  uint64_t active;
+  uint64_t idle;
+} cpu_load_stats;
 
 #endif /* _NTOP_TYPEDEFS_H_ */

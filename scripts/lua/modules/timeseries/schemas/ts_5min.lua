@@ -200,14 +200,14 @@ schema:addMetric("bytes_rcvd")
 -- SNMP SCHEMAS
 -------------------------------------------------------
 
-schema = ts_utils.newSchema("snmp_if:traffic", {step=300, rrd_heartbeat=3000, rrd_fname="bytes"})
+schema = ts_utils.newSchema("snmp_if:traffic", {step=300, rrd_heartbeat=3000, rrd_fname="bytes", is_system_schema = true})
 schema:addTag("ifid")
 schema:addTag("device")
 schema:addTag("if_index")
 schema:addMetric("bytes_sent")
 schema:addMetric("bytes_rcvd")
 
-schema = ts_utils.newSchema("snmp_if:errors", {step=300, rrd_heartbeat=3000})
+schema = ts_utils.newSchema("snmp_if:errors", {step=300, rrd_heartbeat=3000, is_system_schema = true})
 schema:addTag("ifid")
 schema:addTag("device")
 schema:addTag("if_index")
@@ -300,7 +300,16 @@ schema:addMetric("replies_error_packets")
 
 --##############################################
 
-schema = ts_utils.newSchema("host:tcp_stats", {step = 300})
+schema = ts_utils.newSchema("host:tcp_rx_stats", {step = 300})
+schema:addTag("ifid")
+schema:addTag("host")
+schema:addMetric("retransmission_packets")
+schema:addMetric("out_of_order_packets")
+schema:addMetric("lost_packets")
+
+--##############################################
+
+schema = ts_utils.newSchema("host:tcp_tx_stats", {step = 300})
 schema:addTag("ifid")
 schema:addTag("host")
 schema:addMetric("retransmission_packets")
@@ -383,8 +392,8 @@ schema:addMetric("num_dropbox_shares")
 -- ##############################################
 
 -- NOTE: these are "virtual" schema, they do not correspond to actual timeseries
-schema = ts_utils.newSchema("local_senders", {step=300})
+schema = ts_utils.newSchema("local_senders", {step=300, is_system_schema = true})
 schema:addTag("ifid")
 
-schema = ts_utils.newSchema("local_receivers", {step=300})
+schema = ts_utils.newSchema("local_receivers", {step=300, is_system_schema = true})
 schema:addTag("ifid")

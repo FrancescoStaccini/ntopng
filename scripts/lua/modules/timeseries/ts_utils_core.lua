@@ -19,6 +19,7 @@ ts_utils.MAX_EXPORT_TIME = 60
 require "lua_trace"
 require "ntop_utils"
 
+local dirs = ntop.getDirs()
 package.path = dirs.installdir .. "/scripts/lua/modules/timeseries/drivers/?.lua;" .. package.path
 package.path = dirs.installdir .. "/scripts/lua/modules/timeseries/schemas/?.lua;" .. package.path
 package.path = dirs.installdir .. "/scripts/lua/modules/timeseries/custom/?.lua;" .. package.path
@@ -58,7 +59,7 @@ function ts_utils.getSchema(name)
   local schema = loaded_schemas[name]
 
   if schema and ts_utils.hasHighResolutionTs() then
-    if((schema.options.step == 300) and (not starts(schema.name, "snmp")) and (not starts(schema.name, "local_"))) then
+    if((schema.options.step == 300) and (schema.options.is_system_schema ~= true)) then
       schema.options.insertion_step = 60
       schema.options.step = 60
 
@@ -88,11 +89,16 @@ function ts_utils.getSchema(name)
 end
 
 function ts_utils.loadSchemas()
+  local system_scripts = require("system_scripts_utils")
+
   -- This should include all the available schemas
   require("ts_second")
   require("ts_minute")
   require("ts_5min")
   require("ts_hour")
+
+  -- Possibly load more timeseries schemas
+  system_scripts.getAdditionalTimeseries()
 
   if(ntop.exists(dirs.installdir .. "/scripts/lua/modules/timeseries/custom/ts_minute_custom.lua")) then
      require("ts_minute_custom")

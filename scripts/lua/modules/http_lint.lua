@@ -268,6 +268,12 @@ local function validateNdpiStatsMode(mode)
    return validateChoice(modes, mode)
 end
 
+local function validateCounterSince(mode)
+   local modes = {"actual", "absolute"}
+
+   return validateChoice(modes, mode)
+end
+
 local function validateSflowDistroMode(mode)
    local modes = {"host", "process", "user"}
 
@@ -1074,6 +1080,7 @@ local known_parameters = {
    ["ifid"]                    = validateInterface,             -- An ntopng interface ID
    ["iffilter"]                = validateIfFilter,              -- An interface ID or 'all'
    ["mode"]                    = validateMode,                  -- Remote or Local users
+   ["err_counters_since"]      = validateCounterSince,          -- Select actual or absolute counters
    ["country"]                 = validateCountry,               -- Country code
    ["flow_key"]                = validateNumber,                -- The ID of a flow hash
    ["pool"]                    = validateNumber,                -- A pool ID
@@ -1087,6 +1094,7 @@ local known_parameters = {
    ["alert_type"]              = validateNumber,                -- An alert type enum
    ["alert_severity"]          = validateNumber,                -- An alert severity enum
    ["entity"]                  = validateNumber,                -- An alert entity type
+   ["entity_excludes"]         = validateListOfTypeInline(validateNumber),
    ["asn"]                     = validateNumber,                -- An ASN number
    ["client_asn"]              = validateNumber,                -- A client ASN number
    ["server_asn"]              = validateNumber,                -- A server ASN number
@@ -1448,7 +1456,7 @@ local known_parameters = {
    ["operating_system"]        = validateNumber,
    ["action"]                  = validateSingleWord, -- generic
    ["ts_schema"]               = validateSingleWord,
-   ["ts_query"]                = validateListOfTypeInline(validateSingleWord),
+   ["ts_query"]                = validateListOfTypeInline(validateUnquoted),
    ["ts_compare"]              = validateZoom,
    ["detail_view"]             = validateSingleWord,
    ["initial_point"]           = validateBool,

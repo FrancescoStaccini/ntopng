@@ -144,6 +144,9 @@ LuaEngine::~LuaEngine() {
       if((ctx->iface != NULL) && ctx->live_capture.pcaphdr_sent)
 	ctx->iface->deregisterLiveCapture(ctx);
 
+      if(ctx->ping != NULL)
+	delete ctx->ping;
+      
       free(ctx);
     }
 
@@ -2445,15 +2448,44 @@ static bool is_table_empty(lua_State *L, int index) {
 
 /* ****************************************** */
 
-static inline int concat_table_fields(lua_State *L, int index, char *buf, int size) {
+/* NOTE: outbuf and orig buffers must not overlap */
+static inline void influx_escape_char(char *outbuf, int outlen, const char *orig, char to_escape) {
+  const char *pos;
+
+  while((pos = strchr(orig, to_escape)) != NULL) {
+    int to_copy = (pos - orig);
+
+    if((to_copy+3) > outlen) // +3: escape, to_replace, NULL
+      break;
+
+    memcpy(outbuf, orig, to_copy);
+    outbuf[to_copy] = '\\';
+    outbuf[to_copy+1] = to_escape;
+
+    outbuf += to_copy+2;
+    outlen -= to_copy+2;
+    orig = pos+1;
+  }
+
+  if(outlen > 0)
+    strncpy(outbuf, orig, outlen);
+
+  outbuf[outlen-1] = '\0';
+}
+
+static inline int influx_concat_table_fields(lua_State *L, int index, char *buf, int size) {
   bool first = true;
+  char val_buf[128];
 
   // table traversal from https://www.lua.org/ftp/refman-5.0.pdf
   lua_pushnil(L);
 
   while(lua_next(L, index) != 0) {
+    influx_escape_char(val_buf, sizeof(val_buf), lua_tostring(L, -1), ' ');
+
     int l = snprintf(buf, size, "%s%s=%s", first ? "" : ",",
-		     lua_tostring(L, -2), lua_tostring(L, -1));
+		     lua_tostring(L, -2), val_buf);
+
     buf += l;
     size -= l;
     first = false;
@@ -2466,8 +2498,9 @@ static inline int concat_table_fields(lua_State *L, int index, char *buf, int si
 
 /* ****************************************** */
 
+/* curl -i -XPOST "http://localhost:8086/write?db=ntopng" --data-binary 'profile:traffic,ifid=0,profile=a profile bytes=2506351 1559634840000000000' */
 static int ntop_append_influx_db(lua_State* vm) {
-  char data[256], *schema;
+  char data[512], *schema;
   int buflen = sizeof(data);
   bool rv = false;
   time_t tstamp;
@@ -2489,9 +2522,9 @@ static int ntop_append_influx_db(lua_State* vm) {
 
   // "iface:traffic,ifid=0 bytes=0 1539358699000000000\n"
   buflen -= snprintf(data, buflen, is_table_empty(vm, 3) ? "%s" : "%s,", schema);
-  buflen = concat_table_fields(vm, 3, data + sizeof(data) - buflen, buflen);
+  buflen = influx_concat_table_fields(vm, 3, data + sizeof(data) - buflen, buflen); // tags
   buflen -= snprintf(data + sizeof(data) - buflen, buflen, " ");
-  buflen = concat_table_fields(vm, 4, data + sizeof(data) - buflen, buflen);
+  buflen = influx_concat_table_fields(vm, 4, data + sizeof(data) - buflen, buflen); // metrics
   buflen -= snprintf(data + sizeof(data) - buflen, buflen, " %lu000000000\n", tstamp);
 
   if(ntop_interface && ntop_interface->getTSExporter()) {
@@ -2500,6 +2533,73 @@ static int ntop_append_influx_db(lua_State* vm) {
   }
 
   lua_pushboolean(vm, rv);
+  return(CONST_LUA_OK);
+}
+
+/* ****************************************** */
+
+static int ntop_inc_influx_exported_points(lua_State* vm) {
+  NetworkInterface *ntop_interface = getCurrentInterface(vm);
+  u_int32_t num_points;
+  bool rv = false;
+
+  ntop->getTrace()->traceEvent(TRACE_DEBUG, "%s() called", __FUNCTION__);
+
+  if(!ntop_interface)
+    return(CONST_LUA_ERROR);
+
+  if(ntop_lua_check(vm, __FUNCTION__, 1, LUA_TNUMBER) != CONST_LUA_OK) return(CONST_LUA_ERROR);
+  num_points = lua_tointeger(vm, 1);
+
+  if(ntop_interface && ntop_interface->getTSExporter()) {
+    ntop_interface->getTSExporter()->incNumExportedPoints(num_points);
+    rv = true;
+  }
+
+  lua_pushboolean(vm, rv);
+  return(CONST_LUA_OK);
+}
+
+/* ****************************************** */
+
+static int ntop_inc_influx_dropped_points(lua_State* vm) {
+  NetworkInterface *ntop_interface = getCurrentInterface(vm);
+  u_int32_t num_points;
+  bool rv = false;
+
+  ntop->getTrace()->traceEvent(TRACE_DEBUG, "%s() called", __FUNCTION__);
+
+  if(!ntop_interface)
+    return(CONST_LUA_ERROR);
+
+  if(ntop_lua_check(vm, __FUNCTION__, 1, LUA_TNUMBER) != CONST_LUA_OK) return(CONST_LUA_ERROR);
+  num_points = lua_tointeger(vm, 1);
+
+  if(ntop_interface && ntop_interface->getTSExporter()) {
+    ntop_interface->getTSExporter()->incNumDroppedPoints(num_points);
+    rv = true;
+  }
+
+  lua_pushboolean(vm, rv);
+  return(CONST_LUA_OK);
+}
+
+/* ****************************************** */
+
+static int ntop_get_influx_export_stats(lua_State* vm) {
+  NetworkInterface *ntop_interface = getCurrentInterface(vm);
+
+  ntop->getTrace()->traceEvent(TRACE_DEBUG, "%s() called", __FUNCTION__);
+
+  if(!ntop_interface)
+    return(CONST_LUA_ERROR);
+
+  if(ntop_interface && ntop_interface->getTSExporter()) {
+    lua_newtable(vm);
+    ntop_interface->getTSExporter()->lua(vm);
+  } else
+    lua_pushnil(vm);
+
   return(CONST_LUA_OK);
 }
 
@@ -4950,6 +5050,61 @@ static int ntop_get_prefs(lua_State* vm) {
 
 /* ****************************************** */
 
+static int ntop_ping_host(lua_State* vm) {
+  char *host;
+  
+  ntop->getTrace()->traceEvent(TRACE_DEBUG, "%s() called", __FUNCTION__);
+
+  if(ntop_lua_check(vm, __FUNCTION__, 1, LUA_TSTRING) != CONST_LUA_OK) return(CONST_LUA_PARAM_ERROR);
+  if((host = (char*)lua_tostring(vm, 1)) == NULL) return(CONST_LUA_PARAM_ERROR);
+
+  if(getLuaVMUservalue(vm, ping) == NULL) {
+    Ping *ping;
+
+    try {
+      #if !defined(__APPLE__) && !defined(WIN32) && !defined(HAVE_NEDGE)
+      if(Utils::gainWriteCapabilities() == -1)
+	ntop->getTrace()->traceEvent(TRACE_ERROR, "Unable to enable capabilities");
+#endif
+
+      ping = new Ping();
+
+#if !defined(__APPLE__) && !defined(WIN32) && !defined(HAVE_NEDGE)
+      Utils::dropWriteCapabilities();
+#endif
+    } catch(...) {
+      ntop->getTrace()->traceEvent(TRACE_ERROR, "Unable to create ping socket: are you root?");
+      ping = NULL;
+    }
+    
+    if(ping == NULL) {
+      lua_pushnil(vm);
+      return(CONST_LUA_PARAM_ERROR);
+    } else
+      getLuaVMUservalue(vm, ping) = ping;
+  }
+
+  getLuaVMUservalue(vm, ping)->ping(host);
+  
+  return(CONST_LUA_OK);
+}
+
+/* ****************************************** */
+
+static int ntop_collect_ping_results(lua_State* vm) {
+  ntop->getTrace()->traceEvent(TRACE_DEBUG, "%s() called", __FUNCTION__);
+
+  if(getLuaVMUservalue(vm, ping) == NULL) {
+    lua_pushnil(vm);
+    return(CONST_LUA_PARAM_ERROR);
+  } else {
+    getLuaVMUservalue(vm, ping)->collectResponses(vm);  
+    return(CONST_LUA_OK);
+  }
+}
+
+/* ****************************************** */
+
 static int ntop_get_nologin_username(lua_State* vm) {
   ntop->getTrace()->traceEvent(TRACE_DEBUG, "%s() called", __FUNCTION__);
 
@@ -6129,11 +6284,28 @@ static int ntop_get_uptime(lua_State* vm) {
 
 // ***API***
 static int ntop_system_host_stat(lua_State* vm) {
+  float cpu_load;
   ntop->getTrace()->traceEvent(TRACE_DEBUG, "%s() called", __FUNCTION__);
 
   lua_newtable(vm);
-  Utils::luaCpuLoad(vm);
+  if(ntop->getCpuLoad(&cpu_load)) lua_push_float_table_entry(vm, "cpu_load_percentage", cpu_load);
   Utils::luaMeminfo(vm);
+
+  return(CONST_LUA_OK);
+}
+
+/* ****************************************** */
+
+static int ntop_refresh_cpu_load(lua_State* vm) {
+  float cpu_load;
+  ntop->getTrace()->traceEvent(TRACE_DEBUG, "%s() called", __FUNCTION__);
+
+  ntop->refreshCpuLoad();
+
+  if(ntop->getCpuLoad(&cpu_load))
+    lua_pushnumber(vm, cpu_load);
+  else
+    lua_pushnil(vm);
 
   return(CONST_LUA_OK);
 }
@@ -8369,6 +8541,9 @@ static const luaL_Reg ntop_interface_reg[] = {
 
   /* InfluxDB */
   { "appendInfluxDB",                   ntop_append_influx_db                 },
+  { "incInfluxExportedPoints",          ntop_inc_influx_exported_points       },
+  { "incInfluxDroppedPoints",           ntop_inc_influx_dropped_points        },
+  { "getInfluxExportStats"  ,           ntop_get_influx_export_stats          },
 
 #ifdef NTOPNG_PRO
   { "resetPoolsQuotas",                 ntop_reset_pools_quotas               },
@@ -8458,6 +8633,7 @@ static const luaL_Reg ntop_reg[] = {
   { "dumpBinaryFile",   ntop_dump_binary_file },
   { "checkLicense",     ntop_check_license },
   { "systemHostStat",   ntop_system_host_stat },
+  { "refreshCpuLoad",   ntop_refresh_cpu_load },
   { "getCookieAttributes", ntop_get_cookie_attributes },
   { "isAllowedInterface",  ntop_is_allowed_interface },
   { "isAllowedNetwork",    ntop_is_allowed_network },
@@ -8568,8 +8744,12 @@ static const luaL_Reg ntop_reg[] = {
   { "rrd_tune",          ntop_rrd_tune  },
 
   /* Prefs */
-  { "getPrefs",         ntop_get_prefs },
+  { "getPrefs",          ntop_get_prefs },
 
+  /* Ping */
+  { "pingHost",             ntop_ping_host              },
+  { "collectPingResults",   ntop_collect_ping_results   },
+  
   /* HTTP utils */
   { "httpRedirect",         ntop_http_redirect          },
   { "getHttpPrefix",        ntop_http_get_prefix        },
@@ -8857,7 +9037,9 @@ static char* http_encode(char *str) {
 #endif
 
 /* ****************************************** */
+
 #ifdef NOT_USED
+
 void LuaEngine::purifyHTTPParameter(char *param) {
   char *ampersand;
   bool utf8_found = false;
@@ -8924,14 +9106,16 @@ void LuaEngine::purifyHTTPParameter(char *param) {
   }
 }
 #endif
+
 /* ****************************************** */
 
-void LuaEngine::setInterface(const char * user, char * const ifname, u_int16_t ifname_len, bool * const is_allowed) const {
+void LuaEngine::setInterface(const char * user, char * const ifname,
+			     u_int16_t ifname_len, bool * const is_allowed) const {
   NetworkInterface *iface = NULL;
   char key[CONST_MAX_LEN_REDIS_KEY];
   ifname[0] = '\0';
 
-  if(!user || user[0] == '\0')
+  if((user == NULL) || (user[0] == '\0'))
     user = NTOP_NOLOGIN_USER;
 
   if(is_allowed) *is_allowed = false;
@@ -8943,16 +9127,18 @@ void LuaEngine::setInterface(const char * user, char * const ifname, u_int16_t i
     /* If here is only one allowed interface for the user.
        The interface must exists otherwise we hould have prevented the login */
     if(is_allowed) *is_allowed = true;
-    ntop->getTrace()->traceEvent(TRACE_DEBUG, "Allowed interface found. [Interface: %s][user: %s]", ifname, user);
-
+    ntop->getTrace()->traceEvent(TRACE_DEBUG, "Allowed interface found. [Interface: %s][user: %s]",
+				 ifname, user);
   } else if(snprintf(key, sizeof(key), "ntopng.prefs.%s.ifname", user)
 	    && (ntop->getRedis()->get(key, ifname, ifname_len) < 0
-		|| !ntop->isExistingInterface(ifname))) {
+		|| (!ntop->isExistingInterface(ifname)))) {
     /* No allowed interface and no default (or not existing) set interface */
     snprintf(ifname, ifname_len, "%s",
 	     ntop->getFirstInterface()->get_name());
     ntop->getRedis()->set(key, ifname, 3600 /* 1h */);
-    ntop->getTrace()->traceEvent(TRACE_DEBUG, "No interface interface found. Using default. [Interface: %s][user: %s]", ifname, user);
+    ntop->getTrace()->traceEvent(TRACE_DEBUG,
+				 "No interface interface found. Using default. [Interface: %s][user: %s]",
+				 ifname, user);
   }
 
   if((iface = ntop->getNetworkInterface(ifname, NULL /* allowed user interface check already enforced */)) != NULL) {
@@ -9045,7 +9231,8 @@ bool LuaEngine::setParamsTable(lua_State* vm,
 
 int LuaEngine::handle_script_request(struct mg_connection *conn,
 				     const struct mg_request_info *request_info,
-				     char *script_path, bool *attack_attempt, const char *user,
+				     char *script_path, bool *attack_attempt,
+				     const char *user,
 				     const char *group, bool localuser) {
   NetworkInterface *iface = NULL;
   char buf[64], key[64], ifname[MAX_INTERFACE_NAME_LEN];
@@ -9078,7 +9265,9 @@ int LuaEngine::handle_script_request(struct mg_connection *conn,
       valid_csrf = 0;
 
     } else if(post_data_len > HTTP_MAX_POST_DATA_LEN - 1) {
-      ntop->getTrace()->traceEvent(TRACE_WARNING, "Too much data submitted with the form. [post_data_len: %u]", post_data_len);
+      ntop->getTrace()->traceEvent(TRACE_WARNING,
+				   "Too much data submitted with the form. [post_data_len: %u]",
+				   post_data_len);
       valid_csrf = 0;
     } else {
       post_data[post_data_len] = '\0';

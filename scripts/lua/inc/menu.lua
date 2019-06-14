@@ -425,7 +425,9 @@ if ntop.isEnterprise() and show_flowdevs then
 end
 
 if isAllowedSystemInterface() then
-   if active_page == "system" then
+   local system_scripts = require("system_scripts_utils")
+
+   if active_page == "system_stats" then
      print [[ <li class="dropdown active"> ]]
    else
      print [[ <li class="dropdown"> ]]
@@ -439,8 +441,8 @@ if isAllowedSystemInterface() then
 
    print[[<li><a href="]] print(ntop.getHttpPrefix()) print[[/lua/system_stats.lua">]] print(i18n("system_status")) print[[</li>]]
 
-   if(ts_utils.getDriverName() == "influxdb") then
-      print('<li><a href="'..ntop.getHttpPrefix()..'/lua/influxdb_stats.lua">') print("InfluxDB") print('</a></li>')
+   for _, entry in ipairs(system_scripts.getSystemMenuEntries()) do
+      print[[<li><a href="]] print(entry.url) print[[">]] print(entry.label) print[[</li>]]
    end
 
    if ntop.isEnterprise() then

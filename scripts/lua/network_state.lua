@@ -1,21 +1,33 @@
 --
--- (C) 2018 - ntop.org
+-- (C) 2019 - ntop.org
 --
 
 dirs = ntop.getDirs()
 package.path = dirs.installdir .. "/scripts/lua/?.lua;" .. package.path
 if((dirs.scriptdir ~= nil) and (dirs.scriptdir ~= "")) then package.path = dirs.scriptdir .. "/lua/modules/?.lua;" .. package.path end
-ignore_post_payload_parse = 1
+ignore_post_payload_parse = 1 à-- TODO: controlla se deve stgare anche qui o basta solo in google_assistant_utils.lua
 require "lua_utils"
 
 local network_state = {}
 local if_stats = interface.getStats()
 
+--[[
+TODO: rendi tutte le funzioni (ove possibile) a tempo, tipo "check_TCP_flow_goodput()". (magari un wrapper?)
+      però occhio in assistant_test.lua, se chiamo più funzioni il tempo massimo di esecuzione è la somma delle deadline.
+      Potrei passarlo come parametro, e ad ogni step riduco il valore, poi lo passerò come deadline alla fun successiva
+
+
+
+
+]]
+--TODO: documenta meglio le funzioni
+
 --------------------------------------------------------------------------------------------------------------
 
-function network_state.getUpTime()
-  return secondsToTime( ntop.getUpTime() )
-end  
+--TODO: la tolgo appena passa il test
+-- function network_state.getUpTime()
+--   return secondsToTime( ntop.getUpTime() )
+-- end  
 
 --return ndpi categoty table [ "category_name" = "bytes" ]
 function network_state.check_ndpi_categories()
@@ -43,7 +55,7 @@ function network_state.check_ndpi_table(i1, i2)
   return t
 end
 
-
+--return a table with name and volume-percentage for each ndpi traffic category
 function network_state.check_traffic_categories()
   local traffic = network_state.check_ndpi_categories()
   local tot = 1
@@ -57,7 +69,7 @@ function network_state.check_traffic_categories()
       table.insert( res, {name = i, perc = math.floor(( v / tot ) * 1000) / 10 } )
   end
 
-  function compare(a, b) return a.perc > b.perc end
+  local function compare(a, b) return a.perc > b.perc end
 
   table.sort( res, compare )
 
@@ -87,7 +99,7 @@ function network_state.check_top_application_protocol()
   for i,v in pairs(proto_app) do tot = tot + v[2] end
 
   
-  function compare(a,b) return a[2]>b[2] end
+  local function compare(a,b) return a[2]>b[2] end
   table.sort(proto_app, compare)
 
 
@@ -103,7 +115,7 @@ function network_state.check_top_application_protocol()
   return res
 end
 
---return table with some interface stats
+--return table with just some interface stats
 function network_state.check_ifstats_table()
   local t = {
     device_num = if_stats.stats.devices,
@@ -131,13 +143,12 @@ end
 --return respectively: state of goodput, number of total flow, total number of bad goodput flow
 function network_state.check_TCP_flow_goodput()
   local bad_gp_client, bad_gp_server, flow_tot, prbl = 0,0,0,0
-  local seen, deadline = 0, os.time() + 3000
+  local seen, deadline = 0, os.time() + 3000 --TODO: parametrizza la deadline (anche group_of?)
   local group_of = 5
 
   repeat
     hoinfo = interface.getHostsInfo(true, "column_", group_of)
     tot = hoinfo.numHosts
-
 
     for i,v in pairs( hoinfo["hosts"] ) do
       local afas, afac = hoinfo["hosts"][i]["active_flows.as_server"], hoinfo["hosts"][i]["active_flows.as_client"]
@@ -146,10 +157,8 @@ function network_state.check_TCP_flow_goodput()
       flow_tot = flow_tot + afac + afas
       bad_gp_client = bad_gp_client + bgc
       bad_gp_server = bad_gp_server + bgs
-  
     end 
     
-
     seen = seen + group_of
   until (seen < tot) or (os.time() > deadline)
 
@@ -212,18 +221,14 @@ function network_state.check_bad_hosts_and_app()
   end
 
   for i,v in pairs(res) do 
-
     if i == "Dangerous" then danger_flag = true end
-
     res[i] = { perc = math.floor( (res[i] / tot) * 1000 ) / 10, bytes = v }
-    
   end
 
   return res, blacklisted, danger_flag
 end
 
-
-
+--return a table with ndpi application name and traffic volume for each ndpi application with "Dangerous" breed 
 function network_state.check_dangerous_traffic()
   local res= {}
   local tot_bytes = 0
@@ -245,8 +250,10 @@ function network_state.check_dangerous_traffic()
   end
 end
 
-
 ------------------------ALERTS----------------------------
+--TODO: NOTIFICHE se possibile. Notificare almeno gli allarmi importanti
+--TODO: distingui/separa/etichetta gli allarmi engaged - released - di flusso...
+--TODO; di sicuro c'è da far capire bene: Soggetto, stato allarme, gravità, tipo. [VEDI APPUNTI ALERT] 
 
 require "alert_utils"
 
@@ -293,7 +300,7 @@ end
 function network_state.alerts_details()
   local engaged_alerts, past_alerts, flow_alerts = network_state.check_alerts() 
   local tmp_alerts, alerts = {}, {}
-  local limit= 3 --temporary limit, add effective selection criterion
+  local limit= 3 --temporary limit, add effective selection criterion (eg. text limit is 640 char )
 
   j = 0
   for i,v in pairs(engaged_alerts)  do
@@ -342,7 +349,7 @@ function network_state.alerts_details()
       Porta_Server  = srv_port,
       IP_Client     = cli_addr,
       Porta_Client  = cli_port,
-      JSON_info     = alert_json
+      JSON_info     = alert_json --sono necessarie le JSON INFO? 
     }
 
     table.insert( alerts, e )
@@ -357,6 +364,5 @@ function network_state.alerts_details()
 end
   
 ------------------------------------------------------
-
 
 return network_state

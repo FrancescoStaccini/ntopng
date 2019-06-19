@@ -519,7 +519,6 @@ function ts_dump.run_5min_dump(_ifname, ifstats, config, when, time_threshold, s
 
       --WIP outside the callback the heavy stuff
       if config.arp_matrix_timseries_rrd_creation then
-        arp_matrix_utils.loadSchemas()
         talkers_table = arp_matrix_utils.getLocalTalkersDeviceType()
         arp_matrix_utils.dumpArpMatrix(_ifname)
       end

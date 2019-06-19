@@ -126,10 +126,12 @@ function getPathFromIPv6(addr)
       ipv6[i] = string.format('%.4x', tonumber(p, 16) or 0)
    end
 
-   local i = 1
-   for _, p in pairsByKeys(suffix:split(":") or {suffix}, rev) do
-      ipv6[8 - i + 1] = string.format('%.4x', tonumber(p, 16) or 0)
-      i = i + 1
+   if not (prefix == ip) then 
+      local i = 1
+      for _, p in pairsByKeys(suffix:split(":") or {suffix}, rev) do
+         ipv6[8 - i + 1] = string.format('%.4x', tonumber(p, 16) or 0)
+         i = i + 1
+      end
    end
 
    local most_significant = {ipv6[1], ipv6[2], ipv6[3], ipv6[4]}
@@ -158,7 +160,9 @@ function getPathFromKey(key)
       local ipver = tskey_parts[2]
       return getPathFromMac(mac, "hosts/") .. "/" .. ipver
    elseif isIPv6(key) then
-      return getPathFromIPv6(key)
+      local ipv6Path = getPathFromIPv6(key)
+      io.write("\n[getPathFromKey()] [case isIPv6()] key: "..key .. " path: " ..  ipv6Path.."\n")
+      return ipv6Path
    elseif isMacAddress(key) then
       return getPathFromMac(key)
    end

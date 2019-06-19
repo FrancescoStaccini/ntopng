@@ -16,62 +16,6 @@ local discover =            require "discover_utils"
 local matrix = interface.getArpStatsMatrixInfo()
 
 
---[[   
-    per le serie temporali? che dati tengo? e come?
-    potrei anche "temporizzare" tutte le info sopra descritte cambiando l'ID (es <ip + timestamp> ),
-    ma occuperebbero MOLTO spazio
-
-    --però così una marea di info sono "duplicate" :( non posso mettere puntatori qua in lua; farla in C++?
-______________________________________________
-    es. struttura elemento tabella:
-    
-    > hostID (ip? mac?)
-        > MAC/IP
-        > tot talkers
-        > tot pkts sent
-        > tot pkts rvc
-        > freq tot
-            > tot req 
-                > snt
-                > snt freq
-                > rcv
-                > rvc freq
-            > tot rep 
-                > snt
-                > snt freq
-                > rcv
-                > rvc freq
-        > Talkers (list)
-            > hostID
-            > MAC
-            > country
-            > OS
-            > device type
-            > manufacturers
-            > pkts
-                > req 
-                    > snt
-                    > snt freq
-                    > rcv
-                    > rvc freq
-                > rep 
-                    > snt
-                    > snt freq
-                    > rcv
-                    > rvc freq
-
-____________________________________________
-
-
-]]
-
-local function in_if(cond, t, f)
-    if cond then 
-        return t
-    else
-        return f
-    end
-end 
 
 
 
@@ -109,10 +53,10 @@ local function createStats(matrix)
                         pkts_rcvd = stats["dst2src.requests"] + stats["dst2src.replies"],
                         talkers_num = 1,
 
-                        device_type = in_if( macInfo,  discover.devtype2string(macInfo["devtype"]), nil),
+                        device_type = ternary( macInfo,  discover.devtype2string(macInfo["devtype"]), nil),
                         --TODO: fun di utilità per l'OS
-                        OS = in_if(macInfo, macInfo["operatingSystem"], nil ),
-                        manufacturer = in_if(macInfo, macInfo["manufacturer"], nil ),
+                        OS = ternary(macInfo, macInfo["operatingSystem"], nil ),
+                        manufacturer = ternary(macInfo, macInfo["manufacturer"], nil ),
 
                         talkers = {}
                     }
@@ -144,7 +88,7 @@ local function createStats(matrix)
 
             if not t_res[dst_ip] then 
 
-                macInfo = in_if( dst_mac ~= "FF:FF:FF:FF:FF:FF", interface.getMacInfo(stats["dst_mac"]), nil )
+                macInfo = ternary( dst_mac ~= "FF:FF:FF:FF:FF:FF", interface.getMacInfo(stats["dst_mac"]), nil )
 
                 t_res[dst_ip] = {          -- nuovo elemento
 
@@ -153,9 +97,9 @@ local function createStats(matrix)
                         pkts_rcvd = stats["src2dst.requests"] + stats["src2dst.replies"],
                         pkts_snt = stats["dst2src.requests"] + stats["dst2src.replies"],
                         talkers_num = 1,
-                        device_type = in_if( macInfo,  discover.devtype2string(macInfo["devtype"]), nil),
-                        OS = in_if(macInfo, macInfo["operatingSystem"], nil ),--TODO: fun di utilità per l'OS
-                        manufacturer = in_if(macInfo, macInfo["manufacturer"], nil ),
+                        device_type = ternary( macInfo,  discover.devtype2string(macInfo["devtype"]), nil),
+                        OS = ternary(macInfo, macInfo["operatingSystem"], nil ),--TODO: fun di utilità per l'OS
+                        manufacturer = ternary(macInfo, macInfo["manufacturer"], nil ),
 
                         talkers = {}
                     }

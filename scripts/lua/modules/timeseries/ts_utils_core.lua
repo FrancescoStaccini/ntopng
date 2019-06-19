@@ -100,6 +100,12 @@ function ts_utils.loadSchemas()
   -- Possibly load more timeseries schemas
   system_scripts.getAdditionalTimeseries()
 
+  --WIP
+  if ntop.getPref("ntopng.prefs.is_arp_matrix_generation_enabled") then
+    local arp_matrix_utils = require "arp_matrix_utils"
+    arp_matrix_utils.loadSchemas()
+  end
+
   if(ntop.exists(dirs.installdir .. "/scripts/lua/modules/timeseries/custom/ts_minute_custom.lua")) then
      require("ts_minute_custom")
   end

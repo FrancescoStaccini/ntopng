@@ -1,5 +1,5 @@
 --
--- (C) 2018 - ntop.org
+-- (C) 2019 - ntop.org
 --
 
 dirs = ntop.getDirs()
@@ -13,6 +13,9 @@ local net_state = require "network_state"
 
 local response, request
 
+--NOTE: la parte di telegram è decisamente provvisoria, studia il modo per usare il bot senza fare hard-code del chat bot / id
+
+
 --[[
 see "ndpi_get_proto_breed_name( ... )" in ndpi_main.c for more info
 
@@ -23,7 +26,8 @@ NDPI_PROTOCOL_UNSAFE:                 "Unsafe"         /* Probably provides risk
 NDPI_PROTOCOL_POTENTIALLY_DANGEROUS:  "Dangerous"      /* Surely is dangerous (ex. Tor). Be prepared to troubles */
 NDPI_PROTOCOL_UNRATED:                "Unrated"        /* No idea, not implemented or impossible to classify */
 ]]--
----------------------------------LOCAL FUNCTIONS------------------------------------------
+
+---------------------------------UTILITY FUNCTIONS------------------------------------------
 
 local function translate_ndpi_breeds(table)
   local t = {}
@@ -47,7 +51,10 @@ local function are_app_and_hosts_good()
   local safe_text, score, text = "", 0, ""
 
   if ndpi_breeds == nil then
-    google.send("Non sono riuscito ad eseguire la richiesta")
+    --TODO:rifai, è pericoloso perché viene utilizzato anche per comporre frasi!
+    --google.send("Non sono riuscito ad eseguire la richiesta") 
+    return ""
+    --credo sia meglio ritornare stringa vuota, fai i test! (tipo vedi la handler_network_state())
   end
 
   if ndpi_breeds["Safe"] then
@@ -150,8 +157,8 @@ end
 -------------------------------------INTENTS HANDLER FUNCTIONS-------------------------------------------
 
 
-function handler_upTime()
-  local uptime, time = ntop.getUptime()
+local function handler_upTime()
+  local uptime, time = secondsToTime( ntop.getUpTime() )
   if uptime > 3600 then
     time = secondsToTime( uptime ) 
   else
@@ -162,7 +169,7 @@ function handler_upTime()
 end
 
 
-function handler_Network_State()
+local function handler_Network_State()
   local stats = net_state.check_ifstats_table()
   local alert_num, severity = net_state.check_num_alerts_and_severity()
   local alert_text = ""
@@ -182,7 +189,7 @@ function handler_Network_State()
     alert_text = "0 allarmi scattati\n"
   end
 
-  local app_host_good_text, b, danger = are_app_and_hosts_good()
+  local app_host_good_text, b, danger = are_app_and_hosts_good() --TODO: "b" a che serve? rimuovila in caso
 
   local text = "Rilevo:\n"..stats.device_num.." dispositivi collegati, "..stats.local_host_num..
   " host locali, "  ..stats.flow_num.." flussi attivi.\n".. alert_text.. app_host_good_text
@@ -202,7 +209,7 @@ function handler_Network_State()
 end
 
 
-function handler_network_state_communication()
+local function handler_network_state_communication()
   local stats, text = net_state.check_net_communication(),""
   local ctg, prc = net_state.check_top_traffic_application_protocol_categories()
 
@@ -222,7 +229,7 @@ function handler_network_state_communication()
 end
 
 
-function handler_traffic_app_info()
+local function handler_traffic_app_info()
   local stats = net_state.check_top_application_protocol()
   local text, top_num, j = "", 0, 1
   
@@ -262,7 +269,7 @@ function handler_traffic_app_info()
   google.send(text, display_text, nil, {"Sì","No"})
 end
 
-function handler_traffic_app_info_more_info()
+local function handler_traffic_app_info_more_info()
   local stats, text = net_state.check_top_application_protocol(), ""
   local if_0 = "< 1%; "
 
@@ -281,7 +288,7 @@ function handler_traffic_app_info_more_info()
 end
 
 
-function handler_device_info()
+local function handler_device_info()
   local info, devices_num = net_state.check_devices_type()
   local text2 = ""
   
@@ -301,7 +308,7 @@ function handler_device_info()
 end
 
 
-function handler_send_devices_info()
+local function handler_send_devices_info()
   local limit, text = request["parameters"]["number"], ""
   local discover = require "discover_utils"
   local callback = require "callback_utils"
@@ -338,8 +345,8 @@ function handler_send_devices_info()
 end
 
 
-function handler_suspicious_activity_more_info()
-  local ndpi_breeds, blacklisted_host_num, danger  = net_state.check_bad_hosts_and_app()
+local function handler_suspicious_activity_more_info()
+  local ndpi_breeds, blacklisted_host_num, danger = net_state.check_bad_hosts_and_app()
   local res = {}
   local text = ""
   local d_text = ""
@@ -405,13 +412,13 @@ function handler_suspicious_activity_more_info()
 end
 
 
-function handler_suspicious_activity()
+local function handler_suspicious_activity()
 
   google.send( are_app_and_hosts_good() ..  ". Vuoi saperne di più sulla sicurezza del traffico?", nil, nil, {"Sì", "No"} )
 end
 
 
-function local_remote_traffic()
+local function local_remote_traffic()
   local stats, text = net_state.check_net_communication(),""
 
   text = "il "..stats.prc_remote2local_traffic.."% del traffico è in entrata, il "..
@@ -420,7 +427,7 @@ function local_remote_traffic()
   return text
 end
 
-function flow_efficency()
+local function flow_efficency()
   local global_state, flow_tot, bad_gp = net_state.check_TCP_flow_goodput()
   local stats= net_state.check_net_communication()
 
@@ -447,7 +454,7 @@ function flow_efficency()
 end
 
 
-function handler_traffic_category()
+local function handler_traffic_category()
   local categories = net_state.check_traffic_categories()
   local text, d_text = "", ""
 
@@ -480,8 +487,8 @@ function handler_traffic_category()
   return text, d_text
 end
 
-
-function handler_network_state_communication_more_info()
+--TODO: rivedi, era stato pensato per accumulare info, ma in realtà non lo sta facendo! prende un solo parametro e non itera sugli altri
+local function handler_network_state_communication_more_info() 
   local param, text, display_text = request["parameters"]["Communication"], "Ops, ho un problema, prova a chiedermi altro", "Ops, ho un problema, prova a chiedermi altro"
   local v = param[1]
 
@@ -504,14 +511,14 @@ function handler_network_state_communication_more_info()
 end
 
 
-function handler_dangerous_communications_detected()
+local function handler_dangerous_communications_detected()
 
   local text, display_text = danger_app()
   google.send(text, display_text)
 end
 
 
-function handler_ntopng()
+local function handler_ntopng()
   local display_text = "Sono l'assistente vocale di ntopng"
   local speech_text = "Sono l'assistente vocale di n top n g, scopri di più visitando il sito!"
   local card_title = "ntopng: High-Speed Web-based Traffic Analysis and Flow Collection"
@@ -525,7 +532,7 @@ function handler_ntopng()
 end
 
 
-function handler_what_can_you_do()
+local function handler_what_can_you_do()
   local text = "Posso tenerti aggiornato sullo stato della tua rete, descriverti come vanno le comunicazioni, dirti chi è connesso in questo momento, informarti se ci sono attività sospette in corso, avviare una cattura di pacchetti e molto altro!"
   sugg = {
     "Come sta la rete",
@@ -542,7 +549,7 @@ function handler_what_can_you_do()
 end
 
 
-function handler_alert_more_info()
+local function handler_alert_more_info()
   local text, display_text = "",""
   local alerts = net_state.alerts_details()
 
@@ -575,7 +582,7 @@ function handler_alert_more_info()
   end
 end
 
-function handler_alert()
+local function handler_alert()
   local alert_num, severity = net_state.check_num_alerts_and_severity()
   local alert_text = ""
 
@@ -599,7 +606,7 @@ function handler_alert()
 end
 
 
-function handler_tcp_dump()
+local function handler_tcp_dump()
   local duration_amount, duration_unit = request.parameters.duration.amount, request.parameters.duration.unit
   --possible values of "unit": s - min - h - day
 
@@ -648,7 +655,7 @@ function handler_tcp_dump()
 end
 
 
-function handler_send_dump()
+local function handler_send_dump()
   local chat_id, bot_token = ntop.getCache("ntopng.prefs.telegram_chat_id"), ntop.getCache("ntopng.prefs.telegram_bot_token")
   io.write("token & id:"..bot_token .." - " .. chat_id )
 
@@ -689,7 +696,7 @@ elseif  request.intent_name == "Traffic_App_Info-More_Info" then response = hand
 elseif  request.intent_name == "UpTime" then response = handler_upTime()
 
 elseif  request.intent_name == "Devices_Info" then response = handler_device_info()
-elseif  request.intent_name == "Devices_Info - yes" then response = handler_send_devices_info()--*
+elseif  request.intent_name == "Devices_Info - yes" then response = handler_send_devices_info()
 
 elseif  request.intent_name == "Suspicious_Activity" then response = handler_suspicious_activity()
 elseif  request.intent_name == "Suspicious_Activity-More_Info" then response = handler_suspicious_activity_more_info()
@@ -708,5 +715,5 @@ elseif  request.intent_name == "alert_more_info" then response = handler_alert_m
 elseif  request.intent_name == "alert_from_network_state" then response = handler_alert_more_info()
 
 
-else response = google.send("Scusa, ma non ho capito bene, puoi ripetere?")
+else response = google.send("Scusa, ma non ho capito bene, puoi ripetere?") -- teoricamente questo caso non si pone
 end

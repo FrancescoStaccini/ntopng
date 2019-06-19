@@ -394,8 +394,11 @@ elseif(page == "historical") then
    }
    
    --WIP
-   local am_ts = getDeviceArpMatrixTimeseries(tags.mac, tags)
-
+   local am_ts = {}
+   if ntop.getPref("ntopng.prefs.is_arp_matrix_generation_enabled") then
+      am_ts = getDeviceArpMatrixTimeseries(tags.mac, tags)
+   end
+   
    drawGraphs(ifId, schema, tags, _GET["zoom"], url, selected_epoch, {
       top_categories = "top:mac:ndpi_categories",
       timeseries = table.merge({

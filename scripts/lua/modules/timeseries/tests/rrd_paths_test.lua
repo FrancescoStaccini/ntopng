@@ -16,6 +16,7 @@ local replacement_tag = "some_other_tag"
 local prefixes_to_skip = {
   test = true,
   mac = true,                 -- Collides with host, but a MAC address is different from an IP address
+  influxdb = true,
 }
 
 local suffixes_to_skip = {
@@ -60,7 +61,7 @@ function test_unique_paths(test)
     unique_paths[fpath] = schema.name
 
     -- double check changing the last tag
-    if #schema._tags >= 3 then
+    if #schema._tags >= 1 then
       local last_tag = schema._tags[#schema._tags]
       local tags2 = table.clone(tags1)
       tags2[last_tag] = replacement_tag

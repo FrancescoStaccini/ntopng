@@ -511,6 +511,7 @@
 #define CONST_ALERT_MSG_QUEUE                    "ntopng.alert_queue"
 #define CONST_ALERT_MAC_IP_QUEUE                 "ntopng.alert_mac_ip_queue"
 #define CONST_ALERT_OUTSIDE_DHCP_RANGE           "ntopng.alert_outside_dhcp_range_queue"
+#define CONST_ALERT_PERIODIC_ACTIVITY_QUEUE      "ntopng.periodic_activity_queue"
 #define CONST_ALERT_NFQ_FLUSHED                  "ntopng.alert_nfq_flushed_queue"
 #define CONST_ALERT_HOST_REMOTE_TO_REMOTE        "ntopng.alert_host_remote_to_remote"
 #define CONST_ALERT_BCAST_DOMAIN_TOO_LARGE_QUEUE "ntopng.alert_bcast_domain_too_large"
@@ -846,6 +847,7 @@
 #define STORE_MANAGER_MAX_KEY                20
 #define DEFAULT_GLOBAL_DNS                   ""
 #define DEFAULT_SAFE_SEARCH_DNS              "208.67.222.123" /* OpenDNS Family Shield */
+#define ALERTS_MANAGER_MAX_AGGR_SECS         300 /* Aggregate equal alerts if generated within this interval */
 #define ALERTS_MANAGER_MAX_ENTITY_ALERTS     1024
 #define ALERTS_MANAGER_MAX_FLOW_ALERTS       16384
 #define ALERTS_MANAGER_TABLE_NAME            "closed_alerts"
@@ -869,6 +871,7 @@
 #define SHUTDOWN_SCRIPT_PATH       "shutdown.lua"
 #define HOUSEKEEPING_SCRIPT_PATH   "housekeeping.lua"
 #define DISCOVER_SCRIPT_PATH       "discover.lua"
+#define TIMESERIES_SCRIPT_PATH     "timeseries.lua"
 #define UPGRADE_SCRIPT_PATH        "upgrade.lua"
 #define PINGER_SCRIPT_PATH         "pinger.lua"
 #define SECOND_SCRIPT_PATH         "second.lua"

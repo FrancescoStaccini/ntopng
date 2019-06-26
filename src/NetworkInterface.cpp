@@ -1826,7 +1826,7 @@ bool NetworkInterface::processPacket(u_int32_t bridge_iface_idx,
 	  char name[64];
 
 	  if(((payload[2] & 0x80) /* NetBIOS Response */ || ((payload[2] & 0x78) == 0x28 /* NetBIOS Registration */))
-	     && (ndpi_netbios_name_interpret((char*)&payload[12], name, sizeof(name)) > 0)
+	     && (ndpi_netbios_name_interpret((char*)&payload[14], name, sizeof(name)) > 0)
 	     && (!strstr(name, "__MSBROWSE__"))
 	     ) {
 
@@ -2987,7 +2987,7 @@ void NetworkInterface::periodicStatsUpdate() {
     } else
 #ifdef AGGREGATED_FLOW_DEBUG
       ntop->getTrace()->traceEvent(TRACE_NORMAL,
-				   "Aggregation in %i housekeeping cycles [housekeeping frequency: %i] [inter-aggregation housekeeping cycles: %i] ",
+				   "Aggregation in %i housekeeping cycles [housekeeping frequency: %i] [inter-aggregation housekeeping cycles: %i][num_items: %u]",
 				   nextFlowAggregation, ntop->getPrefs()->get_housekeeping_frequency(), FLOW_AGGREGATION_DURATION,
 				   aggregated_flows_hash->getCurrentSize());
 #endif
@@ -4465,14 +4465,14 @@ int NetworkInterface::sortFlows(u_int32_t *begin_slot,
 /* **************************************************** */
 
 int NetworkInterface::getFlows(lua_State* vm,
+			       u_int32_t *begin_slot,
+			       bool walk_all,
 			       AddressTree *allowed_hosts,
 			       Host *host,
 			       Paginator *p) {
   struct flowHostRetriever retriever;
   char sortColumn[32];
   DetailsLevel highDetails;
-  u_int32_t begin_slot = 0;
-  bool walk_all = true;
 
   if(p == NULL) {
     ntop->getTrace()->traceEvent(TRACE_WARNING, "Unable to return results with a NULL paginator");
@@ -4491,13 +4491,14 @@ int NetworkInterface::getFlows(lua_State* vm,
 
   disablePurge(true);
 
-  if(sortFlows(&begin_slot, walk_all, &retriever, allowed_hosts, host, p, sortColumn) < 0) {
+  if(sortFlows(begin_slot, walk_all, &retriever, allowed_hosts, host, p, sortColumn) < 0) {
     enablePurge(true);
     return -1;
   }
 
   lua_newtable(vm);
   lua_push_uint64_table_entry(vm, "numFlows", retriever.actNumEntries);
+  lua_push_uint64_table_entry(vm, "nextSlot", *begin_slot);
 
   lua_newtable(vm);
 

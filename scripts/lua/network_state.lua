@@ -5,7 +5,7 @@
 dirs = ntop.getDirs()
 package.path = dirs.installdir .. "/scripts/lua/?.lua;" .. package.path
 if((dirs.scriptdir ~= nil) and (dirs.scriptdir ~= "")) then package.path = dirs.scriptdir .. "/lua/modules/?.lua;" .. package.path end
-ignore_post_payload_parse = 1 à-- TODO: controlla se deve stgare anche qui o basta solo in google_assistant_utils.lua
+ignore_post_payload_parse = 1 -- TODO: controlla se deve stgare anche qui o basta solo in google_assistant_utils.lua
 require "lua_utils"
 
 local network_state = {}
@@ -15,9 +15,6 @@ local if_stats = interface.getStats()
 TODO: rendi tutte le funzioni (ove possibile) a tempo, tipo "check_TCP_flow_goodput()". (magari un wrapper?)
       però occhio in assistant_test.lua, se chiamo più funzioni il tempo massimo di esecuzione è la somma delle deadline.
       Potrei passarlo come parametro, e ad ogni step riduco il valore, poi lo passerò come deadline alla fun successiva
-
-
-
 
 ]]
 --TODO: documenta meglio le funzioni
@@ -40,7 +37,7 @@ function network_state.check_ndpi_categories()
   return t
 end
 
---makes the sum of "i1" and "i2" for each ndpi proto
+--makes the sum of "i1" and "i2" (keys of table elements) for each ndpi proto
 --return ndpi proto table [ "proto_name" = "i1 + i2" ]
 function network_state.check_ndpi_table(i1, i2)
   local t, ndpi_stats = {}, interface.getActiveFlowsStats() 
@@ -135,7 +132,6 @@ function network_state.check_devices_type()
   for i,v in pairs(interface.getMacDeviceTypes() ) do
     res[discover.devtype2string(i)] = v
   end 
-
 
   return res, if_stats.stats.devices
 end

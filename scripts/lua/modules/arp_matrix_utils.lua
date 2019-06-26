@@ -55,7 +55,7 @@ function arpMatrixModule.dumpArpMatrix(ifnm)
             ts_utils.append("host_pair:arp_communication", {ifid = ifn, protocol = "arp", id = id, num_packets = tot}, when, verbose)
             cont = cont + 1
 
-            io.write(cont.." - if: ".. ifn .." id: "..id.." - "..tot.."\n")
+            --io.write(cont.." - if: ".. ifn .." id: "..id.." - "..tot.."\n")
         end
     end
     return cont

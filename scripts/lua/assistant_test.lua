@@ -302,12 +302,13 @@ local function handler_device_info()
     text =  text .. "Tra cui ".. text2
   end
 
-  text = text .. ". Vuoi informazioni più dettagliate?"
+  text = text .. ". Vuoi informazioni più dettagliate? Altrimenti dimmi il nome, o l'indirizzo, di un dispositivo"
 
   google.send(text, text, true, {"Sì","No"})
 end
 
-
+--TODO: pagination for devices info, or
+--      redesign the dialog (use the device info fallback intent to retreive the addr/name of device)
 local function handler_send_devices_info()
   local limit, text = request["parameters"]["number"], ""
   local discover = require "discover_utils"
@@ -332,7 +333,7 @@ local function handler_send_devices_info()
     
   end
 
-  if limit >4 then 
+  if limit > 4 then  
     if (send_text_telegram(text) == 0) then
       google.send("Info inviate su Telegram")
     else
@@ -676,9 +677,135 @@ local function handler_send_dump()
     end
 
   else
-    google.send("Ops, non ho trovato il file. Sei sicuro di aver avviato la cattura prima?")
+    google.send("Ops, non ho trovato il file. Sei sicuro di aver avviato la cattura?")
   end
 end
+
+
+--WIP
+--TODO: controlla se: è addr/nome? se si allora mi da le info dettagliate su quel dispositivo
+local function handler_device_info_fallback()
+  local queryText = request.queryText
+  local text = "Non ho capito bene"
+  local info = interface.findHost(queryText)
+  local mac = nil
+
+  if queryText:find(" ") then 
+    --+ di una parola, non è un nome/indirizzo
+    --google.send suggerimenti + testo che invita ad usare i suggerimenti o come fare la richiesta
+    return 
+  end
+
+  for i,v in pairs(info) do
+    local host_info = interface.getHostInfo(i)
+
+    if host_info then
+      mac_info = interface.getMacInfo( host_info.mac )
+    end
+
+    if mac_info then break end
+  end
+
+  if mac_info then --isMacAddress(...) is in ntop.utils
+    text = ""
+    local ndpi_categories = net_state.check_ndpi_categories()
+    local total_bytes = 0
+
+    --note: in "mac_info" the sum of the ndpi_category.byte(rcvd/snt) =\= tot_byte(rcvd/snt). idk_y 
+    for _,b in pairs(ndpi_categories) do 
+      total_bytes = total_bytes + b
+    end
+
+
+    
+
+    -- for ii, vv in pairs(mac_info) do
+
+    --   text = text .. " | ".. ii .. " - ".. tostring(vv).."\n"
+
+
+    -- end
+    --text = 
+
+    -- local mac_info = interface.getMacInfo(info.mac)
+
+    -- if mac_info then 
+    --   text = "YEAH"
+    -- end
+
+    --TODO: build response
+
+  --elseif  then --interface.findHost(name/addr/something) if the host exist return a table with all the addr
+  
+
+  end
+
+  google.send(text)  
+end
+
+
+--[[
+  MAC INFO EXAMPLE
+
+    idea: "num_hosts:1" può essere il discriminante per poi fare il "interface.findHost(...)",
+    prendere i dati degli host e BAM, così posso esporre anche altro
+
+  {
+  "seen.last":1561537296,
+  "special_mac":false,
+  "throughput_bps":71.983856201172,
+  "location":"lan",
+  "arp_replies.rcvd":0,
+  "bytes.rcvd.anomaly_index":0,
+  "bytes.ndpi.unknown":0,
+  "packets.sent":112162,
+  "bytes.sent.anomaly_index":75,
+  "bytes.sent":6729720,
+  "last_throughput_bps":71.98420715332,
+  "bytes.rcvd":0,
+  "throughput_trend_bps_diff":-0.0003509521484375,
+  "num_hosts":1,
+  "arp_requests.sent":0,
+  "manufacturer":"ICANN, IANA Department",
+  "mac":"00:00:5E:00:01:61",
+  "fingerprint":"",
+  "packets.rcvd.anomaly_index":0,
+  "ndpi_categories":{
+    "Network":{
+      "category":14,
+      "bytes.sent":6699270,
+      "bytes":6700290,
+      "duration":97780,
+      "bytes.rcvd":1020
+    },
+    "Unspecified":{
+      "category":0,
+      "bytes.sent":654,
+      "bytes":1404,
+      "duration":5,
+      "bytes.rcvd":750
+    }
+  },
+  "source_mac":true,
+  "devtype":3,
+  "seen.first":1560506203,
+  "duration":1031094,
+  "arp_replies.sent":0,
+  "throughput_trend_pps":2,
+  "pool":0,
+  "ndpi":[],
+  "operatingSystem":0,
+  "packets.sent.anomaly_index":100,
+  "throughput_trend_bps":2,
+  "packets.rcvd":0,
+  "bridge_seen_iface_id":1,
+  "throughput_pps":1.1997309923172,
+  "last_throughput_pps":1.1997367143631,
+  "arp_requests.rcvd":0
+}
+
+]]
+
 
 ---------------------------------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------------------------------
@@ -713,6 +840,10 @@ elseif  request.intent_name == "send_dump" then response = handler_send_dump()
 elseif  request.intent_name == "alert" then response = handler_alert()
 elseif  request.intent_name == "alert_more_info" then response = handler_alert_more_info()
 elseif  request.intent_name == "alert_from_network_state" then response = handler_alert_more_info()
+
+  --WIP 
+elseif request.intent_name == "Devices_Info - fallback" then response = handler_device_info_fallback()
+
 
 
 else response = google.send("Scusa, ma non ho capito bene, puoi ripetere?") -- teoricamente questo caso non si pone

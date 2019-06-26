@@ -11,6 +11,7 @@ ts_utils.aggregation = ts_common.aggregation
 ts_utils.schema = require "ts_schema"
 ts_utils.getLastError = ts_common.getLastError
 ts_utils.getLastErrorMessage = ts_common.getLastErrorMessage
+ts_utils.custom_schemas = {}
 
 -- This is used in realtime charts to avoid querying recent data not written to
 -- the database yet.
@@ -99,7 +100,16 @@ function ts_utils.loadSchemas()
   require("ts_hour")
 
   -- Possibly load more timeseries schemas
-  system_scripts.getAdditionalTimeseries()
+  local menu_entries = system_scripts.getAdditionalTimeseries()
+
+  -- Possibly load custom schemas
+  -- It is necessary to load them here in order for custom schemas to
+  -- be available in rest/ts.lua
+  for _, entry in pairs(menu_entries) do
+    if((entry.schema ~= nil) and (entry.custom_schema ~= nil)) then
+      ts_utils.custom_schemas[entry.schema] = entry.custom_schema
+    end
+  end
 
   --WIP
   if ntop.getPref("ntopng.prefs.is_arp_matrix_generation_enabled") then

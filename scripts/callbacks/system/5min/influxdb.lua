@@ -4,6 +4,8 @@
 
 local ts_utils = require("ts_utils_core")
 
+local MAX_INFLUX_EXPORT_QUEUE_LEN = 30
+
 local probe = {
   name = "InfluxDB",
   description = "Monitors InfluxDB health and performance",
@@ -52,39 +54,60 @@ end
 -- ##############################################
 
 function probe.loadSchemas(ts_utils)
-  local influxdb = ts_utils.getQueryDriver()
   local schema
 
   -- The following metrics are built-in into influxdb
   schema = ts_utils.newSchema("influxdb:storage_size", {
-    label = i18n("system_stats.influxdb_storage", {dbname = influxdb.db}),
     influx_internal_query = get_storage_size_query,
     metrics_type = ts_utils.metrics.gauge, step = 10
   })
   schema:addMetric("disk_bytes")
 
   schema = ts_utils.newSchema("influxdb:memory_size", {
-    label = i18n("memory"), influx_internal_query = get_memory_size_query,
+    influx_internal_query = get_memory_size_query,
     metrics_type = ts_utils.metrics.gauge, step = 10
   })
   schema:addMetric("mem_bytes")
 
   schema = ts_utils.newSchema("influxdb:write_successes", {
-    label = i18n("system_stats.write_througput"), influx_internal_query = get_write_success_query,
+    influx_internal_query = get_write_success_query,
     metrics_type = ts_utils.metrics.counter, step = 10
   })
   schema:addMetric("points")
 
   schema = ts_utils.newSchema("influxdb:exported_points",
-    {label = i18n("system_stats.exported_points"), metrics_type = ts_utils.metrics.counter})
+    {metrics_type = ts_utils.metrics.counter})
   schema:addMetric("points")
 
-  schema = ts_utils.newSchema("influxdb:dropped_points",
-    {label = i18n("system_stats.dropped_points"), metrics_type = ts_utils.metrics.counter})
+  schema = ts_utils.newSchema("influxdb:dropped_points",{metrics_type = ts_utils.metrics.counter})
   schema:addMetric("points")
 
-    schema = ts_utils.newSchema("influxdb:rtt", {label = i18n("graphs.num_ms_rtt"), metrics_type = ts_utils.metrics.gauge})
+  schema = ts_utils.newSchema("influxdb:exports", {metrics_type = ts_utils.metrics.counter})
+  schema:addMetric("num_exports")
+
+  schema = ts_utils.newSchema("influxdb:rtt", {metrics_type = ts_utils.metrics.gauge})
   schema:addMetric("millis_rtt")
+end
+
+-- ##############################################
+
+function probe.getTimeseriesMenu(ts_utils)
+  local influxdb = ts_utils.getQueryDriver()
+
+  return {
+    {schema="influxdb:storage_size",                      label=i18n("traffic_recording.storage_utilization")},
+    {schema="influxdb:memory_size",                       label=i18n("about.ram_memory")},
+    {schema="influxdb:write_successes",                   label=i18n("system_stats.write_througput")},
+    {schema="influxdb:exports",                           label=i18n("system_stats.exports"), value_formatter = "fcounter_to_intval",},
+    {schema="custom:infludb_exported_vs_dropped_points",  label=i18n("system_stats.exported_vs_dropped_points"),
+      custom_schema = {
+        bases = {"influxdb:exported_points", "influxdb:dropped_points"},
+        types = {"area", "line"}, axis = {1,2},
+      },
+      metrics_labels = {i18n("system_stats.exported_points"), i18n("system_stats.dropped_points")},
+    },
+    {schema="influxdb:rtt",                               label=i18n("graphs.num_ms_rtt")},
+  }
 end
 
 -- ##############################################
@@ -92,24 +115,21 @@ end
 function probe.getExportStats()
   local points_exported = 0
   local points_dropped = 0
+  local exports = 0
   local ifnames = interface.getIfNames()
-  local old_ifname = ifname
+
+  local influxdb = ts_utils.getQueryDriver()
 
   for ifid, ifname in pairs(ifnames) do
-     interface.select(ifname)
-     local stats = interface.getInfluxExportStats()
-
-     if(stats ~= nil) then
-        points_exported = points_exported + stats.num_points_exported
-        points_dropped = points_dropped + stats.num_points_dropped
-     end
+     points_exported = points_exported + influxdb:get_exported_points(ifid)
+     points_dropped = points_dropped + influxdb:get_dropped_points(ifid)
+     exports = exports + influxdb:get_exports(ifid)
   end
-
-  interface.select(old_ifname)
 
   return {
     points_exported = points_exported,
-    points_dropped = points_dropped
+    points_dropped = points_dropped,
+    exports = exports,
   }
 end
 
@@ -128,11 +148,28 @@ end
 
 -- ##############################################
 
-function probe._exportStats(when, ts_utils)
+function probe._exportStats(when, ts_utils, influxdb)
   local stats = probe.getExportStats()
 
   ts_utils.append("influxdb:exported_points", {points = stats.points_exported}, when)
   ts_utils.append("influxdb:dropped_points", {points = stats.points_dropped}, when)
+  ts_utils.append("influxdb:exports", {num_exports = stats.exports}, when)
+end
+
+-- ##############################################
+
+function probe._checkExportQueueLen(when, ts_utils, influxdb)
+  local queue_len = influxdb.getExportQueueLength()
+
+  if(queue_len > MAX_INFLUX_EXPORT_QUEUE_LEN) then
+    local err_msg = i18n("alerts_dashboard.influxdb_queue_too_long_description",
+      {length = queue_len})
+
+    interface.storeAlert(alertEntity("influx_db"), influxdb.url,
+      alertType("influxdb_queue_too_long"), alertSeverity("error"), err_msg)
+  end
+
+  traceError(TRACE_INFO, TRACE_CONSOLE, string.format("InfluxDB export queue length: %u", queue_len))
 end
 
 -- ##############################################
@@ -140,7 +177,8 @@ end
 function probe.runTask(when, ts_utils)
   local influxdb = ts_utils.getQueryDriver()
 
-  probe._exportStats(when, ts_utils)
+  probe._exportStats(when, ts_utils, influxdb)
+  probe._checkExportQueueLen(when, ts_utils, influxdb)
   probe._measureRtt(when, ts_utils, influxdb)
 end
 

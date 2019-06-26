@@ -115,6 +115,12 @@ function system_scripts.runTask(task, when)
   local periodicity = task_to_periodicity[task]
   local default_schema_options = { step = periodicity, is_system_schema = true }
 
+  if(task ~= "second") then
+    -- Do not include this in the second script as it has a performance
+    -- impact of about 100ms
+    require("lua_utils")
+  end
+
   if(periodicity == nil) then
     return(false)
   end
@@ -152,8 +158,6 @@ end
 function system_scripts.getAdditionalTimeseries(module_filter)
   local old_new_schema_fn = ts_utils.newSchema
   local additional_ts = {}
-  local needs_label = false
-  local current_probe_label = nil
   local default_schema_options = nil
 
   ts_utils.newSchema = function(name, options)
@@ -161,25 +165,6 @@ function system_scripts.getAdditionalTimeseries(module_filter)
     if(schema == nil) then
       schema = old_new_schema_fn(name, table.merge(default_schema_options, options))
     end
-
-    if(options.label == nil) then
-      traceError(TRACE_ERROR, TRACE_CONSOLE, string.format("Missing schema label in schema '%s'", name))
-      return nil
-    end
-
-    if needs_label then
-      needs_label = false
-
-      additional_ts[#additional_ts + 1] = {
-        separator = 1,
-        label = current_probe_label,
-      }
-    end
-
-    additional_ts[#additional_ts + 1] = {
-      schema = name,
-      label = options.label,
-    }
 
     return schema
   end
@@ -195,10 +180,18 @@ function system_scripts.getAdditionalTimeseries(module_filter)
           (((module_filter == "system") and (probe.page_script == nil)) or
             (probe_name == module_filter) or
             (module_filter == nil))) then
-        needs_label = true
-        current_probe_label = probe.name or probe_name
-
         probe.loadSchemas(ts_utils)
+
+        if(probe.getTimeseriesMenu ~= nil) then
+          local menu = probe.getTimeseriesMenu(ts_utils) or {}
+
+          table.insert(menu, 1, {
+            separator = 1,
+            label = probe.name or probe_name,
+          })
+
+          additional_ts = table.merge(additional_ts, menu)
+        end
       end
     end
   end

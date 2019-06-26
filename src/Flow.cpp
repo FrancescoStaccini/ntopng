@@ -46,6 +46,7 @@ Flow::Flow(NetworkInterface *_iface,
     srv2cli_last_goodput_bytes = cli2srv_last_goodput_bytes = 0, good_ssl_hs = true,
     flow_alerted = flow_dropped_counts_increased = false, vrfId = 0;
 
+  idle_mark = false;
   detection_completed = false;
   ndpiDetectedProtocol = ndpiUnknownProtocol;
   doNotExpireBefore = iface->getTimeLastPktRcvd() + DONT_NOT_EXPIRE_BEFORE_SEC;
@@ -872,8 +873,10 @@ bool Flow::dumpFlow(bool dump_alert) {
     dumpFlowAlert();
   }
 
-  if(((cli2srv_packets - last_db_dump.cli2srv_packets) == 0)
-     && ((srv2cli_packets - last_db_dump.srv2cli_packets) == 0))
+  /* Check for bytes, and not for packets, as with nprobeagent
+     there are not packet counters, just bytes. */
+  if(((cli2srv_bytes - last_db_dump.cli2srv_bytes) == 0)
+     && ((srv2cli_bytes - last_db_dump.srv2cli_bytes) == 0))
       return(rc);
 
   if(ntop->getPrefs()->do_dump_flows()
@@ -995,9 +998,9 @@ void Flow::update_hosts_stats(struct timeval *tv, bool dump_alert) {
   Vlan *vl;
   NetworkStats *cli_network_stats;
 
-  if(isReadyToPurge()) {
+  if(isReadyToBeMarkedAsIdle()) {
     /* Marked as ready to be purged, will be purged by NetworkInterface::purgeIdleFlows */
-    set_to_purge(tv->tv_sec);
+    set_idle(tv->tv_sec);
   }
 
   if(check_tor && (ndpiDetectedProtocol.app_protocol == NDPI_PROTOCOL_SSL)) {
@@ -1287,7 +1290,7 @@ void Flow::update_hosts_stats(struct timeval *tv, bool dump_alert) {
 	if(top_bytes_thpt < bytes_thpt) top_bytes_thpt = bytes_thpt;
 	if(top_goodput_bytes_thpt < goodput_bytes_thpt) top_goodput_bytes_thpt = goodput_bytes_thpt;
 
-	if(!idle() /* set_to_purge() deals with low goodput flows when they become idle */
+	if(!idle() /* set_idle() deals with low goodput flows when they become idle */
 	   && iface->getIfType() != interface_type_ZMQ
 	   && protocol == IPPROTO_TCP
 	   && get_goodput_bytes() > 0
@@ -1921,7 +1924,7 @@ u_int32_t Flow::key(Host *_cli, u_int16_t _cli_port,
 
 /* *************************************** */
 
-bool Flow::isReadyToPurge() {
+bool Flow::isReadyToBeMarkedAsIdle() {
   if (ntop->getPrefs()->flushFlowsOnShutdown()
       && (ntop->getGlobals()->isShutdownRequested() || ntop->getGlobals()->isShutdown()))
     return(true);
@@ -2332,7 +2335,7 @@ void Flow::housekeep(time_t t) {
 #ifdef HAVE_NEDGE
   if(iface->getIfType() == interface_type_NETFILTER) {
     if(isNetfilterIdleFlow()) {
-      set_to_purge(iface->getTimeLastPktRcvd());
+      set_idle(iface->getTimeLastPktRcvd());
     }
   }
 #endif
@@ -3591,7 +3594,7 @@ FlowStatus Flow::getFlowStatus() {
 	      return status_ssl_certificate_mismatch;
 	  }
 	  break;
- 	}
+	}
 
 #ifndef HAVE_NEDGE
 	if(isIdle  && lowGoodput)  return status_slow_data_exchange;
@@ -3618,13 +3621,13 @@ FlowStatus Flow::getFlowStatus() {
       && cli_host->get_ip()->isNonEmptyUnicastAddress()
       && srv_host->get_ip()->isNonEmptyUnicastAddress()) {
 
-    if(! cli_host->isLocalHost() && 
+    if(! cli_host->isLocalHost() &&
        ! srv_host->isLocalHost())
       return status_remote_to_remote;
-
-    if(get_duration() > ntop->getPrefs()->get_longlived_flow_duration())
-      return status_longlived;
   }
+
+  if(isLongLived())
+    return status_longlived;
 
   if(cli_host && srv_host
      /* Assumes elephant flows are normal when the category is data transfer */
@@ -3659,23 +3662,29 @@ FlowStatus Flow::getFlowStatus() {
    return(status_flow_when_interface_alerted);
 #endif
 
-  if(protos.ssl.ssl_version && (protos.ssl.ssl_version < 0x303 /* TLSv1.2 */))
+  if(isSSL() && protos.ssl.ssl_version && (protos.ssl.ssl_version < 0x303 /* TLSv1.2 */))
     return(status_ssl_old_protocol_version);
   else if(protos.ssl.ja3.server_unsafe_cipher != ndpi_cipher_safe)
     return(status_ssl_unsafe_ciphers);
-  
+
   return(status_normal);
 }
 
 /* ***************************************************** */
 
-bool Flow::isTiny() {
+bool Flow::isTiny() const {
   //if((cli2srv_packets < 3) && (srv2cli_packets == 0))
   if((get_packets() <= ntop->getPrefs()->get_max_num_packets_per_tiny_flow())
      || (get_bytes() <= ntop->getPrefs()->get_max_num_bytes_per_tiny_flow()))
     return(true);
   else
     return(false);
+}
+
+/* ***************************************************** */
+
+bool Flow::isLongLived() const {
+  return ntop->getPrefs()->is_longlived_flow(this);
 }
 
 /* ***************************************************** */
@@ -3734,6 +3743,7 @@ void Flow::setPacketsBytes(time_t now, u_int32_t s2d_pkts, u_int32_t d2s_pkts,
 void Flow::setParsedeBPFInfo(const ParsedeBPF * const ebpf, bool src2dst_direction) {  
   bool client_process = true;
   ParsedeBPF *cur = NULL;
+  bool update_ok = true;
 
   if(!ebpf)
     return;
@@ -3751,12 +3761,26 @@ void Flow::setParsedeBPFInfo(const ParsedeBPF * const ebpf, bool src2dst_directi
     if(!cli_ebpf)
       cur = cli_ebpf = new (std::nothrow) ParsedeBPF(*ebpf);
     else
-      cli_ebpf->update(ebpf);
+      update_ok = cli_ebpf->update(ebpf);
   } else { /* server_process */
     if(!srv_ebpf)
       cur = srv_ebpf = new (std::nothrow) ParsedeBPF(*ebpf);
     else
-      srv_ebpf->update(ebpf);
+      update_ok = srv_ebpf->update(ebpf);
+  }
+
+  if(!update_ok) {
+    static bool warning_shown = false;
+    char *fbuf;
+    ssize_t fbuf_len = 512;
+
+    if(!warning_shown && (fbuf = (char*)malloc(fbuf_len))) {
+      ntop->getTrace()->traceEvent(TRACE_WARNING, "Identical flow seen across multiple containers? %s",
+				   print(fbuf, fbuf_len));
+
+      warning_shown = true;
+      free(fbuf);
+    }
   }
 
   if(cur && cur->container_info_set) {
@@ -3782,8 +3806,8 @@ void Flow::updateJA3() {
 
 /* ***************************************************** */
 
-/* Called when a flow is set_to_purge */
-void Flow::postFlowSetPurge(time_t t) {
+/* Called when a flow is set_idle */
+void Flow::postFlowSetIdle(time_t t) {
   /* not called from the datapath for flows, so it is only
      safe to touch low goodput uses */
   if(good_low_flow_detected) {

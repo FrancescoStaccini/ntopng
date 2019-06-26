@@ -73,31 +73,83 @@ print [[
 if(page == "overview") then
     print("<table class=\"table table-bordered table-striped\">\n")
 
-    print("<tr><th nowrap width='20%'>".. i18n("system_stats.influxdb_storage", {dbname = ts_utils.getQueryDriver().db}) .."</th><td><img class=\"influxdb-info-load\" border=0 src=".. ntop.getHttpPrefix() .. "/img/throbber.gif style=\"vertical-align:text-top;\" id=throbber><span id=\"influxdb-info-text\"></span></td></tr>\n")
-    print("<tr><th nowrap>".. i18n("memory") .."</th><td><img class=\"influxdb-info-load\" border=0 src=".. ntop.getHttpPrefix() .. "/img/throbber.gif style=\"vertical-align:text-top;\" id=throbber><span id=\"influxdb-info-memory\"></span></td></tr>\n")
+    print("<tr><th nowrap width='20%'>".. i18n("traffic_recording.storage_utilization") .."</th><td><img class=\"influxdb-info-load\" border=0 src=".. ntop.getHttpPrefix() .. "/img/throbber.gif style=\"vertical-align:text-top;\" id=throbber><span id=\"influxdb-info-text\"></span></td></tr>\n")
+    print("<tr><th nowrap>".. i18n("about.ram_memory") .."</th><td><img class=\"influxdb-info-load\" border=0 src=".. ntop.getHttpPrefix() .. "/img/throbber.gif style=\"vertical-align:text-top;\" id=throbber><span id=\"influxdb-info-memory\"></span></td></tr>\n")
 
     if(probe ~= nil) then
        local stats = probe.getExportStats()
-       print("<tr><th nowrap>".. i18n("system_stats.exported_points") .."</th><td>".. formatValue(stats.points_exported) .."</td></tr>\n")
-       print("<tr><th nowrap>".. i18n("system_stats.dropped_points") .."</th><td>".. formatValue(stats.points_dropped) .."</td></tr>\n")
+
+       print("<tr><th nowrap>".. i18n("system_stats.exports") .."</th><td><span id=\"influxdb-exports\">".. formatValue(stats.exports) .."</span></td></tr>\n")
+       print("<tr><th nowrap>".. i18n("system_stats.exported_points") .."</th><td><span id=\"influxdb-exported-points\">".. formatValue(stats.points_exported) .."</span></td></tr>\n")
+       print("<tr><th nowrap>".. i18n("system_stats.dropped_points") .."</th><td><span id=\"influxdb-dropped-points\">".. formatValue(stats.points_dropped) .."</span></td></tr>\n")
     end
 
-    print("<tr><th nowrap>".. i18n("system_stats.series_cardinality") .." <a href=\"https://docs.influxdata.com/influxdb/v1.7/concepts/glossary/#series-cardinality\"><i class='fa fa-external-link '></i></a></th><td><img class=\"influxdb-info-load\" border=0 src=".. ntop.getHttpPrefix() .. "/img/throbber.gif style=\"vertical-align:text-top;\" id=throbber><span id=\"influxdb-info-series\"></span></td></tr>\n")
+    print("<tr><th nowrap>".. i18n("system_stats.series_cardinality") .." <a href=\"https://docs.influxdata.com/influxdb/v1.7/concepts/glossary/#series-cardinality\"><i class='fa fa-external-link '></i></a></th><td><img class=\"influxdb-info-load\" border=0 src=".. ntop.getHttpPrefix() .. "/img/throbber.gif style=\"vertical-align:text-top;\" id=throbber><span id=\"influxdb-info-series\"></span><i id=\"high-cardinality-warn\" class=\"fa fa-warning fa-lg\" title=\"".. i18n("system_stats.high_series_cardinality") .."\" style=\"color: orange; display:none\"></td></i></tr>\n")
     print[[<script>
- $(function() {
-    $.get("]] print(ntop.getHttpPrefix()) print[[/lua/get_influxdb_info.lua", function(info) {
-       $(".influxdb-info-load").hide();
+
+ var last_db_bytes, last_memory, last_num_series;
+ var last_exported_points, last_dropped_points;
+ var last_exports;
+
+ function refreshInfluxStats() {
+  $.get("]] print(ntop.getHttpPrefix()) print[[/lua/get_influxdb_info.lua", function(info) {
+     $(".influxdb-info-load").hide();
+     if(typeof info.db_bytes !== "undefined") {
        $("#influxdb-info-text").html(bytesToVolume(info.db_bytes) + " ");
+       if(typeof last_db_bytes !== "undefined")
+         $("#influxdb-info-text").append(drawTrend(info.db_bytes, last_db_bytes));
+       last_db_bytes = info.db_bytes;
+     }
+     if(typeof info.memory !== "undefined") {
        $("#influxdb-info-memory").html(bytesToVolume(info.memory) + " ");
+       if(typeof last_memory !== "undefined")
+         $("#influxdb-info-memory").append(drawTrend(info.memory, last_memory));
+       last_memory = info.memory;
+     }
+     if(typeof info.num_series !== "undefined") {
        $("#influxdb-info-series").html(addCommas(info.num_series) + " ");
-    }).fail(function() {
-       $(".influxdb-info-load").hide();
-    });
- });
+       if(typeof last_num_series !== "undefined")
+         $("#influxdb-info-series").append(drawTrend(info.num_series, last_num_series));
+       last_num_series = info.num_series;
+     }
+     if(typeof info.points_exported !== "undefined") {
+       $("#influxdb-exported-points").html(addCommas(info.points_exported) + " ");
+       if(typeof last_exported_points !== "undefined")
+         $("#influxdb-exported-points").append(drawTrend(info.points_exported, last_exported_points));
+       last_exported_points = info.points_exported;
+     }
+     if(typeof info.points_dropped !== "undefined") {
+       $("#influxdb-dropped-points").html(addCommas(info.points_dropped) + " ");
+       if(typeof last_dropped_points !== "undefined")
+         $("#influxdb-dropped-points").append(drawTrend(info.points_dropped, last_dropped_points, " style=\"color: #B94A48;\""));
+       last_dropped_points = info.points_dropped;
+     }
+     if(typeof info.exports !== "undefined") {
+       $("#influxdb-exports").html(addCommas(info.exports) + " ");
+       if(typeof last_exports !== "undefined")
+         $("#influxdb-exports").append(drawTrend(info.exports, last_exports));
+       last_exports = info.exports;
+     }
+
+     if(info.num_series >= 950000)
+       $("#high-cardinality-warn").show();
+  }).fail(function() {
+     $(".influxdb-info-load").hide();
+  });
+ }
+
+setInterval(refreshInfluxStats, 5000);
+refreshInfluxStats();
  </script>
  ]]
+       print("</table>\n")
 
-   print("</table>\n")
+    print("<b>"..i18n("notes").."</b>")
+    print("<ul>")
+    print("<li>"..i18n("system_stats.note_what_is_a_point").."</li>")
+    print("<li>"..i18n("system_stats.note_total_exports").."</li>")
+    print("</ul>")
+
 elseif(page == "historical") then
    local schema = _GET["ts_schema"] or "influxdb:storage_size"
    local selected_epoch = _GET["epoch"] or ""

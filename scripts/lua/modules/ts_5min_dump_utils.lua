@@ -455,7 +455,7 @@ function ts_dump.run_5min_dump(_ifname, ifstats, config, when, time_threshold, s
   local is_rrd_creation_enabled = (not skip_ts) and (ntop.getPref("ntopng.prefs.ifid_"..ifstats.id..".interface_rrd_creation") ~= "false")
   local are_alerts_enabled = (not skip_alerts) and mustScanAlerts(ifstats)
   local num_processed_hosts = 0
-  local min_instant = when - (when % 60) - 60   --in this way the min_instant get a value less than the current time
+  local min_instant = when - (when % 60) - 60
 
   -- alerts stuff
   if are_alerts_enabled then
@@ -474,28 +474,28 @@ function ts_dump.run_5min_dump(_ifname, ifstats, config, when, time_threshold, s
   if (is_rrd_creation_enabled and (config.host_rrd_creation ~= "0")) or are_alerts_enabled then
     local in_time = callback_utils.foreachLocalRRDHost(_ifname, time_threshold, is_rrd_creation_enabled, function (hostname, host_ts)
       local host_key = host_ts.tskey
-      local previous_instant = 0 
-      
+
       if are_alerts_enabled then
         -- Check alerts first
         check_host_alerts(ifstats.id, working_status, hostname)
       end
 
       if(is_rrd_creation_enabled and (dumped_hosts[host_key] == nil)) then
-        if(host_ts.initial_point ~= nil) then--initial point è la tabella che contiene tutte le metriche e rispettivi valori
-          previous_instant = host_ts.initial_point_time
+        local min_host_instant = min_instant
+
+        if(host_ts.initial_point ~= nil) then
           -- Dump the first point
           ts_dump.host_update_rrd(host_ts.initial_point_time, host_key, host_ts.initial_point, ifstats, verbose, config)
+          min_host_instant = math.max(min_host_instant, host_ts.initial_point_time - 1)
         end
 
-        for _, host_point in ipairs(host_ts or {}) do 
-          local instant = host_point.instant --è il momento in cui è stato campionato il punto della serie temporale          
-          if (instant > min_instant) and (instant > previous_instant ) then 
-            previous_instant = instant
+        for _, host_point in ipairs(host_ts or {}) do
+          local instant = host_point.instant
+
+          if instant >= min_host_instant then
             ts_dump.host_update_rrd(instant, host_key, table.merge( host_point, {hostname = hostname}), ifstats, verbose, config) --wip: hostname added in "host_point" for the dropbpox share timeseries
           end
         end
-        previous_instant = 0 --TODO: controlla se è necessario metterle a 0, credo di no 
         -- mark the host as dumped
         dumped_hosts[host_key] = true
       end

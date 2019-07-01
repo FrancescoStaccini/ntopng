@@ -5,10 +5,7 @@ local host_pools_utils = require "host_pools_utils"
 local callback_utils = require "callback_utils"
 local ts_utils = require "ts_utils_core"
 local format_utils = require "format_utils"
-local arp_matrix_utils = require "arp_matrix_utils"
-local dropbox = require "dropbox_utils"
 require "ts_5min"
-
 
 local ts_custom
 if ntop.exists(dirs.installdir .. "/scripts/lua/modules/timeseries/custom/ts_5min_custom.lua") then
@@ -39,69 +36,6 @@ function ts_dump.l2_device_update_stats_rrds(when, devicename, device, ifstats, 
         when,verbose)
 end
 
--- ########################################################
-
---WIP
-function ts_dump.l2_device_update_talkers_stats_rrds( when, devicename, device, ifstats, verbose, talkers)
-  local tt = arp_matrix_utils.talkersTot(talkers)
-
-  if tt > 0 then 
-    ts_utils.append("mac:local_talkers", {ifid=ifstats.id, mac=devicename,
-                num_talkers = tt,
-                },
-          when, verbose)
-
-    if talkers["Router/Switch"] or talkers["Wireless Network"] then 
-      ts_utils.append("mac:local_talkers_network_devices", {ifid=ifstats.id, mac=devicename,
-                  num_router_or_switch = ternary(talkers["Router/Switch"], talkers["Router/Switch"], 0),
-                  num_wireless_network = ternary(talkers["Wireless Network"], talkers["Wireless Network"], 0),
-                  },
-      when, verbose)
-    end
-
-    if talkers["Laptop"] or talkers["Tablet"] or talkers["Phone"] then 
-      ts_utils.append("mac:local_talkers_mobile_devices", {ifid=ifstats.id, mac=devicename,
-                  num_laptop = ternary(talkers["Laptop"], talkers["Laptop"], 0),
-                  num_tablet = ternary(talkers["Tablet"], talkers["Tablet"], 0),
-                  num_phone = ternary(talkers["Phone"], talkers["Phone"], 0),
-                  },
-      when, verbose)
-    end
-
-    if talkers["Video"] or talkers["TV"] or talkers["Multimedia"] then 
-      ts_utils.append("mac:local_talkers_media_devices", {ifid=ifstats.id, mac=devicename,
-                  num_video = ternary(talkers["Video"], talkers["Video"], 0),
-                  num_tv = ternary(talkers["TV"], talkers["TV"], 0),
-                  num_multimedia = ternary(talkers["Multimedia"], talkers["Multimedia"], 0),
-                  },
-      when, verbose)
-    end
-
-    if talkers["NAS"] or talkers["Printer"] or talkers["Computer"] then 
-    ts_utils.append("mac:local_talkers_work_devices", {ifid=ifstats.id, mac=devicename,
-                num_nas = ternary(talkers["NAS"], talkers["NAS"], 0),
-                num_printer = ternary(talkers["Printer"], talkers["Printer"], 0),
-                num_computer = ternary(talkers["Computer"], talkers["Computer"], 0),
-                },
-    when, verbose)
-    end
-
-    if talkers["IoT"] then 
-      ts_utils.append("mac:local_talkers_iot_devices", {ifid=ifstats.id, mac=devicename,
-                  num_iot = talkers["IoT"],
-                  },
-      when, verbose)  
-    end
-
-    if talkers["Unknown"] then 
-    ts_utils.append("mac:local_talkers_unknow_devices", {ifid=ifstats.id, mac=devicename,
-                  num_unknow = talkers["Unknown"],
-                  },
-    when, verbose)
-    end
-
-  end
-end
 -- ########################################################
 
 function ts_dump.asn_update_rrds(when, ifstats, verbose)
@@ -247,9 +181,7 @@ function ts_dump.getConfig()
   config.country_rrd_creation = ntop.getPref("ntopng.prefs.country_rrd_creation")
   config.vlan_rrd_creation = ntop.getPref("ntopng.prefs.vlan_rrd_creation")
   config.tcp_retr_ooo_lost_rrd_creation = ntop.getPref("ntopng.prefs.tcp_retr_ooo_lost_rrd_creation")
-
-  --WIP
-  config.arp_matrix_timseries_rrd_creation = ntop.getPref("ntopng.prefs.is_arp_matrix_generation_enabled")
+  config.ndpi_flows_timeseries_creation = ntop.getPref("ntopng.prefs.ndpi_flows_rrd_creation")
 
   -- ########################################################
   -- Populate some defaults
@@ -384,15 +316,6 @@ function ts_dump.host_update_stats_rrds(when, hostname, host, ifstats, verbose)
     end
   end
 
-  --WIP dropbox shared file
-    local n = table.len( dropbox.getHostNamespaces(host.hostname) )
-    if n > 0 then 
-      ts_utils.append("host:dropbox_shares", {ifid=ifstats.id, host=hostname,
-            num_dropbox_shares = n}, when, verbose)
-      --io.write("{D-Shares dumped} host: ".. host.hostname.." ts key: "..hostname.." num: "..n.."\n")
-    end
-  ---------------------------------------------------------
-
   -- UDP breakdown
   ts_utils.append("host:udp_sent_unicast", {ifid=ifstats.id, host=hostname,
             bytes_sent_unicast=host["udpBytesSent.unicast"],
@@ -404,15 +327,23 @@ function ts_dump.host_update_stats_rrds(when, hostname, host, ifstats, verbose)
   end
 end
 
-function ts_dump.host_update_ndpi_rrds(when, hostname, host, ifstats, verbose)
+function ts_dump.host_update_ndpi_rrds(when, hostname, host, ifstats, verbose, config)
   -- nDPI Protocols
   for k, value in pairs(host["ndpi"] or {}) do
     local sep = string.find(value, "|")
+    local sep2 = string.find(value, "|", sep+1)
     local bytes_sent = string.sub(value, 1, sep-1)
-    local bytes_rcvd = string.sub(value, sep+1)
+    local bytes_rcvd = string.sub(value, sep+1, sep2-1)
 
     ts_utils.append("host:ndpi", {ifid=ifstats.id, host=hostname, protocol=k,
               bytes_sent=bytes_sent, bytes_rcvd=bytes_rcvd}, when, verbose)
+
+    if config.ndpi_flows_timeseries_creation == "1" then
+      local num_flows = string.sub(value, sep2+1)
+
+      ts_utils.append("host:ndpi_flows", {ifid=ifstats.id, host=hostname, protocol=k,
+              num_flows = num_flows}, when, verbose)
+    end
   end
 end
 
@@ -439,7 +370,7 @@ function ts_dump.host_update_rrd(when, hostname, host, ifstats, verbose, config)
     end
 
     if(config.host_ndpi_timeseries_creation == "per_protocol" or config.host_ndpi_timeseries_creation == "both") then
-      ts_dump.host_update_ndpi_rrds(when, hostname, host, ifstats, verbose)
+      ts_dump.host_update_ndpi_rrds(when, hostname, host, ifstats, verbose, config)
     end
 
     if(config.host_ndpi_timeseries_creation == "per_category" or config.host_ndpi_timeseries_creation == "both") then
@@ -493,20 +424,16 @@ function ts_dump.run_5min_dump(_ifname, ifstats, config, when, time_threshold, s
           local instant = host_point.instant
 
           if instant >= min_host_instant then
-            ts_dump.host_update_rrd(instant, host_key, table.merge( host_point, {hostname = hostname}), ifstats, verbose, config) --wip: hostname added in "host_point" for the dropbpox share timeseries
+            ts_dump.host_update_rrd(instant, host_key, host_point, ifstats, verbose, config)
           end
         end
+
         -- mark the host as dumped
         dumped_hosts[host_key] = true
       end
-      
+
       num_processed_hosts = num_processed_hosts + 1
     end)
-
-    if working_status ~= nil then
-      -- NOTE: must always finalize current working_status before returning
-      finalizeAlertsWorkingStatus(working_status)
-    end
 
     if not in_time then
        traceError(TRACE_ERROR, TRACE_CONSOLE, "[".. _ifname .." ]" .. i18n("error_rrd_cannot_complete_dump"))
@@ -517,31 +444,13 @@ function ts_dump.run_5min_dump(_ifname, ifstats, config, when, time_threshold, s
   --tprint("Dump of ".. num_processed_hosts .. " hosts: completed in " .. (os.time() - dump_tstart) .. " seconds")
 
   if is_rrd_creation_enabled then
-    if config.l2_device_rrd_creation ~= "0" then 
-
-      --WIP outside the callback the heavy stuff
-      if config.arp_matrix_timseries_rrd_creation then
-        talkers_table = arp_matrix_utils.getLocalTalkersDeviceType()
-        arp_matrix_utils.dumpArpMatrix(_ifname)
-      end
-      --end wip
-
+    if config.l2_device_rrd_creation ~= "0" then
       local in_time = callback_utils.foreachDevice(_ifname, time_threshold, function (devicename, device)
         ts_dump.l2_device_update_stats_rrds(when, devicename, device, ifstats, verbose)
 
         if config.l2_device_ndpi_timeseries_creation == "per_category" then
           ts_dump.l2_device_update_categories_rrds(when, devicename, device, ifstats, verbose)
         end
-
-        ---WIP inside the callback the particular stuff
-        if config.arp_matrix_timseries_rrd_creation then
-          local device_talkers = {}
-          if talkers_table and talkers_table[devicename] then
-            device_talkers = talkers_table[devicename].talkersDevices
-          end
-          ts_dump.l2_device_update_talkers_stats_rrds( when, devicename, device, ifstats, verbose, device_talkers )
-        end
-      --end wip-----------
       end)
 
       if not in_time then

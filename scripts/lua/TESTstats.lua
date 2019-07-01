@@ -18,7 +18,7 @@ local matrix = interface.getArpStatsMatrixInfo()
 
 
 
-
+--FUNZIONE TEST
 -- le voci della tabella commentate sono legate alla dim temporale
 -- si può facilmente modificare per creare stats solo per uno (o predeterminati) host
 local function createStats(matrix)
@@ -140,7 +140,7 @@ end
 
 local json = require("dkjson")
 --print( json.encode(createStats(matrix), {indent = true} ) )
---print( json.encode( matrix, {indent = true} ) )
+print( json.encode( interface.findHost("AC:9E:17:81:A1:76"), {indent = true} ) )
 --print( json.encode( interface.getStats(), {indent = true} ) )
 
 --tprint(interface.getMacInfo("00:00:5E:00:01:61" ) )
@@ -150,7 +150,7 @@ local json = require("dkjson")
 
 
 --print( json.encode( interface.getMacsInfo(), {indent = true}) )
-print( json.encode( interface.getMacInfo("00:00:5E:00:01:61" ), {indent = true}) )
+--print( json.encode( interface.getMacInfo("00:00:5E:00:01:61" ), {indent = true}) )
 
 
 --

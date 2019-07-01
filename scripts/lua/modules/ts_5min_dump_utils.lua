@@ -455,7 +455,7 @@ function ts_dump.run_5min_dump(_ifname, ifstats, config, when, time_threshold, s
   local is_rrd_creation_enabled = (not skip_ts) and (ntop.getPref("ntopng.prefs.ifid_"..ifstats.id..".interface_rrd_creation") ~= "false")
   local are_alerts_enabled = (not skip_alerts) and mustScanAlerts(ifstats)
   local num_processed_hosts = 0
-  local min_instant = when - (when % 60) - 60  --why -60!?!?!? why 60 ms before the current time?
+  local min_instant = when - (when % 60) - 60   --in this way the min_instant get a value less than the current time
 
   -- alerts stuff
   if are_alerts_enabled then
@@ -474,14 +474,8 @@ function ts_dump.run_5min_dump(_ifname, ifstats, config, when, time_threshold, s
   if (is_rrd_creation_enabled and (config.host_rrd_creation ~= "0")) or are_alerts_enabled then
     local in_time = callback_utils.foreachLocalRRDHost(_ifname, time_threshold, is_rrd_creation_enabled, function (hostname, host_ts)
       local host_key = host_ts.tskey
-      local call = 0--wip test
-      local verbose = true --wip test
-      local previous_instant = 0 --wip try
-
-      io.write("\n=_=_=_=_=_=_=_=_=_=_=_=_=_=_=_=_=_=_=_=_=_=_=_=_=_=_=_=_\n\n") --wip test
-      traceError(TRACE_NORMAL, TRACE_CONSOLE,"host_key: "..host_key.." - when: "..when .. " already dumped? ".. ternary(dumped_hosts[host_key], "Y", "N").."\n" )
-
-
+      local previous_instant = 0 
+      
       if are_alerts_enabled then
         -- Check alerts first
         check_host_alerts(ifstats.id, working_status, hostname)
@@ -491,55 +485,22 @@ function ts_dump.run_5min_dump(_ifname, ifstats, config, when, time_threshold, s
         if(host_ts.initial_point ~= nil) then--initial point è la tabella che contiene tutte le metriche e rispettivi valori
           previous_instant = host_ts.initial_point_time
           -- Dump the first point
-          traceError(TRACE_NORMAL, TRACE_CONSOLE,"first if. call = "..call.." [initial point: "..host_ts.initial_point_time.. " min_instant: "..min_instant.."]" )--wip
-          --io.write("host_ts.initial_point_time: "..host_ts.initial_point_time.." \n")
-          --  io.write("tprint of: host_ts.initial_point\n")
-          --  tprint(host_ts.initial_point) --tabella conten
-          io.write("(1)update_rrd started at: " ..os.time().. " \n")
           ts_dump.host_update_rrd(host_ts.initial_point_time, host_key, host_ts.initial_point, ifstats, verbose, config)
-          io.write("(1)update_rrd ended at: " ..os.time().. " \n")
-          call = call + 1--wip  test
         end
 
-        --BECCATO! VIENE CHIAMATO DUE VOLTE! (ma non sempre quando un host viene chiamato due volte da errore) pare sia legato al min_istant o comuque i tempi
-
-        local for_cycles = 0
         for _, host_point in ipairs(host_ts or {}) do 
-          for_cycles = for_cycles +1 
-          local instant = host_point.instant --è il momento in cui è stato campionato il punto della serie temporale
-          -- da grep: src/TimeseriesRingStatus.cpp:78:      lua_push_uint64_table_entry(vm, "instant", pt->timestamp)
-          
+          local instant = host_point.instant --è il momento in cui è stato campionato il punto della serie temporale          
           if (instant > min_instant) and (instant > previous_instant ) then 
             previous_instant = instant
-            io.write("\n") --wip test
-            traceError(TRACE_NORMAL, TRACE_CONSOLE,"second if. call = "..call .." [instant: "..instant .. " min_instant: "..min_instant.."]\n")--wip test
-            --io.write("instant: "..host_ts.initial_point_time.." \n")
-            --  io.write("tprint of: host_point")
-            --  tprint(host_ts.initial_point)
-            io.write("(2)update_rrd started at: " ..os.time().. " \n")
             ts_dump.host_update_rrd(instant, host_key, table.merge( host_point, {hostname = hostname}), ifstats, verbose, config) --wip: hostname added in "host_point" for the dropbpox share timeseries
-            io.write("(2)update_rrd ended at: " ..os.time().. " \n")
-
-
-            call = call+1--wip test
-          else
-
-            traceError(TRACE_NORMAL, TRACE_CONSOLE,"for cycles: "..for_cycles.. " - instant: "..instant .. " - min_instant: "..min_instant)--wip test
-            --in ora di test il flusso d'esecuzione non è arrivato in questo ramo
-
           end
         end
-        --TODO: controlla se è necessario metterle a 0, credo di no 
-        for_cycles = 0
-        previous_instant = 0
-        call = 0
-
+        previous_instant = 0 --TODO: controlla se è necessario metterle a 0, credo di no 
         -- mark the host as dumped
         dumped_hosts[host_key] = true
       end
       
       num_processed_hosts = num_processed_hosts + 1
-      
     end)
 
     if working_status ~= nil then
@@ -553,8 +514,7 @@ function ts_dump.run_5min_dump(_ifname, ifstats, config, when, time_threshold, s
     end
   end
 
-  --NOTE: this was commented
-  tprint("Dump of ".. num_processed_hosts .. " hosts: completed in " .. (os.time() - dump_tstart) .. " seconds")
+  --tprint("Dump of ".. num_processed_hosts .. " hosts: completed in " .. (os.time() - dump_tstart) .. " seconds")
 
   if is_rrd_creation_enabled then
     if config.l2_device_rrd_creation ~= "0" then 
@@ -564,14 +524,14 @@ function ts_dump.run_5min_dump(_ifname, ifstats, config, when, time_threshold, s
         talkers_table = arp_matrix_utils.getLocalTalkersDeviceType()
         arp_matrix_utils.dumpArpMatrix(_ifname)
       end
-      ----------  ----------------------------------------------------
+      --end wip
+
       local in_time = callback_utils.foreachDevice(_ifname, time_threshold, function (devicename, device)
         ts_dump.l2_device_update_stats_rrds(when, devicename, device, ifstats, verbose)
 
         if config.l2_device_ndpi_timeseries_creation == "per_category" then
           ts_dump.l2_device_update_categories_rrds(when, devicename, device, ifstats, verbose)
         end
-
 
         ---WIP inside the callback the particular stuff
         if config.arp_matrix_timseries_rrd_creation then
@@ -581,7 +541,7 @@ function ts_dump.run_5min_dump(_ifname, ifstats, config, when, time_threshold, s
           end
           ts_dump.l2_device_update_talkers_stats_rrds( when, devicename, device, ifstats, verbose, device_talkers )
         end
-        -----------
+      --end wip-----------
       end)
 
       if not in_time then

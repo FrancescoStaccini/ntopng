@@ -12,7 +12,7 @@ local network_state = {}
 local if_stats = interface.getStats()
 
 --[[
-TODO: rendi tutte le funzioni (ove possibile) a tempo, tipo "check_TCP_flow_goodput()". (magari un wrapper?)
+TODO: rendi tutte le funzioni (ove possibile, E SENSATO, tipo quando ciclo sui devices ) a tempo, tipo "check_TCP_flow_goodput()". (magari un wrapper?)
       però occhio in assistant_test.lua, se chiamo più funzioni il tempo massimo di esecuzione è la somma delle deadline.
       Potrei passarlo come parametro, e ad ogni step riduco il valore, poi lo passerò come deadline alla fun successiva
 
@@ -93,22 +93,18 @@ end
 function network_state.check_top_application_protocol()
   local t, tot = {}, 1
   local proto_app = network_state.check_ndpi_table("bytes.sent", "bytes.rcvd" )
+  local c, res = 0, {}
   for i,v in pairs(proto_app) do tot = tot + v[2] end
 
-  
   local function compare(a,b) return a[2]>b[2] end
   table.sort(proto_app, compare)
 
-
-  local c, res = 0, {}
-  
   for i,v in pairs(proto_app) do
-
       local prc = math.floor( (v[2] / tot) * 100 )
       c = c + 1
       res[c] = { v[1] , prc }
-
   end
+
   return res
 end
 

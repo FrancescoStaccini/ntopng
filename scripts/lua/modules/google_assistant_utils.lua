@@ -187,6 +187,7 @@ function ga_module.receive()
 
   ntop.setCache("session_id", info.session )
 
+  
   io.write("\n")
   io.write("DIALOGFLOW REQUEST")
   tprint(response)

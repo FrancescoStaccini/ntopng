@@ -683,19 +683,36 @@ end
 
 
 --WIP
---TODO: controlla se: è addr/nome? se si allora mi da le info dettagliate su quel dispositivo
-local function handler_device_info_fallback()
-  local queryText = request.queryText
-  local text = "Non ho capito bene"
-  local info = interface.findHost(queryText)
-  local mac = nil
+--IDEA: rich message response con link per i nomi delle appliczioni di sistema (es. MDNS)
 
-  if queryText:find(" ") then 
-    --+ di una parola, non è un nome/indirizzo
-    --google.send suggerimenti + testo che invita ad usare i suggerimenti o come fare la richiesta
-    return 
+--NOTE: dovrei ignorare il traffico MDNS? o traffico di altri protocolli di rete simili (forse tutto ciò che ha breed = Network?)
+
+--TODO: controlla se: è addr/nome? se si allora mi da le info dettagliate su quel dispositivo
+local function handler_device_info_fallback() --è una "finta fallback"
+  local queryText = request.queryText
+  local text = ""
+  local info = interface.findHost(queryText)
+  local total_bytes = 0
+  local mac = nil
+  local dev_type = "Sconosciuto"
+  local name = ""
+  local ndpi_table = {}
+  local ndpi_categories_table = {}
+  local name = "Sconosciuto"
+  local tmp = {}
+
+  --local os = "Sconosciuto"
+  local host_pool = nil
+  local goodput = nil
+  local num_alerts = 0
+
+  --controllo parametro
+  if queryText:find(" ") then -- + di una parola, non è un nome/indirizzo
+    google.send("Scusa ma non ho capitpo il nome del Dispositivo, puoi ripetere?")
+    return --todo: suggerimenti + testo che invita ad usare i suggerimenti o come fare la richiesta
   end
 
+  --ricerca mac/tabella info mac
   for i,v in pairs(info) do
     local host_info = interface.getHostInfo(i)
 
@@ -706,40 +723,96 @@ local function handler_device_info_fallback()
     if mac_info then break end
   end
 
-  if mac_info then --isMacAddress(...) is in ntop.utils
-    text = ""
-    local ndpi_categories = net_state.check_ndpi_categories()
-    local total_bytes = 0
 
-    --note: in "mac_info" the sum of the ndpi_category.byte(rcvd/snt) =\= tot_byte(rcvd/snt). idk_y 
-    for _,b in pairs(ndpi_categories) do 
-      total_bytes = total_bytes + b
+  if mac_info then 
+    local ndpi_categories = net_state.check_ndpi_categories()
+
+    if mac_info.devtype then 
+      local discover = require "discover_utils" 
+      dev_type = discover.devtype2string( mac_info.devtype )
     end
 
+    if ndpi_categories then --ndpi_categories
+      text = text .. "\nCategorie Traffico:\n"
+      --note: in "mac_info" the sum of the ndpi_category.byte(rcvd/snt) =\= tot_byte(rcvd/snt). idk_y 
+      for _,b in pairs(ndpi_categories) do 
+        total_bytes = total_bytes + b
+      end
+
+      --TODO: se non uso la "ndpi_categories_table" accorpa i cicli e fai subito la tabella come array per la sort
+      for i,v in pairs(ndpi_categories) do
+        ndpi_categories_table[i] = math.floor( (v / total_bytes) * 100 )
+      end
+
+      --creo array e ordino
+      for i,v in pairs(ndpi_categories_table) do table.insert(tmp, {name=i,perc=v} ) end
+      table.sort(tmp, function (a,b) return a["perc"] > b["perc"] end)
+
+      --stampo solo se perc>1, max 5 categorie
+      local c = 1
+      for _,v in pairs(tmp) do
+        if v.perc > 1 and c < 5 then --5 è un limite temporaneo
+          text = text .."- ".. v.name .. ": "..v.perc.."%\n" 
+        end
+        c = c + 1
+      end
+
+    end--END categories info
+
+    total_bytes = 0
 
     
+    --note: cos'è "childSafe boolean false" ?
+    --NOTE: ciclo perché potrebbero esserci più host per tale devices
+    for addr,v in pairs(info) do --ndpi
+      
+      local host_info = interface.getHostInfo(addr)
 
-    -- for ii, vv in pairs(mac_info) do
+      if host_info then 
+        --tprint(host_info)
 
-    --   text = text .. " | ".. ii .. " - ".. tostring(vv).."\n"
+        if host_info.name then 
+          if name and ( name:len() > host_info.name:len() ) then 
+          name = host_info.name
+          end
+        end
 
+        if host_info.ndpi then 
 
-    -- end
-    --text = 
+          for _,b in pairs(host_info.ndpi) do 
+            total_bytes = total_bytes + b["bytes.sent"] + b["bytes.rcvd"]
+          end
 
-    -- local mac_info = interface.getMacInfo(info.mac)
+          for ii, vv in pairs(host_info.ndpi) do
+            --local prc = math.floor( ( (vv["bytes.sent"] + vv["bytes.rcvd"]) / total_bytes ) * 100 )
+            ndpi_table[ii] = (ndpi_table[ii] or 0) + vv["bytes.sent"] + vv["bytes.rcvd"]
+          end
+        end--END ndpi
 
-    -- if mac_info then 
-    --   text = "YEAH"
-    -- end
+        io.write("end host -----------------------------------------------------------------------------")
+      end--END host_info
+    end--END for-host_info
 
-    --TODO: build response
+    tmp = {}
+    for i,v in pairs(ndpi_table) do table.insert(tmp, {name=i,perc=v} ) end
+    table.sort(tmp, function (a,b) return a["perc"] > b["perc"] end)
 
-  --elseif  then --interface.findHost(name/addr/something) if the host exist return a table with all the addr
-  
+    text = text .. "\nApplicazioni:\n"
+
+    --stampo solo se perc>1, max 5 app
+    local c = 1
+    for _,v in pairs(tmp) do
+      local perc = math.floor( (v.perc / total_bytes) * 100 )
+      if perc > 1 and c < 5 then --5 è un limite temporaneo
+        text = text .."- ".. v.name .. ": "..perc.."%\n" 
+      end
+      c = c + 1
+    end
 
   end
 
+  --metto nome e tipo in cima
+  text = name .. " - "..dev_type .. "\n"..text
   google.send(text)  
 end
 
@@ -748,7 +821,7 @@ end
   MAC INFO EXAMPLE
 
     idea: "num_hosts:1" può essere il discriminante per poi fare il "interface.findHost(...)",
-    prendere i dati degli host e BAM, così posso esporre anche altro
+    prendere i dati degli host e BAM, così posso esporre anche altro (tipo le applicazioni, ecc.)
 
   {
   "seen.last":1561537296,
@@ -803,6 +876,359 @@ end
   "last_throughput_pps":1.1997367143631,
   "arp_requests.rcvd":0
 }
+
+
+HOST INFO
+table
+seen.first number 1560506203
+throughput_trend_bps_diff number 0.0
+devtype number 3
+bytes.sent.anomaly_index number 67
+udpBytesSent.unicast number 0
+active_flows.as_client number 1
+icmp.bytes.rcvd number 0
+systemhost boolean false
+unreachable_flows.as_server number 0
+flows.as_server number 507
+throughput_trend_pps number 3
+name string toprak
+icmp.bytes.sent.anomaly_index number 0
+udp.packets.sent number 572
+bytes.ndpi.unknown number 55708
+throughput_bps number 0.0
+total_alerts number 468
+other_ip.packets.sent number 0
+packets.sent.anomaly_index number 0
+local_network_name string 146.48.96.0/22
+local_network_id number 2
+ssl_fingerprint table
+longitude number 12.109700202942
+pktStats.sent table
+pktStats.sent.upTo256 number 254
+pktStats.sent.upTo1518 number 76
+pktStats.sent.upTo128 number 186
+pktStats.sent.finack number 0
+pktStats.sent.above9000 number 0
+pktStats.sent.upTo2500 number 0
+pktStats.sent.rst number 0
+pktStats.sent.synack number 0
+pktStats.sent.syn number 0
+pktStats.sent.upTo512 number 31
+pktStats.sent.upTo9000 number 0
+pktStats.sent.upTo1024 number 20
+pktStats.sent.upTo6500 number 0
+pktStats.sent.upTo64 number 5
+has_dropbox_shares boolean false
+duration number 1046702
+latitude number 43.147899627686
+city string 
+low_goodput_flows.as_client.anomaly_index number 0
+sites.old string { }
+udp.packets.rcvd number 1
+operatingSystem number 0
+low_goodput_flows.as_client number 0
+low_goodput_flows.as_server.anomaly_index number 0
+num_alerts number 0
+tcp.bytes.rcvd number 1860
+seen.last number 1561552904
+asname string Consortium GARR
+anomalous_flows.as_server number 481
+other_ip.bytes.rcvd.anomaly_index number 0
+packets.rcvd number 571
+os string 
+total_flows.as_client number 661
+country string IT
+udp.bytes.sent number 193155
+names table
+names.dhcp string toprak
+names.mdns string toprak
+is_multicast boolean false
+throughput_trend_bps number 3
+broadcast_domain_host boolean true
+drop_all_host_traffic boolean false
+tcp.bytes.rcvd.anomaly_index number 80
+http table
+http.receiver table
+http.receiver.response table
+http.receiver.response.num_2xx number 0
+http.receiver.response.num_5xx number 0
+http.receiver.response.num_1xx number 0
+http.receiver.response.num_3xx number 0
+http.receiver.response.total number 0
+http.receiver.response.num_4xx number 0
+http.receiver.query table
+http.receiver.query.num_post number 0
+http.receiver.query.num_get number 0
+http.receiver.query.num_other number 0
+http.receiver.query.num_put number 0
+http.receiver.query.total number 0
+http.receiver.query.num_head number 0
+http.receiver.rate table
+http.receiver.rate.response table
+http.receiver.rate.response.1xx number 0
+http.receiver.rate.response.2xx number 0
+http.receiver.rate.response.3xx number 0
+http.receiver.rate.response.4xx number 0
+http.receiver.rate.response.5xx number 0
+http.receiver.rate.query table
+http.receiver.rate.query.put number 0
+http.receiver.rate.query.other number 0
+http.receiver.rate.query.get number 0
+http.receiver.rate.query.post number 0
+http.receiver.rate.query.head number 0
+http.sender table
+http.sender.response table
+http.sender.response.num_2xx number 0
+http.sender.response.num_5xx number 0
+http.sender.response.num_1xx number 0
+http.sender.response.num_3xx number 0
+http.sender.response.total number 0
+http.sender.response.num_4xx number 0
+http.sender.rate table
+http.sender.rate.response table
+http.sender.rate.response.1xx number 0
+http.sender.rate.response.2xx number 0
+http.sender.rate.response.3xx number 0
+http.sender.rate.response.4xx number 0
+http.sender.rate.response.5xx number 0
+http.sender.rate.query table
+http.sender.rate.query.put number 0
+http.sender.rate.query.other number 0
+http.sender.rate.query.get number 0
+http.sender.rate.query.post number 0
+http.sender.rate.query.head number 0
+http.sender.query table
+http.sender.query.num_post number 0
+http.sender.query.num_get number 0
+http.sender.query.num_other number 0
+http.sender.query.num_put number 0
+http.sender.query.total number 0
+http.sender.query.num_head number 0
+http.virtual_hosts table
+sites string { }
+dns table
+dns.rcvd table
+dns.rcvd.num_replies_ok number 0
+dns.rcvd.num_queries number 0
+dns.rcvd.queries table
+dns.rcvd.queries.num_aaaa number 0
+dns.rcvd.queries.num_any number 0
+dns.rcvd.queries.num_soa number 0
+dns.rcvd.queries.num_txt number 0
+dns.rcvd.queries.num_ptr number 0
+dns.rcvd.queries.num_a number 0
+dns.rcvd.queries.num_other number 0
+dns.rcvd.queries.num_mx number 0
+dns.rcvd.queries.num_cname number 0
+dns.rcvd.queries.num_ns number 0
+dns.rcvd.num_replies_error number 0
+dns.sent table
+dns.sent.num_replies_ok number 0
+dns.sent.num_queries number 0
+dns.sent.queries table
+dns.sent.queries.num_aaaa number 0
+dns.sent.queries.num_any number 0
+dns.sent.queries.num_soa number 0
+dns.sent.queries.num_txt number 0
+dns.sent.queries.num_ptr number 0
+dns.sent.queries.num_a number 0
+dns.sent.queries.num_other number 0
+dns.sent.queries.num_mx number 0
+dns.sent.queries.num_cname number 0
+dns.sent.queries.num_ns number 0
+dns.sent.num_replies_error number 0
+host_pool_id number 0
+tskey string 28:D2:44:73:AC:10_v4
+total_activity_time number 20735
+udpBytesSent.non_unicast number 1529597
+tcp.packets.sent number 0
+icmp.bytes.sent number 0
+last_throughput_pps number 0.0
+other_ip.packets.rcvd number 0
+other_ip.bytes.sent number 0
+vlan number 0
+bytes.sent number 1532259
+icmp.packets.rcvd number 0
+icmp.packets.sent number 0
+udp.bytes.rcvd number 95
+unreachable_flows.as_client number 7
+low_goodput_flows.as_server number 0
+continent string EU
+tcp.bytes.sent number 0
+anomalous_flows.as_client number 0
+hiddenFromTop boolean false
+tcp.packets.rcvd number 31
+tcp.bytes.sent.anomaly_index number 0
+dhcpHost boolean true
+contacts.as_server number 0
+contacts.as_client number 1
+other_ip.bytes.rcvd number 0
+udp.bytes.rcvd.anomaly_index number 0
+packets.rcvd.anomaly_index number 0
+mac string 28:D2:44:73:AC:10
+active_http_hosts number 0
+bytes.rcvd number 57335
+privatehost boolean false
+ndpi_categories table
+ndpi_categories.Network table
+ndpi_categories.Network.bytes.sent number 1469928
+ndpi_categories.Network.bytes number 1471903
+ndpi_categories.Network.bytes.rcvd number 1975
+ndpi_categories.Network.category number 14
+ndpi_categories.Network.duration number 15445
+ndpi_categories.RPC table
+ndpi_categories.RPC.bytes.sent number 0
+ndpi_categories.RPC.bytes number 190
+ndpi_categories.RPC.bytes.rcvd number 190
+ndpi_categories.RPC.category number 16
+ndpi_categories.RPC.duration number 10
+ndpi_categories.Music table
+ndpi_categories.Music.bytes.sent number 58910
+ndpi_categories.Music.bytes number 58910
+ndpi_categories.Music.bytes.rcvd number 0
+ndpi_categories.Music.category number 25
+ndpi_categories.Music.duration number 3425
+ndpi_categories.System table
+ndpi_categories.System.bytes.sent number 1272
+ndpi_categories.System.bytes number 1272
+ndpi_categories.System.bytes.rcvd number 0
+ndpi_categories.System.category number 18
+ndpi_categories.System.duration number 25
+ndpi_categories.Media table
+ndpi_categories.Media.bytes.sent number 0
+ndpi_categories.Media.bytes number 60
+ndpi_categories.Media.bytes.rcvd number 60
+ndpi_categories.Media.category number 1
+ndpi_categories.Media.duration number 5
+ndpi_categories.Web table
+ndpi_categories.Web.bytes.sent number 1551
+ndpi_categories.Web.bytes number 1551
+ndpi_categories.Web.bytes.rcvd number 0
+ndpi_categories.Web.category number 5
+ndpi_categories.Web.duration number 5
+ndpi_categories.Unspecified table
+ndpi_categories.Unspecified.bytes.sent number 598
+ndpi_categories.Unspecified.bytes number 55708
+ndpi_categories.Unspecified.bytes.rcvd number 55110
+ndpi_categories.Unspecified.category number 0
+ndpi_categories.Unspecified.duration number 2305
+is_broadcast boolean false
+ndpi table
+ndpi.SNMP table
+ndpi.SNMP.bytes.sent number 0
+ndpi.SNMP.packets.sent number 0
+ndpi.SNMP.bytes.rcvd number 595
+ndpi.SNMP.breed string Acceptable
+ndpi.SNMP.duration number 35
+ndpi.SNMP.packets.rcvd number 595
+ndpi.ICMP table
+ndpi.ICMP.bytes.sent number 791
+ndpi.ICMP.packets.sent number 791
+ndpi.ICMP.bytes.rcvd number 60
+ndpi.ICMP.breed string Acceptable
+ndpi.ICMP.duration number 40
+ndpi.ICMP.packets.rcvd number 60
+ndpi.Unknown table
+ndpi.Unknown.bytes.sent number 459
+ndpi.Unknown.packets.sent number 459
+ndpi.Unknown.bytes.rcvd number 53250
+ndpi.Unknown.breed string Unrated
+ndpi.Unknown.duration number 2140
+ndpi.Unknown.packets.rcvd number 53250
+ndpi.SSL table
+ndpi.SSL.bytes.sent number 1551
+ndpi.SSL.packets.sent number 1551
+ndpi.SSL.bytes.rcvd number 0
+ndpi.SSL.breed string Safe
+ndpi.SSL.duration number 5
+ndpi.SSL.packets.rcvd number 0
+ndpi.RX table
+ndpi.RX.bytes.sent number 0
+ndpi.RX.packets.sent number 0
+ndpi.RX.bytes.rcvd number 190
+ndpi.RX.breed string Acceptable
+ndpi.RX.duration number 10
+ndpi.RX.packets.rcvd number 96
+ndpi.NetBIOS table
+ndpi.NetBIOS.bytes.sent number 552
+ndpi.NetBIOS.packets.sent number 552
+ndpi.NetBIOS.bytes.rcvd number 0
+ndpi.NetBIOS.breed string Acceptable
+ndpi.NetBIOS.duration number 10
+ndpi.NetBIOS.packets.rcvd number 0
+ndpi.Spotify table
+ndpi.Spotify.bytes.sent number 58910
+ndpi.Spotify.packets.sent number 58910
+ndpi.Spotify.bytes.rcvd number 0
+ndpi.Spotify.breed string Acceptable
+ndpi.Spotify.duration number 3425
+ndpi.Spotify.packets.rcvd number 0
+ndpi.MDNS table
+ndpi.MDNS.bytes.sent number 1469137
+ndpi.MDNS.packets.sent number 1276927
+ndpi.MDNS.bytes.rcvd number 1320
+ndpi.MDNS.breed string Acceptable
+ndpi.MDNS.duration number 15405
+ndpi.MDNS.packets.rcvd number 1320
+ndpi.BJNP table
+ndpi.BJNP.bytes.sent number 720
+ndpi.BJNP.packets.sent number 484
+ndpi.BJNP.bytes.rcvd number 0
+ndpi.BJNP.breed string Acceptable
+ndpi.BJNP.duration number 15
+ndpi.BJNP.packets.rcvd number 0
+ndpi.RTP table
+ndpi.RTP.bytes.sent number 0
+ndpi.RTP.packets.sent number 0
+ndpi.RTP.bytes.rcvd number 60
+ndpi.RTP.breed string Acceptable
+ndpi.RTP.duration number 5
+ndpi.RTP.packets.rcvd number 60
+localhost boolean true
+total_flows.as_server number 507
+ifid number 1
+asn number 137
+childSafe boolean false
+is_blacklisted boolean false
+tcpPacketStats.sent table
+tcpPacketStats.sent.out_of_order number 0
+tcpPacketStats.sent.lost number 0
+tcpPacketStats.sent.retransmissions number 0
+tcpPacketStats.sent.keep_alive number 0
+host_unreachable_flows.as_client number 0
+host_unreachable_flows.as_server number 0
+tcp.packets.seq_problems boolean true
+ip string 146.48.99.74
+ipkey number 2452644682
+icmp.bytes.rcvd.anomaly_index number 0
+tcpPacketStats.rcvd table
+tcpPacketStats.rcvd.out_of_order number 0
+tcpPacketStats.rcvd.lost number 3
+tcpPacketStats.rcvd.retransmissions number 48
+tcpPacketStats.rcvd.keep_alive number 0
+bytes.rcvd.anomaly_index number 0
+last_throughput_bps number 0.0
+flows.as_client number 661
+packets.sent number 6912
+pktStats.recv table
+pktStats.recv.upTo256 number 0
+pktStats.recv.upTo1518 number 0
+pktStats.recv.upTo128 number 1
+pktStats.recv.finack number 0
+pktStats.recv.above9000 number 0
+pktStats.recv.upTo2500 number 0
+pktStats.recv.rst number 0
+pktStats.recv.synack number 0
+pktStats.recv.syn number 31
+pktStats.recv.upTo512 number 0
+pktStats.recv.upTo9000 number 0
+pktStats.recv.upTo1024 number 0
+pktStats.recv.upTo6500 number 0
+pktStats.recv.upTo64 number 31
+throughput_pps number 0.0
+other_ip.bytes.sent.anomaly_index number 0
+active_flows.as_server number 0
+udp.bytes.sent.anomaly_index number 67
 
 ]]
 

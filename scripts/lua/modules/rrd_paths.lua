@@ -126,7 +126,7 @@ function getPathFromIPv6(addr)
       ipv6[i] = string.format('%.4x', tonumber(p, 16) or 0)
    end
 
-   if not (prefix == ip) then --wip (funge! così evito l'ultima word sia zero (ipv6[8] = 0000)
+   if not (prefix == ip) then --wip ( così evito l'ultima word sia zero (ipv6[8] = 0000)
       local i = 1
       for _, p in pairsByKeys(suffix:split(":") or {suffix}, rev) do
          ipv6[8 - i + 1] = string.format('%.4x', tonumber(p, 16) or 0)
@@ -161,8 +161,7 @@ function getPathFromKey(key)
       return getPathFromMac(mac, "hosts/") .. "/" .. ipver
    elseif isIPv6(key) then
       local ipv6Path = getPathFromIPv6(key)
-      --WIP
-      --traceError(TRACE_NORMAL, TRACE_CONSOLE," key: "..key .. " path: " ..  ipv6Path)
+      --traceError(TRACE_NORMAL, TRACE_CONSOLE," key: "..key .. " path: " ..  ipv6Path) --WIP
       return ipv6Path
    elseif isMacAddress(key) then
       return getPathFromMac(key)

@@ -23,6 +23,7 @@ print[[
       "showing_x_to_y_rows": "]] print(i18n("showing_x_to_y_rows", {x="{0}", y="{1}", tot="{2}"})) print[[",
       "actions": "]] print(i18n("actions")) print[[",
       "query_was_aborted": "]] print(i18n("graphs.query_was_aborted")) print[[",
+      "exports": "]] print(i18n("system_stats.exports_label")) print[[",
    };
 
    var http_prefix = "]] print(ntop.getHttpPrefix()) print[[";
@@ -134,8 +135,6 @@ end
 -- ##############################################
 
 if not ifs.isView and ntop.getPrefs().are_alerts_enabled == true then
-
-   local alert_cache = interface.getCachedNumAlerts() or {}
    local active = ""
    local style = ""
    local color = ""
@@ -144,7 +143,7 @@ if not ifs.isView and ntop.getPrefs().are_alerts_enabled == true then
    -- color = 'style="color: #B94A48;"' -- bootstrap danger red
    -- end
 
-   if alert_cache["num_alerts_engaged"] == 0 and alert_cache["alerts_stored"] == false then
+   if not ifs["has_alerts"] then
       style = ' style="display: none;"'
    end
 

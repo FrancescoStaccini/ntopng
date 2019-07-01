@@ -3,6 +3,7 @@
 --
 
 local ts_utils = require("ts_utils_core")
+local alerts = require("alerts_api")
 
 local MAX_INFLUX_EXPORT_QUEUE_LEN = 30
 
@@ -98,7 +99,9 @@ function probe.getTimeseriesMenu(ts_utils)
     {schema="influxdb:storage_size",                      label=i18n("traffic_recording.storage_utilization")},
     {schema="influxdb:memory_size",                       label=i18n("about.ram_memory")},
     {schema="influxdb:write_successes",                   label=i18n("system_stats.write_througput")},
-    {schema="influxdb:exports",                           label=i18n("system_stats.exports"), value_formatter = "fcounter_to_intval",},
+    {schema="influxdb:exports",                           label=i18n("system_stats.exports_label"),
+      value_formatter = {"export_rate", "exports_format"},
+      metrics_labels = {i18n("system_stats.exports_label")}},
     {schema="custom:infludb_exported_vs_dropped_points",  label=i18n("system_stats.exported_vs_dropped_points"),
       custom_schema = {
         bases = {"influxdb:exported_points", "influxdb:dropped_points"},
@@ -158,27 +161,10 @@ end
 
 -- ##############################################
 
-function probe._checkExportQueueLen(when, ts_utils, influxdb)
-  local queue_len = influxdb.getExportQueueLength()
-
-  if(queue_len > MAX_INFLUX_EXPORT_QUEUE_LEN) then
-    local err_msg = i18n("alerts_dashboard.influxdb_queue_too_long_description",
-      {length = queue_len})
-
-    interface.storeAlert(alertEntity("influx_db"), influxdb.url,
-      alertType("influxdb_queue_too_long"), alertSeverity("error"), err_msg)
-  end
-
-  traceError(TRACE_INFO, TRACE_CONSOLE, string.format("InfluxDB export queue length: %u", queue_len))
-end
-
--- ##############################################
-
 function probe.runTask(when, ts_utils)
   local influxdb = ts_utils.getQueryDriver()
 
   probe._exportStats(when, ts_utils, influxdb)
-  probe._checkExportQueueLen(when, ts_utils, influxdb)
   probe._measureRtt(when, ts_utils, influxdb)
 end
 

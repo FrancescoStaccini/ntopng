@@ -3,10 +3,13 @@
 --
 
 local dirs = ntop.getDirs()
+
 package.path = dirs.installdir .. "/scripts/lua/modules/?.lua;" .. package.path
 
 require "lua_utils"
 local json = require("dkjson")
+local ts_utils = require("ts_utils_core")
+local system_scripts = require("system_scripts_utils")
 
 sendHTTPHeader('application/json')
 
@@ -73,9 +76,13 @@ function dumpInterfaceStats(interface_name)
       end
 
       if prefs.are_alerts_enabled == true then
-	 local alert_cache = interface.getCachedNumAlerts() or {}
-	 res["engaged_alerts"]     = alert_cache["num_alerts_engaged"] or 0
-	 res["alerts_stored"]      = alert_cache["alerts_stored"] or 0
+	 res["engaged_alerts"]     = ifstats["num_alerts_engaged"] or 0
+	 res["has_alerts"]         = ifstats["has_alerts"]
+	 res["ts_alerts"] = {}
+
+	 if ts_utils.getDriverName() == "influxdb" and system_scripts.hasAlerts({entity = alertEntity("influx_db")}) then
+	    res["ts_alerts"]["influxdb"] = true
+	 end
       end
 
       if not userHasRestrictions() then

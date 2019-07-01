@@ -127,8 +127,15 @@ end
 
 if (isAdministrator()) then
    if (page == "config") and (not table.empty(_POST)) then
+      local custom_name = _POST["custom_name"]
+
+      if starts(custom_name, "tcp:__") then
+        -- Was mangled by sanitization
+        custom_name = "tcp://" .. string.sub(custom_name, 7)
+      end
+
       -- TODO move keys to new schema: replace ifstats.name with ifid
-      ntop.setCache('ntopng.prefs.'..ifstats.name..'.name',_POST["custom_name"])
+      ntop.setCache('ntopng.prefs.'..ifstats.name..'.name', custom_name)
 
       local ifspeed_cache = 'ntopng.prefs.'..ifstats.name..'.speed'
       if isEmptyString(_POST["ifSpeed"]) then
@@ -1105,8 +1112,9 @@ elseif(page == "historical") then
          --{schema="tcp_retr_ooo_lost",   label=i18n("graphs.tcp_retr_ooo_lost"), nedge_exclude=1},
          {schema="iface:tcp_retransmissions",   label=i18n("graphs.tcp_packets_retr"), nedge_exclude=1},
          {separator=1, label=i18n("tcp_flags")},
-         {schema="iface:tcp_syn",               label=i18n("graphs.tcp_syn_packets"), nedge_exclude=1},
-         {schema="iface:tcp_synack",            label=i18n("graphs.tcp_synack_packets"), nedge_exclude=1},
+         {schema="iface:tcp_syn",               label=i18n("graphs.tcp_syn_packets"), nedge_exclude=1, pro_skip=1},
+         {schema="iface:tcp_synack",            label=i18n("graphs.tcp_synack_packets"), nedge_exclude=1, pro_skip=1},
+         {schema="custom:iface_tcp_syn_vs_tcp_synack", label=i18n("graphs.tcp_syn_vs_tcp_synack"), metrics_labels = {"SYN", "SYN+ACK"}},
          {schema="iface:tcp_finack",            label=i18n("graphs.tcp_finack_packets"), nedge_exclude=1},
          {schema="iface:tcp_rst",               label=i18n("graphs.tcp_rst_packets"), nedge_exclude=1},
       }

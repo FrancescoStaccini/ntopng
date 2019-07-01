@@ -142,13 +142,6 @@ typedef enum {
 } AlertEntity;
 
 typedef enum {
-  alert_engine_periodic_1min = 0,
-  alert_engine_periodic_5min,
-  alert_engine_periodic_hour,
-  alert_engine_periodic_day,
-} AlertEngine;
-
-typedef enum {
   alert_on = 1,       /* An issue has been discovered and an alert has been triggered */
   alert_off = 2,      /* A previous alert has been fixed */
   alert_permanent = 3 /* Alert that can't be fixed (e.g. a flow with an anomaly) */
@@ -358,6 +351,8 @@ typedef enum {
   column_thpt,
   column_bytes,
   column_info,
+  column_client_rtt,
+  column_server_rtt,
   /* Hosts */
   column_ip,
   column_alerts,
@@ -554,7 +549,7 @@ typedef struct {
 } DeviceProtocolBitmask;
 
 #ifndef HAVE_NEDGE
-class SNMP; /* Forward */
+class SNMP;
 #endif
 
 struct ntopngLuaContext {
@@ -563,7 +558,9 @@ struct ntopngLuaContext {
   struct mg_connection *conn;
   AddressTree *allowedNets;
   NetworkInterface *iface;
+#ifndef WIN32
   Ping *ping;
+#endif
 #ifndef HAVE_NEDGE
   SNMP *snmp;
 #endif

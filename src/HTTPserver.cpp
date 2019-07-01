@@ -126,8 +126,6 @@ bool HTTPserver::authorized_localhost_user_login(const struct mg_connection *con
 void HTTPserver::traceLogin(const char *user, bool authorized) {
   NetworkInterface *ntop_interface;
   AlertsManager *am;
-  const char *alert_json;
-  time_t when = time(NULL);
   json_object *jobj;
 
   ntop_interface = ntop->getSystemInterface();
@@ -145,14 +143,10 @@ void HTTPserver::traceLogin(const char *user, bool authorized) {
 
   json_object_object_add(jobj, "scope",  json_object_new_string("login"));
   json_object_object_add(jobj, "status", json_object_new_string(authorized ? "authorized" : "unauthorized"));
+  json_object_object_add(jobj, "user",  json_object_new_string(user));
 
-  alert_json = json_object_to_json_string(jobj);
-
-  if (alert_json) {
-    am->storeGenericAlert(alert_entity_user, user, alert_user_activity, 
-      authorized ? alert_level_info : alert_level_warning, alert_json, when);
-  }
-
+  ntop->getRedis()->rpush(CONST_ALERT_NTOPNG_LOGIN_TRACE_QUEUE, (char *)json_object_to_json_string(jobj), 0 /* No trim */);
+ 
   json_object_put(jobj);
 }
 
@@ -329,6 +323,7 @@ static int isWhitelistedURI(const char * const uri) {
 
 /* ****************************************** */
 
+#ifdef NO_SSL_DL /* see configure.seed */
 static bool ssl_client_x509_auth(const struct mg_connection * const conn, const struct mg_request_info * const request_info,
 				 char * const username, char * const group, bool * const localuser) {
   bool ret = false;
@@ -368,6 +363,7 @@ static bool ssl_client_x509_auth(const struct mg_connection * const conn, const 
 
   return ret;
 };
+#endif
 
 /* ****************************************** */
 
@@ -441,11 +437,13 @@ static int getAuthorizedUser(struct mg_connection *conn,
     return(1);
   }
 
+  #ifdef NO_SSL_DL
   /* Try to authenticate using client TLS/SSL certificate */
   if(request_info->is_ssl
      && ntop->getPrefs()->is_client_x509_auth_enabled()
      && ssl_client_x509_auth(conn, request_info, username, group, localuser))
     return(1);
+#endif
 
   /* Try to decode Authorization header if present */
   auth_header_p = mg_get_header(conn, "Authorization");
@@ -1138,6 +1136,7 @@ void HTTPserver::parseACL(char * const acl, u_int acl_len) {
 
 static unsigned char ssl_session_ctx_id[] = PACKAGE_NAME "-" NTOPNG_GIT_RELEASE;
 
+#ifdef NO_SSL_DL
 int handle_ssl_verify(int ok, X509_STORE_CTX *ctx) {
   X509 *cert;
   char buf[256];
@@ -1199,6 +1198,7 @@ int init_client_x509_auth(void *ctx) {
 
   return 1;
 };
+#endif
 
 /* ****************************************** */
 
@@ -1234,8 +1234,11 @@ HTTPserver::HTTPserver(const char *_docs_dir, const char *_scripts_dir) {
   memset(&callbacks, 0, sizeof(callbacks));
   callbacks.begin_request = handle_lua_request;
   callbacks.log_message = handle_http_message;
+
+#ifdef NO_SSL_DL
   if(ntop->getPrefs()->is_client_x509_auth_enabled())
     callbacks.init_ssl = init_client_x509_auth;
+#endif
 
   /* Randomize data */
   gettimeofday(&tv, NULL);

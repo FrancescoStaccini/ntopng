@@ -8,6 +8,7 @@ local ts_common = require("ts_common")
 
 local json = require("dkjson")
 local os_utils = require("os_utils")
+local alerts = require("alerts_api")
 require("ntop_utils")
 
 --
@@ -18,7 +19,7 @@ require("ntop_utils")
 --
 
 local INFLUX_QUERY_TIMEMOUT_SEC = 5
-local INFLUX_MAX_EXPORT_QUEUE_LEN = 100
+local INFLUX_MAX_EXPORT_QUEUE_LEN = 200
 local INFLUX_EXPORT_QUEUE = "ntopng.influx_file_queue"
 local MIN_INFLUXDB_SUPPORTED_VERSION = "1.5.1"
 local FIRST_AGGREGATION_TIME_KEY = "ntopng.prefs.influxdb.first_aggregation_time"
@@ -663,6 +664,12 @@ end
 
 -- ##############################################
 
+local function droppedPointsErrorMsg(url)
+  return i18n("alert_messages.influxdb_dropped_points", {influxdb=url})
+end
+
+-- ##############################################
+
 -- Exports a timeseries file in line format to InfluxDB
 -- Returns a tuple(success, file_still_existing)
 function driver:_exportTsFile(fname)
@@ -679,8 +686,15 @@ function driver:_exportTsFile(fname)
   local ret = ntop.postHTTPTextFile(self.username, self.password, self.url .. "/write?db=" .. self.db, fname, delete_file_after_post, 30 --[[ timeout ]])
 
   if((ret == nil) or ((ret.RESPONSE_CODE ~= 200) and (ret.RESPONSE_CODE ~= 204))) then
-    local msg = self:_exportErrorMsg(ret)
-    interface.storeAlert(alertEntity("influx_db"), self.url, alertType("influxdb_export_failure"), alertSeverity("error"), msg)
+    -- local msg = self:_exportErrorMsg(ret)
+
+    -- local influx_alert = alerts:newAlert({
+    --   entity = "influx_db",
+    --   type = "influxdb_export_failure",
+    --   severity = "warning",
+    -- })
+
+    -- influx_alert:trigger(self.url, msg)
 
     rv = false
   end
@@ -688,69 +702,56 @@ function driver:_exportTsFile(fname)
   return rv
 end
 
-local INFLUX_KEY_PREFIX = "ntopng.cache.ifid_%i."
+-- ##############################################
+
+local INFLUX_KEY_PREFIX = "ntopng.cache.influxdb."
+local INFLUX_KEY_DROPPED_POINTS = INFLUX_KEY_PREFIX.."dropped_points"
+local INFLUX_KEY_EXPORTED_POINTS = INFLUX_KEY_PREFIX.."exported_points"
+local INFLUX_KEY_EXPORTS = INFLUX_KEY_PREFIX.."exports"
 
 -- ##############################################
 
-local function get_dropped_points_key(ifid)
-   return string.format(INFLUX_KEY_PREFIX.."dropped_points", ifid)
-end
-
--- ##############################################
-
-local function get_exported_points_key(ifid)
-   return string.format(INFLUX_KEY_PREFIX.."exported_points", ifid)
-end
-
--- ##############################################
-
-local function get_exports_key(ifid)
-   return string.format(INFLUX_KEY_PREFIX.."exports", ifid)
-end
-
--- ##############################################
-
-local function inc_val(k, val_to_add)
-   local val = tonumber(ntop.getCache(k)) or 0
+local function inc_val(k, ifid, val_to_add)
+   local val = tonumber(ntop.getHashCache(k, ifid)) or 0
 
    val = val + val_to_add
-   ntop.setCache(k, string.format("%i", val))
+   ntop.setHashCache(k, ifid, string.format("%i", val))
 end
 
 -- ##############################################
 
 function inc_dropped_points(ifid, num_points)
-   inc_val(get_dropped_points_key(ifid), num_points)
+   inc_val(INFLUX_KEY_DROPPED_POINTS, ifid, num_points)
 end
 
 -- ##############################################
 
 function inc_exported_points(ifid, num_points)
-   inc_val(get_exported_points_key(ifid), num_points)
+   inc_val(INFLUX_KEY_EXPORTED_POINTS, ifid, num_points)
 end
 
 -- ##############################################
 
 function inc_exports(ifid)
-   inc_val(get_exports_key(ifid), 1)
+   inc_val(INFLUX_KEY_EXPORTS, ifid, 1)
 end
 
 -- ##############################################
 
 function driver:get_dropped_points(ifid)
-   return tonumber(ntop.getCache(get_dropped_points_key(ifid))) or 0
+   return tonumber(ntop.getHashCache(INFLUX_KEY_DROPPED_POINTS, ifid)) or 0
 end
 
 -- ##############################################
 
 function driver:get_exported_points(ifid)
-   return tonumber(ntop.getCache(get_exported_points_key(ifid))) or 0
+   return tonumber(ntop.getHashCache(INFLUX_KEY_EXPORTED_POINTS, ifid)) or 0
 end
 
 -- ##############################################
 
 function driver:get_exports(ifid)
-   return tonumber(ntop.getCache(get_exports_key(ifid))) or 0
+   return tonumber(ntop.getHashCache(INFLUX_KEY_EXPORTS, ifid)) or 0
 end
 
 -- ##############################################
@@ -767,17 +768,35 @@ end
 -- ##############################################
 
 local function dropExportable(exportable)
-   interface.select(exportable["ifid_str"])
-
    inc_dropped_points(exportable["ifid"], exportable["num_points"])
    deleteExportableFile(exportable)
 end
 
 -- ##############################################
 
-local function exportableSuccess(exportable)
-   interface.select(exportable["ifid_str"])
+function driver:_droppedExportablesAlert()
+   local alert_periodicity = 60
+   local k = "ntopng.cache.influxdb_dropped_points_alert_triggered"
 
+   if ntop.getCache(k) ~= "1" then
+      local influx_alert = alerts:newAlert({
+	    entity = "influx_db",
+	    type = "influxdb_dropped_points",
+	    severity = "error",
+	    periodicity = alert_periodicity,
+      })
+
+      local msg = droppedPointsErrorMsg(self.url)
+      influx_alert:trigger(self.url, msg)
+
+      -- Just to avoid doing :trigger too often
+      ntop.setCache(k, "1", alert_periodicity / 2)
+   end
+end
+
+-- ##############################################
+
+local function exportableSuccess(exportable)
    inc_exported_points(exportable["ifid"], exportable["num_points"])
    inc_exports(exportable["ifid"])
    deleteExportableFile(exportable)
@@ -833,6 +852,7 @@ end
 function driver:export(deadline)
    interface.select(getSystemInterfaceId())
 
+   local dropped_exportables = false
    local num_pending = ntop.llenCache(INFLUX_EXPORT_QUEUE)
 
    if num_pending == 0 then
@@ -851,6 +871,14 @@ function driver:export(deadline)
       traceError(TRACE_INFO, TRACE_CONSOLE, "Dropped old item "..(being_dropped or ''))
 
       num_pending = num_pending - 1
+
+      if not dropped_exportables then
+	 dropped_exportables = true
+      end
+   end
+
+   if dropped_exportables then
+      self:_droppedExportablesAlert()
    end
 
    -- Post the guys using a pretty long timeout
@@ -1293,7 +1321,7 @@ end
 -- ##############################################
 
 function driver:getDiskUsage()
-  local query = 'SELECT SUM(last) FROM (select LAST(diskBytes) FROM "monitor"."shard" where "database" = \''.. self.db ..'\' group by id)'
+   local query = 'SELECT SUM(last) FROM (select LAST(diskBytes) FROM "monitor"."shard" where "database" = \''.. self.db ..'\' group by id)'
   return single_query(self.url .. "/query?db=_internal", query, self.username, self.password)
 end
 

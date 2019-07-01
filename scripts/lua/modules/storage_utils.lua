@@ -20,8 +20,8 @@ local storage_utils = {}
 
 -- #################################
 
-function storage_utils.interfaceStorageInfo(ifid)
-  local info = { total = 0}
+function storage_utils.interfaceStorageInfo(ifid, separate_pcap_volume)
+  local info = { total = 0 }
   local key = "ntopng.cache."..ifid..".storage_info"
 
   local info_json = ntop.getCache(key)
@@ -47,7 +47,9 @@ function storage_utils.interfaceStorageInfo(ifid)
       local pcap_storage_info = recording_utils.storageInfo(ifid)
       local total_pcap_dump_used = (pcap_storage_info.if_used + pcap_storage_info.extraction_used)
       info["pcap"] = total_pcap_dump_used
-      info["total"] = info["total"] + total_pcap_dump_used
+      if separate_pcap_volume then
+        info["total"] = info["total"] + total_pcap_dump_used
+      end
     end
     -- end
 
@@ -61,13 +63,39 @@ end
 
 function storage_utils.storageInfo()
   local ifnames = interface.getIfNames()
-  local info = { total = 0, interfaces = {} }
+  local info = { total = 0, pcap_total = 0, interfaces = {} }
+  local volume_info
+  local pcap_volume_info
+  local separate_pcap_volume = false
+
+  local volume_info = recording_utils.volumeInfo(dirs.workingdir)
+
+  if dirs.pcapdir ~= dirs.workingdir then
+    pcap_volume_info = recording_utils.volumeInfo(dirs.pcapdir)
+    if pcap_volume_info.dev ~= volume_info.dev then
+      separate_pcap_volume = true
+    end
+  end
 
   for id, name in pairs(ifnames) do
     local ifid = tonumber(id)
-    local if_info = storage_utils.interfaceStorageInfo(ifid)
+    local if_info = storage_utils.interfaceStorageInfo(ifid, separate_pcap_volume)
     info.interfaces[ifid] = if_info
     info.total = info.total + if_info.total
+    if if_info.pcap ~= nil then
+      info.pcap_total = info.pcap_total + if_info.pcap
+    end
+  end
+
+  info.other       = volume_info.used - info.total
+  info.volume_size = volume_info.total
+  info.volume_dev  = volume_info.dev
+
+  if separate_pcap_volume then
+    pcap_volume_info = recording_utils.volumeInfo(dirs.pcapdir)
+    info.pcap_other = pcap_volume_info.used - info.pcap_total
+    info.pcap_volume_size = pcap_volume_info.total
+    info.pcap_volume_dev  = pcap_volume_info.dev
   end
 
   return info

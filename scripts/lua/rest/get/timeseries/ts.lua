@@ -95,6 +95,14 @@ end
 
 local res
 
+if(ntop.getPref("ntopng.prefs.ndpi_flows_rrd_creation") == "1") then
+  if(ts_schema == "host:ndpi") then
+    ts_schema = "custom:host_ndpi_and_flows"
+  elseif(ts_schema == "iface:ndpi") then
+    ts_schema = "custom:iface_ndpi_and_flows"
+  end
+end
+
 if starts(ts_schema, "custom:") and ntop.isPro() then
   res = performCustomQuery(ts_schema, tags, tstart, tend, options)
   compare_backward = nil

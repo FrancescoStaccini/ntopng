@@ -375,11 +375,33 @@ void Flow::dumpFlowAlert() {
 
 /* *************************************** */
 
+u_int16_t Flow::getStatsProtocol() const {
+  u_int16_t stats_protocol;
+
+  if(ndpiDetectedProtocol.app_protocol != NDPI_PROTOCOL_UNKNOWN
+      && !ndpi_is_subprotocol_informative(NULL, ndpiDetectedProtocol.master_protocol))
+    stats_protocol = ndpiDetectedProtocol.app_protocol;
+  else
+    stats_protocol = ndpiDetectedProtocol.master_protocol;
+
+  return(stats_protocol);
+}
+
+/* *************************************** */
+
 void Flow::processDetectedProtocol() {
   u_int16_t l7proto;
+  u_int16_t stats_protocol;
 
   if(protocol_processed || (ndpiFlow == NULL))
     return;
+
+  stats_protocol = getStatsProtocol();
+
+  /* Update the active flows stats */
+  if(cli_host) cli_host->incnDPIFlows(stats_protocol);
+  if(srv_host) srv_host->incnDPIFlows(stats_protocol);
+  iface->incnDPIFlows(stats_protocol);
 
   l7proto = ndpi_get_lower_proto(ndpiDetectedProtocol);
 
@@ -1019,11 +1041,7 @@ void Flow::update_hosts_stats(struct timeval *tv, bool dump_alert) {
     }
   }
 
-  if(ndpiDetectedProtocol.app_protocol != NDPI_PROTOCOL_UNKNOWN
-      && !ndpi_is_subprotocol_informative(NULL, ndpiDetectedProtocol.master_protocol))
-    stats_protocol = ndpiDetectedProtocol.app_protocol;
-  else
-    stats_protocol = ndpiDetectedProtocol.master_protocol;
+  stats_protocol = getStatsProtocol();
 
   sent_packets = cli2srv_packets, sent_bytes = cli2srv_bytes, sent_goodput_bytes = cli2srv_goodput_bytes;
   diff_sent_packets = sent_packets - cli2srv_last_packets,
@@ -1457,12 +1475,14 @@ bool Flow::equal(IpAddress *_cli_ip, IpAddress *_srv_ip, u_int16_t _cli_port,
 		 u_int16_t _srv_port, u_int16_t _vlanId, u_int8_t _protocol,
 		 const ICMPinfo * const _icmp_info,
 		 bool *src2srv_direction) {
-  if((_vlanId != vlanId) && (vlanId != 0))
+  if(_vlanId != vlanId)
     return(false);
 
-  if(_protocol != protocol) return(false);
+  if(_protocol != protocol)
+    return(false);
 
-  if(icmp_info && !icmp_info->equal(_icmp_info)) return(false);
+  if(icmp_info && !icmp_info->equal(_icmp_info))
+    return(false);
 
   if(cli_host && cli_host->equal(_cli_ip)
      && srv_host && srv_host->equal(_srv_ip)
@@ -1899,7 +1919,7 @@ void Flow::lua(lua_State* vm, AddressTree * ptree,
 /* *************************************** */
 
 u_int32_t Flow::key() {
-  u_int32_t k = cli_port + srv_port /* +vlanId */ + protocol;
+  u_int32_t k = cli_port + srv_port + vlanId + protocol;
 
   if(cli_host)  k += cli_host->key();
   if(srv_host)  k += srv_host->key();
@@ -2620,7 +2640,7 @@ void Flow::timeval_diff(struct timeval *begin, const struct timeval *end,
 
 /* *************************************** */
 
-char* Flow::getFlowInfo() {
+const char* Flow::getFlowInfo() {
   if(!isMaskedFlow()) {
 
     if(isDNS() && protos.dns.last_query)
@@ -3658,7 +3678,7 @@ FlowStatus Flow::getFlowStatus() {
 #endif
 
 #if 0
-  if(iface->getAlertLevel() > 0)
+  if(iface->hasAlerts())
    return(status_flow_when_interface_alerted);
 #endif
 
@@ -3901,29 +3921,33 @@ void Flow::dissectSSL(char *payload, u_int16_t payload_len) {
 		if(!isalpha(_payload[i]) && _payload[i] != '*') {
 		  protos.ssl.dissect_certificate = false;
 		  break;
-		} else {
-		  char buf[len + 1];
+		}
+		else {
+			if(len < 256) {
+				char buf[256];
 
-		  strncpy(buf, (const char*)&_payload[i], len);
-		  buf[len] = '\0';
+				strncpy(buf, (const char*)&_payload[i], len);
+				buf[len] = '\0';
 
 #if 0
-		  ntop->getTrace()->traceEvent(TRACE_NORMAL, "%s [Len %u][sizeof(buf): %u][ssl cert: %s]", buf, len, sizeof(buf), getSSLCertificate());
+				ntop->getTrace()->traceEvent(TRACE_NORMAL, "%s [Len %u][sizeof(buf): %u][ssl cert: %s]", buf, len, sizeof(buf), getSSLCertificate());
 #endif
 
-		  /*
-		    CNs are NOT case sensitive as per RFC 5280
-		  */
-		  if(protos.ssl.certificate
-		     && ((buf[0] != '*' && !strncasecmp(protos.ssl.certificate, buf, sizeof(buf)))
-			 || (buf[0] == '*' && strcasestr(protos.ssl.certificate, &buf[1])))) {
-		    protos.ssl.subject_alt_name_match = true;
-		    protos.ssl.dissect_certificate = false;
-		    break;
-		  }
-		}
+				/*
+				  CNs are NOT case sensitive as per RFC 5280
+				*/
+				if (protos.ssl.certificate
+					&& ((buf[0] != '*' && !strncasecmp(protos.ssl.certificate, buf, sizeof(buf)))
+						|| (buf[0] == '*' && strcasestr(protos.ssl.certificate, &buf[1])))) {
+					protos.ssl.subject_alt_name_match = true;
+					protos.ssl.dissect_certificate = false;
+					break;
+				}
+			} else /* The fix is not to enlarge the buf but figure out why we need more chars.*/
+				ntop->getTrace()->traceEvent(TRACE_WARNING, "Buffer too short [expected %u]", len);
 
-		i += len;
+			i += len;
+		}
 	      } else {
 #if 0
 		ntop->getTrace()->traceEvent(TRACE_NORMAL, "Leftover %u bytes [%u len]", _payload_len - i, len);

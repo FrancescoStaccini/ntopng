@@ -1219,6 +1219,7 @@ local known_parameters = {
    ["toggle_snmp_alerts_port_errors"]              = validateBool,
    ["snmp_port_load_threshold"]                    = validateNumber,
    ["toggle_midnight_stats_reset"]                 = validateBool,
+   ["toggle_ndpi_flows_rrds"]                      = validateBool,
 
    -- Input fields
    ["companion_interface"]                         = validateEmptyOr(validateInterface),
@@ -1294,7 +1295,7 @@ local known_parameters = {
    ["toggle_host_mask"]                            = validateChoiceInline({"0", "1", "2"}),
    ["topk_heuristic_precision"]                    = validateChoiceInline({"disabled", "more_accurate", "accurate", "aggressive"}),
    ["bridging_policy_target_type"]                 = validateChoiceInline({"per_protocol", "per_category", "both"}),
-   ["timeseries_driver"]                           = validateChoiceInline({"rrd", "influxdb"}),
+   ["timeseries_driver"]                           = validateChoiceInline({"rrd", "influxdb", "prometheus"}),
    ["ts_high_resolution"]                          = validateNumber,
    ["lbd_hosts_as_macs"]                           = validateBool,
    ["toggle_arp_matrix_generation"]                = validateBool,

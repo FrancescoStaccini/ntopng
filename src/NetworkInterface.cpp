@@ -320,6 +320,7 @@ void NetworkInterface::init() {
   frequentProtocols = new FrequentTrafficItems(5);
   num_live_captures = 0;
   memset(live_captures, 0, sizeof(live_captures));
+  num_alerts_engaged = 0, has_alerts = false;
 
   db = NULL;
 #ifdef NTOPNG_PRO
@@ -826,6 +827,9 @@ bool NetworkInterface::walker(u_int32_t *begin_slot,
 			      bool (*walker)(GenericHashEntry *h, void *user_data, bool *matched),
 			      void *user_data) {
   bool ret = false;
+
+  if(id == SYSTEM_INTERFACE_ID)
+    return(false);
 
   switch(wtype) {
   case walker_hosts:
@@ -1641,10 +1645,10 @@ bool NetworkInterface::processPacket(u_int32_t bridge_iface_idx,
 	   && (flow->get_srv_host() && flow->get_srv_host()->isLocalHost())) {
 	  /* Set correct direction in localhost ping */
 	  if((icmp_type == ICMP_ECHO /* ICMP Echo [RFC792] */)
-	     || (icmp_type == ICMP6_ECHO_REQUEST /* 128 - ICMPV6 Echo Request [RFC4443] */))
+	     || (icmp_type == 128 /* 128 - ICMPV6 Echo Request [RFC4443] */))
 	    src2dst_direction = true;
 	  else if((icmp_type == ICMP_ECHOREPLY /* ICMP Echo Reply [RFC792] */)
-		  || (icmp_type == ICMP6_ECHO_REPLY /* 129 - ICMPV6 Echo Reply [RFC4443] */))
+		  || (icmp_type == 129 /* 129 - ICMPV6 Echo Reply [RFC4443] */))
 	    src2dst_direction = false;
 	}
 
@@ -1691,7 +1695,7 @@ bool NetworkInterface::processPacket(u_int32_t bridge_iface_idx,
 	/* https://www.boiteaklou.fr/Data-exfiltration-with-PING-ICMP-NDH16.html */
 	if((((icmp_type == ICMP_ECHO) || (icmp_type == ICMP_ECHOREPLY)) && /* ICMPv4 ECHO */
 	      (trusted_l4_packet_len > CONST_MAX_ACCEPTABLE_ICMP_V4_PAYLOAD_LENGTH)) ||
-	   (((icmp_type == ICMP6_ECHO_REQUEST) || (icmp_type == ICMP6_ECHO_REPLY)) && /* ICMPv6 ECHO */
+	   (((icmp_type == 128) || (icmp_type == 129)) && /* ICMPv6 ECHO */
 	      (trusted_l4_packet_len > CONST_MAX_ACCEPTABLE_ICMP_V6_PAYLOAD_LENGTH)))
 	  flow->set_long_icmp_payload();
       }
@@ -2558,7 +2562,26 @@ decode_packet_eth:
 
 	diff = dst - src;
 
-	if(diff && (src & 0xFFFF0000) != 0xA9FE0000 && (dst & 0xFFFF0000) != 0xA9FE0000) {
+        /*
+          Following is an heuristic which tries to detect the broadcast domain
+          with its size and network-part of the address. Detection is done by checking
+          source and target protocol addresses found in arp.
+
+          Link-local addresses are excluded, as well as arp Probes with a zero source IP.
+
+          ARP Probes are defined in RFC 5227:
+           In this document, the term 'ARP Probe' is used to refer to an ARP
+           Request packet, broadcast on the local link, with an all-zero 'sender
+           IP address'.  [...]  The 'target IP
+           address' field MUST be set to the address being probed.  An ARP Probe
+           conveys both a question ("Is anyone using this address?") and an
+           implied statement ("This is the address I hope to use.").
+         */
+
+	if(diff
+	   && src /* Not a zero source IP (ARP Probe) */
+	   && (src & 0xFFFF0000) != 0xA9FE0000 /* Not a link-local IP */
+	   && (dst & 0xFFFF0000) != 0xA9FE0000 /* Not a link-local IP */) {
 	  u_int32_t cur_mask;
 	  u_int8_t cur_cidr;
 
@@ -3659,7 +3682,7 @@ struct flowHostRetrieveList {
   AutonomousSystem *asValue;
   Country *countryVal;
   u_int64_t numericValue;
-  char *stringValue;
+  const char *stringValue;
   IpAddress *ipValue;
 };
 
@@ -3929,7 +3952,8 @@ static bool flow_matches(Flow *f, struct flowHostRetriever *retriever) {
 static bool flow_search_walker(GenericHashEntry *h, void *user_data, bool *matched) {
   struct flowHostRetriever *retriever = (struct flowHostRetriever*)user_data;
   Flow *f = (Flow*)h;
-  char *flow_info;
+  const char *flow_info;
+  const TcpInfo *tcp_info;
 
   if(retriever->actNumEntries >= retriever->maxNumEntries)
     return(true); /* Limit reached - stop iterating */
@@ -3961,6 +3985,18 @@ static bool flow_search_walker(GenericHashEntry *h, void *user_data, bool *match
 	break;
       case column_bytes:
 	retriever->elems[retriever->actNumEntries++].numericValue = f->get_bytes();
+	break;
+      case column_client_rtt:
+	if((tcp_info = f->getClientTcpInfo()))
+	  retriever->elems[retriever->actNumEntries++].numericValue = (u_int64_t)(tcp_info->rtt * 1000);
+	else
+	  retriever->elems[retriever->actNumEntries++].numericValue = 0;
+	break;
+      case column_server_rtt:
+	if((tcp_info = f->getServerTcpInfo()))
+	  retriever->elems[retriever->actNumEntries++].numericValue = (u_int64_t)(tcp_info->rtt * 1000);
+	else
+	  retriever->elems[retriever->actNumEntries++].numericValue = 0;
 	break;
       case column_info:
 	flow_info = f->getFlowInfo();
@@ -4447,6 +4483,8 @@ int NetworkInterface::sortFlows(u_int32_t *begin_slot,
   else if(!strcmp(sortColumn, "column_ndpi")) retriever->sorter = column_ndpi, sorter = numericSorter;
   else if(!strcmp(sortColumn, "column_duration")) retriever->sorter = column_duration, sorter = numericSorter;
   else if(!strcmp(sortColumn, "column_thpt")) retriever->sorter = column_thpt, sorter = numericSorter;
+  else if(!strcmp(sortColumn, "column_client_rtt")) retriever->sorter = column_client_rtt, sorter = numericSorter;
+  else if(!strcmp(sortColumn, "column_server_rtt")) retriever->sorter = column_server_rtt, sorter = numericSorter;
   else if((!strcmp(sortColumn, "column_bytes")) || (!strcmp(sortColumn, "column_") /* default */)) retriever->sorter = column_bytes, sorter = numericSorter;
   else if(!strcmp(sortColumn, "column_info")) retriever->sorter = column_info, sorter = stringSorter;
   else {
@@ -4994,7 +5032,7 @@ int NetworkInterface::getActiveHostsList(lua_State* vm,
      || retriever.sorter == column_os) {
     for(u_int i=0; i<retriever.maxNumEntries; i++)
       if(retriever.elems[i].stringValue)
-	free(retriever.elems[i].stringValue);
+	free((char*)retriever.elems[i].stringValue);
   } else if(retriever.sorter == column_local_network)
     for(u_int i=0; i<retriever.maxNumEntries; i++)
       if(retriever.elems[i].ipValue)
@@ -5138,7 +5176,7 @@ int NetworkInterface::getActiveHostsGroup(lua_State* vm,
      || (retriever.sorter == column_os)) {
     for(u_int i=0; i<retriever.maxNumEntries; i++)
       if(retriever.elems[i].stringValue)
-	free(retriever.elems[i].stringValue);
+	free((char*)retriever.elems[i].stringValue);
   } else if(retriever.sorter == column_local_network)
     for(u_int i=0; i<retriever.maxNumEntries; i++)
       if(retriever.elems[i].ipValue)
@@ -5523,6 +5561,8 @@ void NetworkInterface::lua(lua_State *vm) {
   lua_push_bool_table_entry(vm, "has_seen_pods", hasSeenPods());
   lua_push_bool_table_entry(vm, "has_seen_containers", hasSeenContainers());
   lua_push_bool_table_entry(vm, "has_seen_ebpf_events", hasSeenEBPFEvents());
+  lua_push_bool_table_entry(vm, "has_alerts", has_alerts);
+  lua_push_int32_table_entry(vm, "num_alerts_engaged", num_alerts_engaged);
 
   lua_newtable(vm);
   lua_push_uint64_table_entry(vm, "packets",     getNumPackets());
@@ -5562,7 +5602,6 @@ void NetworkInterface::lua(lua_State *vm) {
   lua_push_str_table_entry(vm, "type", (char*)get_type());
   lua_push_uint64_table_entry(vm, "speed", ifSpeed);
   lua_push_uint64_table_entry(vm, "mtu", ifMTU);
-  lua_push_uint64_table_entry(vm, "alertLevel", alertLevel);
   lua_push_str_table_entry(vm, "ip_addresses", (char*)getLocalIPAddresses());
   bcast_domains->lua(vm);
 
@@ -6227,11 +6266,6 @@ void NetworkInterface::allocateNetworkStats() {
       oom_warning_sent = true;
     }
   }
-
-  if(alertsManager)
-    alertLevel = alertsManager->getNumAlerts(true);
-  else
-    alertLevel = 0;
 }
 
 /* **************************************** */
@@ -6900,14 +6934,15 @@ bool NetworkInterface::getVLANInfo(lua_State* vm, u_int16_t vlan_id) {
 /* **************************************** */
 
 static bool host_reload_alert_prefs(GenericHashEntry *host, void *user_data, bool *matched) {
-  bool full_refresh = (user_data != NULL) ? true : false;
+  //bool full_refresh = (user_data != NULL) ? true : false;
   Host *h = (Host*)host;
 
   h->refreshHostAlertPrefs();
   *matched = true;
 
-  if(full_refresh)
-    h->loadAlertsCounter();
+  //if(full_refresh)
+    //h->resetAlertCounters();
+
   return(false); /* false = keep on walking */
 }
 

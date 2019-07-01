@@ -201,6 +201,7 @@ class Flow : public GenericHashEntry {
   void dumpPacketStats(lua_State* vm, bool cli2srv_direction);
   bool isReadyToBeMarkedAsIdle();
   bool isBlacklistedFlow() const;
+  u_int16_t getStatsProtocol() const;
   inline bool isDeviceAllowedProtocol() {
       return(!cli_host || !srv_host ||
         ((cli_host->getDeviceAllowedProtocolStatus(ndpiDetectedProtocol, true) == device_proto_allowed) &&
@@ -273,7 +274,7 @@ class Flow : public GenericHashEntry {
   u_int32_t getNextTcpSeq(u_int8_t tcpFlags, u_int32_t tcpSeqNum, u_int32_t payloadLen) ;
   double toMs(const struct timeval *t);
   void timeval_diff(struct timeval *begin, const struct timeval *end, struct timeval *result, u_short divide_by_two);
-  char* getFlowInfo();
+  const char* getFlowInfo();
   inline char* getFlowServerInfo() {
     return (isSSL() && protos.ssl.certificate) ? protos.ssl.certificate : host_server_name;
   }
@@ -292,10 +293,6 @@ class Flow : public GenericHashEntry {
 		       u_int16_t payload_len, bool src2dst_direction);
 
   void updateSeqNum(time_t when, u_int32_t sN, u_int32_t aN);
-  inline void updateCommunityIdFlowHash() {
-    if(!community_id_flow_hash)
-      community_id_flow_hash = CommunityIdFlowHash::get_community_id_flow_hash(this);
-  }
   void processDetectedProtocol();
   void setDetectedProtocol(ndpi_protocol proto_id, bool forceDetection);
   void setCustomApp(custom_app_t ca) {
@@ -439,7 +436,6 @@ class Flow : public GenericHashEntry {
   inline void updateProfile()     { trafficProfile = iface->getFlowProfile(this); }
   inline char* get_profile_name() { return(trafficProfile ? trafficProfile->getName() : (char*)"");}
 #endif
-  inline float getFlowRTT() { return(rttSec); }
   /* http://bradhedlund.com/2008/12/19/how-to-calculate-tcp-throughput-for-long-distance-links/ */
   inline float getCli2SrvMaxThpt() { return(rttSec ? ((float)(cli2srv_window*8)/rttSec) : 0); }
   inline float getSrv2CliMaxThpt() { return(rttSec ? ((float)(srv2cli_window*8)/rttSec) : 0); }

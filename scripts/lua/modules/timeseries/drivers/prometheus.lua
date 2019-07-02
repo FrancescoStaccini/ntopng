@@ -6,7 +6,10 @@
 
 local driver = {}
 
--- ##############################################
+local prometheus_queue = "ntopng.prometheus_export_queue"
+local max_prometheus_queueLen = 100000
+
+-- ###########################
 
 --! @brief Driver constructor.
 --! @param options global options.
@@ -28,7 +31,9 @@ end
 --! @param metrics map metric_name->metric_value. It contains exactly the metrics defined in the schema.
 --! @return the true on success, false otherwise.
 function driver:append(schema, timestamp, tags, metrics)
-   if(false) then
+   local debug = false
+   
+   if(debug) then
       print("----- Schema --------------")
       tprint(schema.name)
       print("------ Timestamp -------------")
@@ -39,18 +44,35 @@ function driver:append(schema, timestamp, tags, metrics)
       tprint(metrics)
       print("-------------------")
    end
-   
-   local line = schema.name.." {"
-   num = 0
-   for k,v in pairs(tags) do
-      if(num > 0) then line = line .. "," end
-      line = line .. k..'="'..v..'"'
-      num = num + 1
+
+   local tags_str = ''
+   for k, v in pairs(tags or {}) do
+      --[[
+	 All <label values> must be wrapped between " "
+      --]]
+      tags_str = tags_str..string.format('%s="%s",', k, v)
    end
-      
-   for k,v in pairs(metrics) do
-      local exp = line .. ', metric="' .. k .. '"} '.. v .. " " ..timestamp .. "0000"
-      io.write(exp.."\n") -- TODO write onto prometheus
+
+   for k, v in pairs(metrics or {}) do
+      --[[
+	 https://prometheus.io/docs/concepts/data_model/
+
+	 Samples form the actual time series data. Each sample consists of:
+
+	 - a float64 value
+	 - a millisecond-precision timestamp
+
+	 In case you get prometheus errors, you can use the handy tool promtool
+	 to check for metrics format. The tool is distributed together with
+	 prometheus. For example:
+
+	 curl http://localhost:3000/metrics | ./promtool check metrics
+      --]]
+      local metric_str = string.format('%s {%s metric="%s"} %f %d', schema.name, tags_str, k, v, timestamp * 1000)
+
+      -- writing onto Prometheus
+      ntop.lpushCache(prometheus_queue, metric_str)
+      ntop.ltrimCache(prometheus_queue, 0, max_prometheus_queueLen)
    end
 
 end
@@ -98,7 +120,7 @@ end
 --! @brief Informs the driver that it's time to export data.
 --! @note This is called periodically by ntopng and should not be called manually.
 function driver:export()
-   print("prometheus.lua driver:export() called\n")
+   -- print("prometheus.lua driver:export() called\n")
 end
 
 --! @brief Get the most recent timestamp available for queries.

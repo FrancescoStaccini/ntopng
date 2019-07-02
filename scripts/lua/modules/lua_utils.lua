@@ -747,6 +747,10 @@ function hasNagiosSupport()
 end
 
 function hasNindexSupport()
+   if not ntop.isEnterprise() or ntop.isWindows() then
+      return false
+   end
+
    -- TODO optimize
    if prefs == nil then
     prefs = ntop.getPrefs()
@@ -2684,6 +2688,7 @@ end
 -- ###############################################
 
 -- Update Utils::flowstatus2str / FlowStatus enum
+-- Utils::flowStatus2str determines the actual alert_type to set
 
 function getFlowStatusTypes()
    local entries = {

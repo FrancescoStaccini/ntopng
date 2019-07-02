@@ -12,6 +12,7 @@ sendHTTPContentTypeHeader('Application/json')
 
 
 --------------------------------------------------------------------------
+local debug = true
 ---------------------------------------------------------------------------
 local ga_module = {}
 local request = {}
@@ -162,10 +163,12 @@ function ga_module.send(speech_text, display_text, expect_response, suggestions_
   res = fill_response(speech_text, display_text,expect_response, suggestions_strings, card)
   print(res.."\n")
 
-  -- io.write("\n")
-  -- io.write("NTOPNG RESPONSE\n")
-  -- tprint(res)
-  -- io.write("\n---------------------------------------------------------\n")
+if debug then 
+  io.write("\n")
+  io.write("NTOPNG RESPONSE\n")
+  tprint(res)
+  io.write("\n---------------------------------------------------------\n")
+end
 
 end
 
@@ -185,11 +188,12 @@ function ga_module.receive()
 
   ntop.setCache("session_id", info.session )
 
-  
-  -- io.write("\n")
-  -- io.write("DIALOGFLOW REQUEST")
-  -- tprint(response)
-  -- io.write("\n")
+if debug then   
+  io.write("\n")
+  io.write("DIALOGFLOW REQUEST")
+  tprint(response)
+  io.write("\n")
+end
 
   return response
 end

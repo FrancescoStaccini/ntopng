@@ -1,7 +1,10 @@
 
 
 
--- https://quickchart.io   GLI FAI UNA POST COI DATI E TI RESTITUISCE UN'IMMAGINE CON IL GRAFICO, SBEM
+-- https://quickchart.io   GLI FAI UNA POST COI DATI E TI RESTITUISCE UN'IMMAGINE CON IL GRAFICO
+--NOTE: There is a 240 requests per minute per IP rate limit (4 charts/sec) on the public service.
+
+--Also, i can create QR code
 
 
 --os.execute("curl -X POST  https://api.telegram.org/bot"..bot_token.."/sendMessage -d chat_id="..chat_id.." -d text=\" " ..text.." \" ")
@@ -22,6 +25,7 @@ if((dirs.scriptdir ~= nil) and (dirs.scriptdir ~= "")) then package.path = dirs.
 --ignore_post_payload_parse = 1
 require "lua_utils"
 local json = require("dkjson")
+local net_state = require "network_state"
 
 sendHTTPContentTypeHeader('text/html')
 
@@ -104,20 +108,40 @@ end
   },
 }
 
+
+MEGATODO:   POST endpoint   (https://quickchart.io/#build-from-url)
+If your chart is large or complicated, you may prefer to send a POST request rather than a GET request. This avoids limitations on URL length and means you don't have to worry about URL encoding. The /chart POST endpoint takes the same parameters as above via the following JSON object:
+
+        {
+          "backgroundColor": "transparent",
+          "width": 500,
+          "height": 300,
+          "chart": {...},
+        }
+      
+Note that if you want to include Javascript options in chart, you'll have to send the parameter as a string rather than a JSON object. 
+
 ]]
 
-function create_graph_url(type, data, datasets)
-    local w,h,site_name = 500, 280, "https://quickchart.io/chart?"
+
+--data contain labels and datasets
+function create_graph_url(data) -- TODO: metti un parametro(tabella) che contiene le variabili sottostanti (insomma falle decidere al chiamante)
+    local w,h,site_name = 500, 280, "https://quickchart.io/chart?" --TODO: indaga sulle possibili dim dell'img (mantenere un certo rapporto tra w e h?)
     local chart type = "bar" --also Radar, Line, Pie, Doughnut, Scatter, Bubble, Radial, Sparklines, Mixed
-    local option = ""--check docs because that's a lot of stuff
-    
+    local bkgColor = "white"
+    local option = ""--check docs because that's a lot of stuff (a lot of plugins like Annotation)
+    local legend = false
 
-
-
-
-    
-
-
+    local display_text = "CIAO SONO GEORGE"
+    local speech_text = "WOF WOF"
+    local card_title = "Giorgione"
+    local card_url_image = "https://drive.google.com/open?id=1-EezgVe6jV0fjUVLYcRyKTuS2RF9jTEN"
+    local accessibility_text = "cane"
+    local button_title = "corgi butt?"
+    local button_open_url_action = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQvmiwQzR_ihGRYwyl9ifunUyTwoGI8nv7yvlyg4B4yV41MeNoNPQ"
+    local card = google.create_card(card_title, card_url_image, accessibility_text,button_title, button_open_url_action)
+  
+    google.send(speech_text, display_text, nil, nil, card)
 end
 
 

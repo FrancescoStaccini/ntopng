@@ -6,12 +6,12 @@ dirs = ntop.getDirs()
 package.path = dirs.installdir .. "/scripts/lua/modules/?.lua;" .. package.path
 if((dirs.scriptdir ~= nil) and (dirs.scriptdir ~= "")) then package.path = dirs.scriptdir .. "/lua/modules/?.lua;" .. package.path end
 require "lua_utils"
-local json = require("dkjson")
+local json = require("dkjson")--CHECK: if i load a module already loaded, i need to explicitly that module here?
 
 sendHTTPContentTypeHeader('Application/json')
 
-
 --------------------------------------------------------------------------
+local debug = true
 ---------------------------------------------------------------------------
 local ga_module = {}
 local request = {}
@@ -30,7 +30,6 @@ local function fill_response(speech_text, display_text, expect_response, suggest
     end
   end
 
-  
   if card then
     myitems =  {  --note: all the rich response must be put inside "myitems"
       { 
@@ -155,17 +154,18 @@ end
   expect_response: boolean to let the assistant listen
   suggestion_strings: suggestion displayed on the bottom of the screen (MAX 8)
   (basic)card: one of the "rich message" response [https://dialogflow.com/docs/intents/rich-messages]
-
   ]]
 function ga_module.send(speech_text, display_text, expect_response, suggestions_strings, card )
 
   res = fill_response(speech_text, display_text,expect_response, suggestions_strings, card)
   print(res.."\n")
 
-  -- io.write("\n")
-  -- io.write("NTOPNG RESPONSE\n")
-  -- tprint(res)
-  -- io.write("\n---------------------------------------------------------\n")
+    if debug then 
+    io.write("\n")
+    io.write("NTOPNG RESPONSE\n")
+    tprint(res)
+    io.write("\n---------------------------------------------------------\n")
+    end
 
 end
 
@@ -185,11 +185,12 @@ function ga_module.receive()
 
   ntop.setCache("session_id", info.session )
 
-  
-  -- io.write("\n")
-  -- io.write("DIALOGFLOW REQUEST")
-  -- tprint(response)
-  -- io.write("\n")
+    if debug then   
+    io.write("\n")
+    io.write("DIALOGFLOW REQUEST")
+    tprint(response)
+    io.write("\n")
+    end
 
   return response
 end

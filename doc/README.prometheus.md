@@ -3,18 +3,30 @@ Introduction
 This readme explains how to integrate ntopng with http://prometheus.io time series database.
 Prometheus polls data from ntopng that must expose the /metrics URL (pull model).
 
-*** THIS WORK IS IN BETA STAGE: IT WILL BE REFINED IN FUTURE VERSIONS AND IT IS SUBJECT TO CHANGES ***
 
 Installation
 ------------
 After installing prometheus, in order to run it you will need a configuration file.
-You can use the one provided in the [https://prometheus.io/docs/introduction/getting_started/](getting started guide).
+You can use the one provided in the [https://prometheus.io/docs/introduction/getting_started/] (getting started guide).
 
-```prometheus -config.file /etc/prometheus/prometheus.yml```
+```
+prometheus --config.file=/etc/prometheus/prometheus.yml
+```
+
+You may also want to enable the admin API (for example to delete old
+timeseries). In this case, add the corresponding option
+
+```
+prometheus --config.file=/etc/prometheus/prometheus.yml --web.enable-admin-api
+```
 
 By default, it will start a webserver on port 9090. Verify the connection before proceeding.
 
-In order to start monitoring ntopng, you should add a new job to the `scrape_configs` section in your prometheus.yml:
+In order to start monitoring ntopng,
+
+[1] Go inside ntopng preferences -> Timeseries then select Prometheous and save it
+
+[2] you should add a new job to the `scrape_configs` section in your prometheus.yml:
 
 ```
 # A scrape configuration containing exactly one endpoint to scrape:
@@ -23,7 +35,7 @@ scrape_configs:
 
     # This is the polling interval. It will affect your data resolution and cpu load.
     # NOTE: keep in sync with "poll_interval" in metrics.lua
-    scrape_interval: 60s
+    scrape_interval: 10s
 
     target_groups:
       # This must match your ntopng host and port
@@ -34,10 +46,13 @@ Since prometheus does not support custom HTTP headers for authentication, you ha
   - disable ntopng login, either locally (-l 0) or both locally and remotely (-l 1)
   - setup an HTTP proxy like nginx to add authentication headers through it
 
-Sample queries
---------------
-- Traffic by ip address: `sum(rate([10m])) by (ip)`
-- Top 5 networks: `topk(5, sum(rate([10m])) by (network))`
-- Top 10 talkers: `topk(10, sum(rate([10m])) by (ip))`
-- Top 10 protocols in network 192.168.1.0/24: `topk(10, sum(rate({network="192.168.1.0/24"}[10m])) by (protocol))`
-- Top 10 protocols of host 192.168.1.1: `topk(10, sum(rate({ip="192.168.1.1"}[10m])) by (protocol))`
+
+Visualization
+-------------
+You can connect to the prometheus GUI at http://localhost:9090 and see timeseries
+
+
+LIMITATION
+----------
+
+Currently ntopng is able to write into prometheus but not to read from it and display data in the GUI

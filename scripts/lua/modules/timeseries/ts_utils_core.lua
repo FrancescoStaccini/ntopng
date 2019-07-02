@@ -49,7 +49,9 @@ end
 -- ##############################################
 
 function ts_utils.hasHighResolutionTs()
-  return (ntop.getPref("ntopng.prefs.timeseries_driver") == "influxdb")
+   local driver_name = ntop.getPref("ntopng.prefs.timeseries_driver")
+   
+   return((driver_name == "influxdb") or (driver_name == "prometheus"))
 end
 
 -- ##############################################
@@ -153,7 +155,7 @@ function ts_utils.listActiveDrivers()
     local rrd_driver = require("rrd"):new({base_path = (dirs.workingdir .. "/rrd_new")})
     active_drivers[#active_drivers + 1] = rrd_driver
   elseif driver == "prometheus" then
-     local prometheus_driver = require("prometheus"):new()
+     local prometheus_driver = require("prometheus"):new({})
      active_drivers[#active_drivers + 1] = prometheus_driver
   elseif driver == "influxdb" then
     local auth_enabled = (ntop.getPref("ntopng.prefs.influx_auth_enabled") == "1")
@@ -179,7 +181,7 @@ end
 function ts_utils.getQueryDriver()
   local drivers = ts_utils.listActiveDrivers()
 
-  -- TODO: for now prefer the influx driver if present
+  -- NOTE: prefer the InfluxDB driver if available, RRD as fallback
   local driver = drivers[2] or drivers[1]
 
   return driver
@@ -290,12 +292,6 @@ function ts_utils.query(schema_name, tags, tstart, tend, options)
   if not schema then
     traceError(TRACE_ERROR, TRACE_CONSOLE, "Schema not found: " .. schema_name)
     return nil
-  end
-
-  -- TODO: temporary fix for "process:memory"
-  if schema_name == "process:memory" then
-    tags = table.clone(tags)
-    tags.ifid = nil
   end
 
   if not schema:verifyTags(tags) then
@@ -744,7 +740,6 @@ end
 
 -- ##############################################
 
--- TODO make standard and document
 function ts_utils.queryMean(schema_name, tstart, tend, tags, options)
   if not isUserAccessAllowed(tags) then
     return nil

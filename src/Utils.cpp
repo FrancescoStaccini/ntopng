@@ -567,6 +567,7 @@ int Utils::mkdir(const char *path, mode_t mode) {
 
 /* **************************************************** */
 
+/* NOTE: this function also determines the AlertType to use */
 const char* Utils::flowStatus2str(FlowStatus s, AlertType *aType, AlertLevel *aLevel) {
   *aType = alert_flow_misbehaviour; /* Default */
   *aLevel = alert_level_warning;
@@ -1833,7 +1834,6 @@ bool Utils::httpGetPost(lua_State* vm, char *url, char *username,
       out_f = fopen(write_fname, "w");
 
       if(out_f == NULL) {
-        char buf[64];
         ntop->getTrace()->traceEvent(TRACE_ERROR, "Could not open %s for write", write_fname, strerror(errno));
         curl_easy_cleanup(curl);
         if(vm) lua_pushnil(vm);

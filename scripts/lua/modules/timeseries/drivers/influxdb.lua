@@ -705,9 +705,19 @@ end
 -- ##############################################
 
 local INFLUX_KEY_PREFIX = "ntopng.cache.influxdb."
+
+-- Keys to identify redis hash caches to keep stats counters
+-- such as dropped and exported points
 local INFLUX_KEY_DROPPED_POINTS = INFLUX_KEY_PREFIX.."dropped_points"
 local INFLUX_KEY_EXPORTED_POINTS = INFLUX_KEY_PREFIX.."exported_points"
 local INFLUX_KEY_EXPORTS = INFLUX_KEY_PREFIX.."exports"
+local INFLUX_KEY_FAILED_EXPORTS = INFLUX_KEY_PREFIX.."failed_exports"
+
+-- Use this flag as TTL-based redis keys to check wether the health
+-- of influxdb is OK.
+local INFLUX_FLAGS_TIMEOUT = 60 -- keep the issue for 60 seconds
+local INFLUX_FLAG_DROPPING_POINTS = INFLUX_KEY_PREFIX.."flag_dropping_points"
+local INFLUX_FLAG_FAILING_EXPORTS = INFLUX_KEY_PREFIX.."flag_failing_exports"
 
 -- ##############################################
 
@@ -720,20 +730,39 @@ end
 
 -- ##############################################
 
-function inc_dropped_points(ifid, num_points)
+local function inc_dropped_points(ifid, num_points)
+   ntop.setCache(INFLUX_FLAG_DROPPING_POINTS, "true", INFLUX_FLAGS_TIMEOUT)
    inc_val(INFLUX_KEY_DROPPED_POINTS, ifid, num_points)
 end
 
 -- ##############################################
 
-function inc_exported_points(ifid, num_points)
+local function inc_exported_points(ifid, num_points)
    inc_val(INFLUX_KEY_EXPORTED_POINTS, ifid, num_points)
 end
 
 -- ##############################################
 
-function inc_exports(ifid)
+local function inc_exports(ifid)
    inc_val(INFLUX_KEY_EXPORTS, ifid, 1)
+end
+
+-- ##############################################
+
+local function inc_failed_exports(ifid)
+   ntop.setCache(INFLUX_FLAG_FAILING_EXPORTS, "true", INFLUX_FLAGS_TIMEOUT)
+   inc_val(INFLUX_KEY_FAILED_EXPORTS, ifid, 1)
+end
+
+-- ##############################################
+
+local function del_all_vals()
+   ntop.delCache(INFLUX_KEY_DROPPED_POINTS)
+   ntop.delCache(INFLUX_KEY_EXPORTED_POINTS)
+   ntop.delCache(INFLUX_KEY_EXPORTS)
+   ntop.delCache(INFLUX_KEY_FAILED_EXPORTS)
+   ntop.delCache(INFLUX_FLAG_DROPPING_POINTS)
+   ntop.delCache(INFLUX_KEY_FAILED_EXPORTS)
 end
 
 -- ##############################################
@@ -756,6 +785,36 @@ end
 
 -- ##############################################
 
+local function is_dropping_points()
+   return ntop.getCache(INFLUX_FLAG_DROPPING_POINTS) == "true"
+end
+
+-- ##############################################
+
+local function is_failing_exports()
+   return ntop.getCache(INFLUX_FLAG_FAILING_EXPORTS) == "true"
+end
+
+-- ##############################################
+
+-- Returns an indication of the current InfluxDB health.
+-- Health is "green" when everything is working as expected,
+-- "yellow" when there are recoverable issues, or "red" when
+-- there is some critical error.
+-- Health corresponds to the current status, i.e., a past
+-- error, will no longer be considered
+function driver:get_health()
+   if is_dropping_points() then
+      return "red"
+   elseif is_failing_exports() then
+      return "yellow"
+   end
+
+   return "green"
+end
+
+-- ##############################################
+
 local function deleteExportableFile(exportable)
    if exportable and exportable["fname"] then
       if ntop.exists(exportable["fname"]) then
@@ -767,6 +826,8 @@ end
 
 -- ##############################################
 
+-- When we giveup for a certain exportable, that is, when we are not
+-- going to try and export it again, we call this function
 local function dropExportable(exportable)
    inc_dropped_points(exportable["ifid"], exportable["num_points"])
    deleteExportableFile(exportable)
@@ -796,10 +857,20 @@ end
 
 -- ##############################################
 
+-- Call this function when an exportable has been sent to InfluxDB
+-- with success
 local function exportableSuccess(exportable)
    inc_exported_points(exportable["ifid"], exportable["num_points"])
    inc_exports(exportable["ifid"])
    deleteExportableFile(exportable)
+end
+
+-- ##############################################
+
+-- Call this function when the export has failed but it is going
+-- to be tried again
+local function exportableFailure(exportable)
+   inc_failed_exports(exportable["ifid"])
 end
 
 -- ##############################################
@@ -899,6 +970,7 @@ function driver:export(deadline)
 	 ntop.lremCache(INFLUX_EXPORT_QUEUE, cur_export)
       else
 	 -- export FAILED, retry next time
+	 exportableFailure(exportable)
       end
    end
 
@@ -1435,11 +1507,13 @@ function driver.init(dbname, url, days_retention, username, password, verbose)
   local version, err = getInfluxdbVersion(url, username, password)
 
   if((not version) and (err ~= nil)) then
+    ntop.setCache("ntopng.cache.influxdb.last_error", err)
     return false, err
   elseif((not version) or (not isCompatibleVersion(version))) then
     local err = i18n("prefs.incompatible_influxdb_version_found",
       {required=MIN_INFLUXDB_SUPPORTED_VERSION, found=version, url="https://portal.influxdata.com/downloads"})
 
+    ntop.setCache("ntopng.cache.influxdb.last_error", err)
     traceError(TRACE_ERROR, TRACE_CONSOLE, err)
     return false, err
   end
@@ -1454,14 +1528,16 @@ function driver.init(dbname, url, days_retention, username, password, verbose)
     local reply = json.decode(res.CONTENT)
 
     if reply and reply.results and reply.results[1] and reply.results[1].series then
-      local dbs = reply.results[1].series[1] or {values={}}
+      local dbs = reply.results[1].series[1]
 
-      for _, row in pairs(dbs.values) do
-        local user_db = row[1]
+      if((dbs ~= nil) and (dbs.values ~= nil)) then
+        for _, row in pairs(dbs.values) do
+          local user_db = row[1]
 
-        if user_db == dbname then
-          db_found = true
-          break
+          if user_db == dbname then
+            db_found = true
+            break
+          end
         end
       end
     end
@@ -1476,6 +1552,7 @@ function driver.init(dbname, url, days_retention, username, password, verbose)
     if not res or (res.RESPONSE_CODE ~= 200) then
       local err = i18n("prefs.influxdb_create_error", {db=dbname, msg=getResponseError(res)})
 
+      ntop.setCache("ntopng.cache.influxdb.last_error", err)
       traceError(TRACE_ERROR, TRACE_CONSOLE, err)
       return false, err
     end
@@ -1501,6 +1578,7 @@ function driver.init(dbname, url, days_retention, username, password, verbose)
     -- NOTE: updateCQRetentionPolicies will be called automatically as driver:setup is triggered after this
   end
 
+  ntop.delCache("ntopng.cache.influxdb.last_error")
   return true, i18n("prefs.successfully_connected_influxdb", {db=dbname, version=version})
 end
 
@@ -1627,6 +1705,10 @@ end
 function driver:setup(ts_utils)
   local queries = {}
   local max_batch_size = 25 -- note: each query is about 400 characters
+
+  -- Clear saved values (e.g., number of exported points) as
+  -- we want to start clean and keep values since-ntopng-startup
+  del_all_vals()
 
   -- Ensure that the database exists
   driver.init(self.db, self.url, nil, self.username, self.password)

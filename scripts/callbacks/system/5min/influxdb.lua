@@ -17,7 +17,11 @@ local probe = {
 -- ##############################################
 
 local function get_memory_size_query(influxdb, schema, tstart, tend, time_step)
-  local q = 'SELECT MEAN(Sys) as mem_bytes' ..
+  --[[
+     See comments in function driver:getMemoryUsage() to understand
+     why it is necessary to subtract the HeapReleased from Sys.
+  --]]
+  local q = 'SELECT MEAN(Sys) - MEAN(HeapReleased) as mem_bytes' ..
       ' FROM "_internal".."runtime"' ..
       " WHERE time >= " .. tstart .. "000000000 AND time <= " .. tend .. "000000000" ..
       " GROUP BY TIME(".. time_step .."s)"
@@ -92,6 +96,8 @@ function probe.getTimeseriesMenu(ts_utils)
     {schema="influxdb:exports",                           label=i18n("system_stats.exports_label"),
       value_formatter = {"export_rate", "exports_format"},
       metrics_labels = {i18n("system_stats.exports_label")}},
+    {schema="influxdb:exported_points",                   label=i18n("system_stats.exported_points")},
+    {schema="influxdb:dropped_points",                    label=i18n("system_stats.dropped_points")},
     {schema="custom:infludb_exported_vs_dropped_points",  label=i18n("system_stats.exported_vs_dropped_points"),
       custom_schema = {
         bases = {"influxdb:exported_points", "influxdb:dropped_points"},
@@ -119,11 +125,14 @@ function probe.getExportStats()
      exports = exports + influxdb:get_exports(ifid)
   end
 
-  return {
-    points_exported = points_exported,
-    points_dropped = points_dropped,
-    exports = exports,
+  local res = {
+     health = influxdb:get_health(),
+     points_exported = points_exported,
+     points_dropped = points_dropped,
+     exports = exports,
   }
+
+  return(res)
 end
 
 -- ##############################################

@@ -21,5 +21,91 @@ function utils.url_encode(str)
     end
     return str	
 end
+
+
+
+--tiene conto solo dei primi 3 proto per una questione di pesantezza cognitiva: l'assistente non deve parlare troppo 
+function utils.create_top_traffic_speech_text(top_app)
+    local text, top_num, j = "", 0, 1
+    
+    if      top_app[3] then top_num = 3
+    elseif  top_app[2] then top_num = 2
+    elseif  top_app[1] then top_num = 1
+    end
+  
+    if top_num == 1 then 
+      text = "I note only "..top_app[1][1].." with "..top_app[1][2] .." percent of traffic."
+    end
+  
+    local text_name, text_perc
+    if top_num > 1 then 
+      text_name = "The ".. top_num .." main applications are: "..(top_app[1][1] or "")..", "..(top_app[2][1] or "")..", and "..(top_app[3][1] or "")
+      text_perc = "; With a traffic, respectively, of "..(top_app[1][2] or "")..", "..(top_app[2][2] or "")..", "..(top_app[3][2] or "").. " percent"
+      text = text_name..text_perc
+    else 
+      text = "No application deteced" 
+    end
+    
+    return text 
+end
+
+
+
+--NOTE: per ora funge col grafico a barre con UNA SOLA entità per punto
+--TODO: a lot! le possibili opzioni sono taaante
+
+--PARAMETER: data must contaim 3 field: labels = dell'asse X; values = di Y; legend_label = the legend;
+--          options must contain 4 field: bkg_color = background color; w = width; h = height; chart_type = the type of the chart
+function utils.create_chart_url(data, options)
+    local w,h,site_name = options.w, options.h, "https://quickchart.io/chart?" --TODO: indaga sulle possibili dim dell'img (mantenere un certo rapporto tra w e h?)
+    local chart_type = options.chart_type --also Radar, Line, Pie, Doughnut, Scatter, Bubble, Radial, Sparklines, Mixed
+    local bkg_color = options.bkg_color
+    --local option = ""--check docs (chart.js) because that's a loooot of stuff (a lot of plugins like Annotation)
+    --local legend = false
+
+    --TODO: support for more options, bars, type ecc...
+    --currently the bar-chart support only ONE bar per point
+    local c = {
+        type = options.chart_type,
+        data = {
+            labels = data.labels,--labels deve essere un array di valori
+            datasets = {{--datasets deve essere un array di valori
+                label = data.legend_label,  
+                data = data["values"] --(inner)data deve essere un array di valori
+            }}
+        }
+    }
+    if options.chart_type == "outlabeledPie" then 
+        c["options"] = {
+            plugins = {
+              legend = false,
+              outlabels = {
+                text = "%l %p",
+                color = "white",
+                stretch = 35,
+                font = {
+                  resizable = true,
+                  minSize = 12,
+                  maxSize = 18
+                }
+              }
+            }
+          }
+    end
+
+    local jn = json.encode(c)
+    local url = ""
+    if options.chart_type == "outlabeledPie" then 
+        url = site_name.."bkg=".. bkg_color.."&c="..utils.url_encode(jn)
+    else
+        url = site_name.."w="..w.."&h="..h.."&bkg=".. bkg_color.."&c="..utils.url_encode(jn)
+    end
+
+    return url
+end
+
+
+
+
 ---------------
 return utils

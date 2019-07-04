@@ -18,7 +18,6 @@
     ora, in teoria mi basta creare la URL a modo, poi la passo a Dialogfow e sarà lui e reperire la foto
     ]]
 
-
 dirs = ntop.getDirs()
 package.path = dirs.installdir .. "/scripts/lua/?.lua;" .. package.path
 if((dirs.scriptdir ~= nil) and (dirs.scriptdir ~= "")) then package.path = dirs.scriptdir .. "/lua/modules/?.lua;" .. package.path end
@@ -31,17 +30,6 @@ sendHTTPContentTypeHeader('text/html')
 
 local test_str = "{type:'bar',data:{labels:['January','February','March','April','May'],datasets:[{label:'Dogs',data:[50,60,70,180,190]},{label:'Cats',data:[100,200,300,400,500]}]}}"
 
---TODO: controlla se è già presente in ntop una funzione simile
-function url_encode(str)
-    if str then
-        str = str:gsub("\n", "\r\n")
-        str = str:gsub("([^%w %-%_%.%~])", function(c)
-        return ("%%%02X"):format(string.byte(c))
-        end)
-        str = str:gsub(" ", "+")
-    end
-    return str	
-end
 
 --print(  url_encode(test_str)    )
 
@@ -61,7 +49,7 @@ end
     }]
   }
 }
------------------------------------------------------------------
+_______________________________________________________________________
 
   type: 'bar',
   data: {
@@ -107,7 +95,7 @@ end
     },
   },
 }
-
+________________________________________________
 
 MEGATODO:   POST endpoint   (https://quickchart.io/#build-from-url)
 If your chart is large or complicated, you may prefer to send a POST request rather than a GET request. This avoids limitations on URL length and means you don't have to worry about URL encoding. The /chart POST endpoint takes the same parameters as above via the following JSON object:
@@ -121,17 +109,8 @@ If your chart is large or complicated, you may prefer to send a POST request rat
       
 Note that if you want to include Javascript options in chart, you'll have to send the parameter as a string rather than a JSON object. 
 
-]]
 
-
---data contain labels and datasets
-function create_graph_url(data) -- TODO: metti un parametro(tabella) che contiene le variabili sottostanti (insomma falle decidere al chiamante)
-    local w,h,site_name = 500, 280, "https://quickchart.io/chart?" --TODO: indaga sulle possibili dim dell'img (mantenere un certo rapporto tra w e h?)
-    local chart type = "bar" --also Radar, Line, Pie, Doughnut, Scatter, Bubble, Radial, Sparklines, Mixed
-    local bkgColor = "white"
-    local option = ""--check docs because that's a lot of stuff (a lot of plugins like Annotation)
-    local legend = false
-
+ELEMENTI DELLA CARD:
     local display_text = "CIAO SONO GEORGE"
     local speech_text = "WOF WOF"
     local card_title = "Giorgione"
@@ -139,13 +118,10 @@ function create_graph_url(data) -- TODO: metti un parametro(tabella) che contien
     local accessibility_text = "cane"
     local button_title = "corgi butt?"
     local button_open_url_action = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQvmiwQzR_ihGRYwyl9ifunUyTwoGI8nv7yvlyg4B4yV41MeNoNPQ"
-    local card = google.create_card(card_title, card_url_image, accessibility_text,button_title, button_open_url_action)
-  
-    google.send(speech_text, display_text, nil, nil, card)
-end
+   
 
 
-
+]]
 
 
 

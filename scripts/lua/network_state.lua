@@ -63,7 +63,7 @@ function network_state.check_traffic_categories()
   end
 
   for i,v in pairs(traffic) do
-      table.insert( res, {name = i, perc = math.floor(( v / tot ) * 1000) / 10 } )
+      table.insert( res, {name = i, perc = math.floor(( v / tot ) * 1000) / 10, bytes = v } )
   end
 
   local function compare(a, b) return a.perc > b.perc end
@@ -102,7 +102,7 @@ function network_state.check_top_application_protocol()
   for i,v in pairs(proto_app) do
       local prc = math.floor( (v[2] / tot) * 100 )
       c = c + 1
-      res[c] = { v[1] , prc }
+      res[c] = { v[1] , prc, v[2] }
   end
 
   return res
@@ -132,6 +132,8 @@ function network_state.check_devices_type()
   return res, if_stats.stats.devices
 end
 
+
+--TODO: accorpa con quella sotto, inoltre le frasi devono essere composte sullo script dell'assistente e non qui! SPOSTALE
 --return respectively: state of goodput, number of total flow, total number of bad goodput flow
 function network_state.check_TCP_flow_goodput()
   local bad_gp_client, bad_gp_server, flow_tot, prbl = 0,0,0,0
@@ -166,6 +168,33 @@ function network_state.check_TCP_flow_goodput()
   end
 
   return state, flow_tot, (bad_gp_client + bad_gp_server)
+end
+
+--TODO: ACCORPA CON QUELLO SOPRA
+function network_state.check_TCP_flow_goodput_2()
+  local bad_gp_client, bad_gp_server, flow_tot, prbl = 0,0,0,0
+  local seen, deadline = 0, os.time() + 3000 --TODO: parametrizza la deadline (anche group_of?)
+  local group_of = 5
+
+  repeat
+    hoinfo = interface.getHostsInfo(true, "column_", group_of)
+    tot = hoinfo.numHosts
+
+    for i,v in pairs( hoinfo["hosts"] ) do
+      local afas, afac = hoinfo["hosts"][i]["active_flows.as_server"], hoinfo["hosts"][i]["active_flows.as_client"]
+      local bgc, bgs = hoinfo["hosts"][i]["low_goodput_flows.as_client"], hoinfo["hosts"][i]["low_goodput_flows.as_server"]
+  
+      flow_tot = flow_tot + afac + afas
+      bad_gp_client = bad_gp_client + bgc
+      bad_gp_server = bad_gp_server + bgs
+    end 
+    
+    seen = seen + group_of
+  until (seen < tot) or (os.time() > deadline)
+
+  local perc = 100 - math.floor( (bad_gp_client + bad_gp_server) / flow_tot) * 100 
+
+  return perc
 end
 
 --return a table with tot traffic, remote/local percentage and pkt drop

@@ -17,6 +17,8 @@ local ga_module = {}
 local request = {}
 local response = {}
 
+--CHECK: è possibile NON mandare la risposta testuale?
+
 --"suggestions_strings" must be a string array, and "card" must be created with create_card()
 local function fill_response(speech_text, display_text, expect_response, suggestions_strings, card)  
   if display_text == nil or display_text == "" then display_text = speech_text end
@@ -84,27 +86,32 @@ local function fill_response(speech_text, display_text, expect_response, suggest
   return json.encode(r)
 end
 
-
+--TODO: MAKE BUTTON OPTIONAL
 --TODO: cards allow many things (like buttons), implement them ---> [ https://dialogflow.com/docs/rich-messages#card ]
 --note: in google assistant, the display/speech_text will appear in a bubble over the card
+--    "button_title" and "button_open_url"_action are optional
 function ga_module.create_card(card_title, card_url_image, accessibility_image_text, button_title, button_open_url_action  )
-
-  local myButton = {}
-  myButton = { 
-    {
-      title = button_title,
-      openUrlAction = { url = button_open_url_action}
-     } 
-  }
-
-  local myCard = {}
-  myCard = {
-    title = card_title,
-    image = { url = card_url_image, accessibilityText = accessibility_image_text },
-    buttons = myButton
-  }
-
-  return myCard
+  local card = {}
+  if button_title and button_open_url_action then 
+    local button = {}
+    button = { 
+      {
+        title = button_title,
+        openUrlAction = { url = button_open_url_action}
+      } 
+    }
+    card = {
+      title = card_title,
+      image = { url = card_url_image, accessibilityText = accessibility_image_text },
+      buttons = button
+    }
+  else 
+    card = {
+      title = card_title,
+      image = { url = card_url_image, accessibilityText = accessibility_image_text },
+    }
+  end
+  return card
 end
 
 --To set an arbitrary context (and overwrite the old one) call setContext()
@@ -169,7 +176,7 @@ function ga_module.send(speech_text, display_text, expect_response, suggestions_
 
 end
 
-
+--TODO!!!: salva il contesto appena arriva un intent e cancella il precedente (insomma voglio che il precedente contesto sia a disposizione)
 function ga_module.receive()
 
   local info, pos, err = json.decode(_POST["payload"], 1, nil)--I assume only ONE outputContext

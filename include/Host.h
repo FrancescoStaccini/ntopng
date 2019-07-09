@@ -24,7 +24,7 @@
 
 #include "ntop_includes.h"
 
-class Host : public GenericHashEntry {
+class Host : public GenericHashEntry, public AlertableEntity {
  protected:
   IpAddress ip;
   Mac *mac;
@@ -159,8 +159,6 @@ class Host : public GenericHashEntry {
   inline u_int32_t key()                            { return(ip.key());              };
   inline IpAddress* get_ip()                 { return(&ip);              }
   void set_mac(Mac  *m);
-  void set_mac(char *m);
-  void set_mac(u_int8_t *m);
   inline bool isBlacklisted()                  { return(blacklisted_host);  };
   void reloadHostBlacklist();
   inline const u_int8_t* const get_mac() const { return(mac ? mac->get_mac() : NULL);}
@@ -195,9 +193,6 @@ class Host : public GenericHashEntry {
   inline u_int64_t getNumBytesRcvd()           { return(stats->getNumBytesRcvd());   }
   inline u_int64_t getNumDroppedFlows()        { return(stats->getNumDroppedFlows());}
   inline u_int64_t getNumBytes()               { return(stats->getNumBytes());}
-  inline bool checkpoint(lua_State* vm, NetworkInterface *iface,
-					      u_int8_t checkpoint_id,
-					      DetailsLevel details_level)    { return(stats->checkpoint(vm, iface, checkpoint_id, details_level)); }
   inline float getThptTrendDiff()              { return(stats->getThptTrendDiff());  }
   inline float getBytesThpt()                  { return(stats->getBytesThpt());      }
   inline float getPacketsThpt()                { return(stats->getPacketsThpt());    }
@@ -261,7 +256,6 @@ class Host : public GenericHashEntry {
   virtual bool dropAllTraffic()  { return(false); };
   bool incFlowAlertHits(time_t when);
   virtual bool setRemoteToRemoteAlerts() { return(false); };
-  inline void checkPointHostTalker(lua_State *vm, bool saveCheckpoint) { stats->checkPointHostTalker(vm, saveCheckpoint); }
   virtual void incrVisitedWebSite(char *hostname) {};
   inline void incTotalAlerts()            { stats->incTotalAlerts(); }
   inline u_int32_t getTotalAlerts()       { return(stats->getTotalAlerts()); }

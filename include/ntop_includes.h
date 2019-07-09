@@ -187,7 +187,6 @@ using namespace std;
 #include "ProtoStats.h"
 #include "Utils.h"
 #include "NtopGlobals.h"
-#include "Checkpointable.h"
 #include "TrafficStats.h"
 #include "nDPIStats.h"
 #include "FlowStatusStats.h"
@@ -256,6 +255,7 @@ using namespace std;
 #endif
 #include "InterfaceStatsHash.h"
 #include "GenericHashEntry.h"
+#include "AlertableEntity.h"
 #if defined(NTOPNG_PRO) && defined(HAVE_NINDEX)
 #include "nindex_api.h"
 #endif

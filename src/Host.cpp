@@ -147,7 +147,7 @@ void Host::initialize(Mac *_mac, u_int16_t _vlanId, bool init_all) {
   if((mac = _mac))
     mac->incUses();
 
-  if((vlan = iface->getVlan(_vlanId, true)) != NULL)
+  if((vlan = iface->getVlan(_vlanId, true, true /* Inline call */)) != NULL)
     vlan->incUses();
 
   num_resolve_attempts = 0, ssdpLocation = NULL;
@@ -182,7 +182,7 @@ void Host::initialize(Mac *_mac, u_int16_t _vlanId, bool init_all) {
   PROFILING_SUB_SECTION_EXIT(iface, 19);
 
   if(init_all) {
-    if((as = iface->getAS(&ip, true)) != NULL) {
+    if((as = iface->getAS(&ip, true /* Create if missing */, true /* Inline call */)) != NULL) {
       as->incUses();
       asn = as->get_asn();
       asname = as->get_asname();
@@ -191,7 +191,7 @@ void Host::initialize(Mac *_mac, u_int16_t _vlanId, bool init_all) {
     char country_name[64];
     get_country(country_name, sizeof(country_name));
 
-    if((country = iface->getCountry(country_name, true)) != NULL)
+    if((country = iface->getCountry(country_name, true /* Create if missing */, true /* Inline call */ )) != NULL)
       country->incUses();
   }
 
@@ -370,32 +370,6 @@ void Host::set_mac(Mac *_mac) {
 
 /* *************************************** */
 
-void Host::set_mac(u_int8_t *_mac) {
-  if(iface)
-    set_mac(iface->getMac(_mac, false));
-}
-
-/* *************************************** */
-
-void Host::set_mac(char *m) {
-  u_int8_t mac_address[6];
-  u_int32_t _mac[6] = { 0 };
-
-  if((m == NULL) || (!strcmp(m, "00:00:00:00:00:00")))
-    return;
-
-  sscanf(m, "%02X:%02X:%02X:%02X:%02X:%02X",
-	 &_mac[0], &_mac[1], &_mac[2], &_mac[3], &_mac[4], &_mac[5]);
-
-  mac_address[0] = _mac[0], mac_address[1] = _mac[1],
-    mac_address[2] = _mac[2], mac_address[3] = _mac[3],
-    mac_address[4] = _mac[4], mac_address[5] = _mac[5];
-
-  set_mac(mac_address);
-}
-
-/* *************************************** */
-
 bool Host::hasAnomalies() {
   time_t now = time(0);
 
@@ -517,6 +491,15 @@ void Host::lua(lua_State* vm, AddressTree *ptree,
 
   lua_push_bool_table_entry(vm, "privatehost", isPrivateHost());
   lua_push_bool_table_entry(vm, "hiddenFromTop", isHiddenFromTop());
+
+  lua_newtable(vm);
+  lua_push_uint64_table_entry(vm, "min", getNumTriggeredAlerts(minute_script));
+  lua_push_uint64_table_entry(vm, "5mins", getNumTriggeredAlerts(five_minute_script));
+  lua_push_uint64_table_entry(vm, "hour", getNumTriggeredAlerts(hour_script));
+  lua_push_uint64_table_entry(vm, "day", getNumTriggeredAlerts(day_script));
+    lua_pushstring(vm, "num_triggered_alerts");
+  lua_insert(vm, -2);
+  lua_settable(vm, -3);
 
   lua_push_uint64_table_entry(vm, "num_alerts", triggerAlerts() ? getNumAlerts() : 0);
 
@@ -1404,3 +1387,8 @@ void Host::dumpDropbox(lua_State *vm) {
   lua_insert(vm, -2);
   lua_settable(vm, -3);
 }
+
+/* ****************************************xo************ */
+
+
+

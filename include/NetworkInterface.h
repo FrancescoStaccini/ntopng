@@ -68,7 +68,7 @@ typedef struct {
  *  @ingroup NetworkInterface
  *
  */
-class NetworkInterface : public Checkpointable {
+class NetworkInterface : public AlertableEntity {
  protected:
   char *ifname, *ifDescription;
   bpf_u_int32 ipv4_network_mask, ipv4_network;
@@ -251,8 +251,6 @@ class NetworkInterface : public Checkpointable {
   bool isNumber(const char *str);
   bool checkIdle();
 
-  void disablePurge(bool on_flows);
-  void enablePurge(bool on_flows);
   void sumStats(TcpFlowStats *_tcpFlowStats, EthStats *_ethStats,
 		LocalTrafficStats *_localStats, nDPIStats *_ndpiStats,
 		PacketStats *_pktStats, TcpPacketStats *_tcpPacketStats);
@@ -356,13 +354,7 @@ class NetworkInterface : public Checkpointable {
   inline void incRetransmittedPkts(u_int32_t num)   { tcpPacketStats.incRetr(num); };
   inline void incOOOPkts(u_int32_t num)             { tcpPacketStats.incOOO(num);  };
   inline void incLostPkts(u_int32_t num)            { tcpPacketStats.incLost(num); };
-  bool checkPointHostCounters(lua_State* vm, u_int8_t checkpoint_id, char *host_ip, u_int16_t vlan_id, DetailsLevel details_level);
-  bool checkPointNetworkCounters(lua_State* vm, u_int8_t checkpoint_id, u_int8_t network_id, DetailsLevel details_level);
-  bool checkPointHostTalker(lua_State* vm, char *host_ip, u_int16_t vlan_id, bool saveCheckpoint);
-  inline bool checkPointInterfaceCounters(lua_State* vm, u_int8_t checkpoint_id, DetailsLevel details_level) { return checkpoint(vm, this, checkpoint_id, details_level); }
-  inline char* getCheckpointCompressionBuffer(u_int8_t checkpoint_id) { return (checkpoint_id<CONST_MAX_NUM_CHECKPOINTS) ? checkpoint_compression_buffer[checkpoint_id] : NULL; };
   void checkPointCounters(bool drops_only);
-  bool serializeCheckpoint(json_object *my_object, DetailsLevel details_level);
 
   virtual u_int64_t getCheckPointNumPackets();
   virtual u_int64_t getCheckPointNumBytes();
@@ -404,7 +396,6 @@ class NetworkInterface : public Checkpointable {
   inline bool isTrafficMirrored()  { return is_traffic_mirrored; };
   void  updateTrafficMirrored();
   void updateFlowDumpDisabled();
-  bool restoreHost(char *host_ip, u_int16_t vlan_id);
   u_int printAvailableInterfaces(bool printHelp, int idx, char *ifname, u_int ifname_len);
   void findFlowHosts(u_int16_t vlan_id,
 		     Mac *src_mac, IpAddress *_src_ip, Host **src,
@@ -540,12 +531,11 @@ class NetworkInterface : public Checkpointable {
   ArpStatsMatrixElement* getArpHashMatrixElement(const u_int8_t _src_mac[6], const u_int8_t _dst_mac[6],
 						 const u_int32_t _src_ip, const u_int32_t _dst_ip,
 						 bool * const src2dst);
-  Vlan* getVlan(u_int16_t vlanId, bool createIfNotPresent);
-  AutonomousSystem *getAS(IpAddress *ipa, bool createIfNotPresent);
-  Country* getCountry(const char *country_name, bool createIfNotPresent);
-  virtual Mac*  getMac(u_int8_t _mac[6], bool createIfNotPresent);
-  virtual Host* getHost(char *host_ip, u_int16_t vlan_id);
-  virtual Host* getHost(IpAddress * const host_ip, u_int16_t vlan_id) const;
+  Vlan* getVlan(u_int16_t vlanId, bool createIfNotPresent, bool isInlineCall);
+  AutonomousSystem *getAS(IpAddress *ipa, bool createIfNotPresent, bool isInlineCall);
+  Country* getCountry(const char *country_name, bool createIfNotPresent, bool isInlineCall);
+  virtual Mac*  getMac(u_int8_t _mac[6], bool createIfNotPresent, bool isInlineCall);
+  virtual Host* getHost(char *host_ip, u_int16_t vlan_id, bool isInlineCall);
   bool getHostInfo(lua_State* vm, AddressTree *allowed_hosts, char *host_ip, u_int16_t vlan_id);
   void findPidFlows(lua_State *vm, u_int32_t pid);
   void findProcNameFlows(lua_State *vm, char *proc_name);
@@ -652,6 +642,8 @@ class NetworkInterface : public Checkpointable {
   inline bool reloadHostsBroadcastDomain()          { return reload_hosts_bcast_domain; }
   inline void checkHostsBlacklistReload()           { if(reload_hosts_blacklist) { reloadHostsBlacklist(); reload_hosts_blacklist = false; } }
   void reloadHostsBlacklist();
+  void checkHostsAlerts(ScriptPeriodicity p);
+  void checkInterfaceAlerts(ScriptPeriodicity p);
   bool isHiddenFromTop(Host *host);
   inline virtual bool areTrafficDirectionsSupported() { return(false); };
   inline virtual bool isView() { return(false); };

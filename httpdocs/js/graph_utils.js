@@ -347,6 +347,16 @@ function hideQuerySlow() {
   $("#query-slow-alert").hide();
 }
 
+function chart_data_sum(series) {
+  return(series.reduce(function(acc, x) {
+    return(acc + x.values.reduce(
+      function(acc, pt) {
+        return(acc + pt[1] || 0);
+      }, 0)
+    )
+  }, 0));
+}
+
 // add a new updateStackedChart function
 function attachStackedChartCallback(chart, schema_name, chart_id, zoom_reset_id, params, step,
           metric_type, align_step, show_all_smooth, initial_range, ts_table_shown) {
@@ -389,11 +399,62 @@ function attachStackedChartCallback(chart, schema_name, chart_id, zoom_reset_id,
 
   var chart_colors_min = ["#7CC28F", "#FCD384", "#FD977B"];
 
+  /* The default number of y points */
+  var num_ticks_y1 = null;
+  var num_ticks_y2 = null;
+  var domain_y1 = null;
+  var domain_y2 = null;
+  var first_run = true;
+
   var update_chart_data = function(new_data) {
     /* reset chart data so that the next transition animation will be gracefull */
     d3_sel.datum([]).call(chart);
+    d3_sel.datum(new_data);
 
-    d3_sel.datum(new_data).transition().call(chart);
+    /* This additional refresh is needed to determine the yticks
+     * and domain, needed below. */
+    d3_sel.call(chart);
+
+    if(first_run) {
+      num_ticks_y1 = chart.yAxis1.ticks();
+      num_ticks_y2 = chart.yAxis2.ticks();
+      domain_y1 = chart.yDomain1();
+      domain_y2 = chart.yDomain2();
+      first_run = false;
+    }
+
+    if(metric_type === "gauge") {
+      var cur_domain_y1 = chart.yAxis1.scale().domain();
+      var cur_domain_y2 = chart.yAxis2.scale().domain();
+
+      cur_domain_y1 = cur_domain_y1[1] - cur_domain_y1[0];
+      cur_domain_y2 = cur_domain_y2[1] - cur_domain_y2[0];
+
+      /* If there are not enough points available, reduce the number of
+       * ticks to avoid repeated ticks with same integer value.
+       * Other solutions (documented in https://stackoverflow.com/questions/21075245/nvd3-prevent-repeated-values-on-y-axis)
+       * are not easily applicable in this case.
+       */
+      chart.yAxis1.ticks(Math.min(cur_domain_y1, num_ticks_y1));
+      chart.yAxis2.ticks(Math.min(cur_domain_y2, num_ticks_y2));
+    }
+
+    var y1_sum = chart_data_sum(new_data.filter(function(x) { return(x.yAxis == 1); }))
+    var y2_sum = chart_data_sum(new_data.filter(function(x) { return(x.yAxis == 2); }))
+
+    /* Fix negative ydomain values appearing when dataset is empty */
+    if(y1_sum == 0)
+      chart.yDomain1([0, 1]);
+    else
+      chart.yDomain1(domain_y1);
+
+    if(y2_sum == 0)
+      chart.yDomain2([0, 1]);
+    else
+      chart.yDomain2(domain_y2);
+
+    /* Refresh the chart */
+    d3_sel.transition().call(chart);
     nv.utils.windowResize(chart.update);
     spinner.remove();
   }

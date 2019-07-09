@@ -285,11 +285,11 @@ u_int32_t ViewInterface::getVLANsHashSize() {
 
 /* **************************************************** */
 
-Host* ViewInterface::getHost(char *host_ip, u_int16_t vlan_id) {
+Host* ViewInterface::getHost(char *host_ip, u_int16_t vlan_id, bool isInlineCall) {
   Host *h = NULL;
 
   for(u_int8_t s = 0; s < numSubInterfaces; s++) {
-    if((h = subInterfaces[s]->getHost(host_ip, vlan_id)))
+    if((h = subInterfaces[s]->getHost(host_ip, vlan_id, isInlineCall)))
       break;
   }
 
@@ -298,23 +298,11 @@ Host* ViewInterface::getHost(char *host_ip, u_int16_t vlan_id) {
 
 /* **************************************************** */
 
-Host* ViewInterface::getHost(IpAddress * const host_ip, u_int16_t vlan_id) const {
-  Host *h = NULL;
-
-  for(u_int8_t s = 0; s < numSubInterfaces; s++) {
-    if((h = subInterfaces[s]->getHost(host_ip, vlan_id)))
-      break;
-  }
-
-  return(h);
-}
-/* **************************************************** */
-
-Mac* ViewInterface::getMac(u_int8_t _mac[6], bool createIfNotPresent) {
+Mac* ViewInterface::getMac(u_int8_t _mac[6], bool createIfNotPresent, bool isInlineCall) {
   Mac *ret = NULL;
 
   for(u_int8_t s = 0; s < numSubInterfaces; s++) {
-    if((ret = subInterfaces[s]->getMac(_mac, false)))
+    if((ret = subInterfaces[s]->getMac(_mac, false, isInlineCall)))
       break;
   }
 

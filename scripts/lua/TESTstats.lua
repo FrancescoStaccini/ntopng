@@ -140,9 +140,31 @@ end
 
 local json = require("dkjson")
 --print( json.encode(createStats(matrix), {indent = true} ) )
-print( json.encode( interface.findHost("AC:9E:17:81:A1:76"), {indent = true} ) )
---print( json.encode( interface.getStats(), {indent = true} ) )
+--print( json.encode( interface.findHost("AC:9E:17:81:A1:76"), {indent = true} ) )
+--print( json.encode( interface.getnDPIProtocols(), {indent = true} ) )
 
+
+--[[
+-- Iterates each active host on the ifname interface.
+-- Each host is passed to the callback with some more information.
+function callback_utils.foreachLocalHost(ifname, deadline, callback)
+]]
+local net_state = require "network_state"
+local params = {}
+--params = {"bytes.sent", "ip", "ipkey", "names.dhcp" }
+params = {"name"}
+
+
+local res = {}
+
+net_state.get_stats( "localhost", params, 2, res)
+
+
+print(  json.encode( res, {indent = true})  )
+
+
+--tprint(t)
+--print( json.encode( t, {indent = true}) )
 --tprint(interface.getMacInfo("00:00:5E:00:01:61" ) )
 
 -- local macs = interface.getMacsInfo().macs
@@ -175,43 +197,43 @@ print( json.encode( interface.findHost("AC:9E:17:81:A1:76"), {indent = true} ) )
 
 --[[ MAC INFO
 
-source_mac boolean true
-throughput_trend_bps number 2
-operatingSystem number 0
-bytes.ndpi.unknown number 0
-bytes.rcvd.anomaly_index number 0
-arp_replies.rcvd number 0
-seen.last number 1556543236
-bytes.rcvd number 0
-packets.sent.anomaly_index number 100
-throughput_trend_bps_diff number -12.012893676758
-manufacturer string Dell Inc.
-bridge_seen_iface_id number 0
-pool number 0
-throughput_trend_pps number 2
-bytes.sent number 3840
-arp_requests.rcvd number 0
-special_mac boolean false
-location string unknown
-throughput_pps number 0.59977388381958
-duration number 375
-packets.rcvd.anomaly_index number 0
-seen.first number 1556542862
-num_hosts number 0
-devtype number 0
-packets.rcvd number 0
-packets.sent number 64
-arp_requests.sent number 64
-last_throughput_pps number 0.79998880624771
-arp_replies.sent number 0
-last_throughput_bps number 47.999328613281
-throughput_bps number 35.986434936523
-bytes.sent.anomaly_index number 100
-fingerprint string 
-mac string 14:18:77:53:49:9C
+    source_mac boolean true
+    throughput_trend_bps number 2
+    operatingSystem number 0
+    bytes.ndpi.unknown number 0
+    bytes.rcvd.anomaly_index number 0
+    arp_replies.rcvd number 0
+    seen.last number 1556543236
+    bytes.rcvd number 0
+    packets.sent.anomaly_index number 100
+    throughput_trend_bps_diff number -12.012893676758
+    manufacturer string Dell Inc.
+    bridge_seen_iface_id number 0
+    pool number 0
+    throughput_trend_pps number 2
+    bytes.sent number 3840
+    arp_requests.rcvd number 0
+    special_mac boolean false
+    location string unknown
+    throughput_pps number 0.59977388381958
+    duration number 375
+    packets.rcvd.anomaly_index number 0
+    seen.first number 1556542862
+    num_hosts number 0
+    devtype number 0
+    packets.rcvd number 0
+    packets.sent number 64
+    arp_requests.sent number 64
+    last_throughput_pps number 0.79998880624771
+    arp_replies.sent number 0
+    last_throughput_bps number 47.999328613281
+    throughput_bps number 35.986434936523
+    bytes.sent.anomaly_index number 100
+    fingerprint string 
+    mac string 14:18:77:53:49:9C
 
-    per la stringa relativa al tipo
-    discover.devtype2string(num_type)
+        per la stringa relativa al tipo
+        discover.devtype2string(num_type)
 ]]
 
 

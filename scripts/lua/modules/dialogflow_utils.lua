@@ -24,10 +24,11 @@ end
 
 
 
---tiene conto solo dei primi 3 proto per una questione di pesantezza cognitiva: l'assistente non deve parlare troppo 
+
 function utils.create_top_traffic_speech_text(top_app)
     local text, top_num, j = "", 0, 1
-    
+
+    --NOTE:tiene conto solo dei primi 3 proto per una questione di pesantezza cognitiva: l'assistente non deve parlare troppo 
     if      top_app[3] then top_num = 3
     elseif  top_app[2] then top_num = 2
     elseif  top_app[1] then top_num = 1
@@ -93,7 +94,11 @@ function utils.create_chart_url(data, options)
           }
     end
 
+
     local jn = json.encode(c)
+
+    tprint(jn)
+
     local url = ""
     if options.chart_type == "outlabeledPie" then 
         url = site_name.."bkg=".. bkg_color.."&c="..utils.url_encode(jn)
@@ -109,3 +114,25 @@ end
 
 ---------------
 return utils
+
+
+-- {
+--   "data":{
+--     "labels":["Unspecified","Network","Cloud","Web","System","Email"],
+--     "datasets":[{
+--       "data":[4509.6435546875,1070.927734375,893.7392578125,618.6279296875,113.142578125,42.2421875],
+--       "label":"Traffic (KB)"
+--     }]
+--   },
+--   "type":"bar"
+-- }
+
+--[[
+cosi ho creato il json per esportare i proto e meterli come entity
+
+local t = {}
+for i,v in pairs(interface.getnDPIProtocols()) do 
+    table.insert(t,{value = i, synonyms = {i} })
+end
+--ho rimosso a mano "sina(weibo)" perchè Dialogflow non vuole parentesi
+]]

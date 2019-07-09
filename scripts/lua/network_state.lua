@@ -12,19 +12,61 @@ local network_state = {}
 local if_stats = interface.getStats()
 
 --[[
-TODO: rendi tutte le funzioni (ove possibile, E SENSATO, tipo quando ciclo sui devices ) a tempo, tipo "check_TCP_flow_goodput()". (magari un wrapper?)
-      però occhio in assistant_test.lua, se chiamo più funzioni il tempo massimo di esecuzione è la somma delle deadline.
-      Potrei passarlo come parametro, e ad ogni step riduco il valore, poi lo passerò come deadline alla fun successiva
+!!!TODO!!!: rivedi e usa get_stats() ove possibile
 
-]]
 --TODO: documenta meglio le funzioni
-
+]]
 --------------------------------------------------------------------------------------------------------------
 
---TODO: la tolgo appena passa il test
--- function network_state.getUpTime()
---   return secondsToTime( ntop.getUpTime() )
--- end  
+--[[
+os.time() --> [...] the number of seconds since some given start time (the "epoch")
+]]
+
+
+--[[ TODO: fai i check sui booleani di ritorno
+TODO: check quando la deadline è scaduta (avverto l'utente)
+note: deadline lo faccio decidere al chiamante (es. vuole fare più iterazioni, dovrà calcolarsi il tempo a modo suo) 
+NOTE: tieni conto che la guardia della deadline è (os.time() >= deadline))
+"params"  contiene i parametri relativi agli host che interessano al chiamante (deve essere un array)
+"res"     contiene il risultato, diviso per "name" (se un campo non era presente tra le stats, sarà nil) ]]
+function network_state.get_stats( type, params, deadline, res) 
+  local callback_utils = require "callback_utils"
+  local res = true
+
+  local function callback(name, stats)  
+    local tmp = {}
+    for _,v in pairs(params) do
+        tmp[v] = ternary( stats[v], stats[v], nil  ) 
+    end
+    
+    res[name] = tmp
+    tmp = {}
+
+    return true
+  end 
+
+  --note: l'iteratore per gli host remoti non è implementato come utils, ma c'è tra i batched iterator
+  if type == "flow" then 
+    --note: per i flow, nella callback -->  name = flow_key  &  stats = flow
+    res = callback_utils.foreachFlow(ifname, os.time() + deadline, callback )
+  elseif type == "devices" then 
+    res = callback_utils.foreachDevice(ifname, os.time() + deadline, callback )
+  elseif type == "host" then 
+    res = callback_utils.foreachHost(ifname, os.time() + deadline, callback )
+  elseif type == "localhost" then 
+    res = callback_utils.foreachLocalHost(ifname, os.time() + deadline, callback )
+  elseif type == "localhost_ts" then
+       --note: per i local rrd host, nella callback -->  stats = host_ts
+       --note: prende 4 campi, quello in più è per avere più dettagli?
+    res = callback_utils.foreachLocalRRDHost(ifname, os.time() + deadline, true, callback )
+  else
+    res = false
+  end
+
+  return res
+end
+
+----------------------------------------------------------------------------------------------------------
 
 --return ndpi categoty table [ "category_name" = "bytes" ]
 function network_state.check_ndpi_categories()

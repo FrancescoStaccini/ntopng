@@ -249,7 +249,7 @@ function handler_if_active_flow_top_application()
     local legend_label = "Traffic (KB)"
     local data = {labels = {}, values = {}, legend_label = legend_label}
     local options = { 
-        w = "500",
+        w = "600",
         h = "280",
         chart_type = "bar",
         bkg_color = "white"
@@ -259,7 +259,7 @@ function handler_if_active_flow_top_application()
         table.insert(data.labels, v[1])
         table.insert(data.values, v[3]/1024 ) --TODO: se necessario (tanto traffico) metti i MB invece dei KB
         i = i + 1
-        if i > 6 or v[2] < 1 then break end    --NOTE: 6 and 1 are arbitrary
+        if i >= 6 or v[2] < 1 then break end    --NOTE: 6 and 1 are arbitrary
         --TODO: better guard, eg: if perc < X break
     end
 
@@ -312,7 +312,7 @@ function handler_if_active_flow_top_categories()
   local legend_label = "Traffic (KB)"
   local data = {labels = {}, values = {}, legend_label = legend_label}
   local options = { 
-      w = "500",
+      w = "600",
       h = "280",
       chart_type = "bar",
       bkg_color = "white"
@@ -322,14 +322,14 @@ function handler_if_active_flow_top_categories()
       table.insert(data.labels, v.name)
       table.insert(data.values, v.bytes/1024 ) --TODO: se necessario (tanto traffico) metti i MB invece dei KB
       i = i + 1
-      if i > 6 or v.perc < 1 then break end    --NOTE: 6 and 1 are arbitrary
+      if i >= 6 or v.perc < 1 then break end    --NOTE: 6 and 1 are arbitrary
   end
 
   local url = df_utils.create_chart_url(data, options)
   local card = dialogflow.create_card(
-      "Top Application Chart",
+      "Top Categories Chart",
       url,
-      "Top Application Chart"
+      "Top Categories Chart"
   )
   --local speech_text = df_utils.create_top_categories_speech_text(top_cat)
   local display_text = "Here is the chart"
@@ -338,8 +338,30 @@ function handler_if_active_flow_top_categories()
   dialogflow.send(display_text, nil, nil, nil, card)
 end
 
+
+
+function handler_who_are_categories()
+  --TODO: cicla tra host/dispositivi per vedere CHI appartiene a tale categoria
+  
+  --[[
+  GUARDA "network_state.check_TCP_flow_goodput()" PER CICLARE A MODO TRA GLI HOST
+
+  ]]
+  dialogflow.send("Work in progress")
+end
+
+
+function handler_who_are_protocols()
+    --TODO: cicla tra host/dispositivi per vedere CHI ha usato il protocollo
+
+  dialogflow.send("Work in progress")
+end
+
+
 --########################################################-Intents-Dispatcher-####################################################################
 request = dialogflow.receive()
+
+--TODO: intent (triggerabile da vari intent, magari guardo contesto/parametri) per farsi mandare grafici/elenchi via mail (o telegram ecc.)
 
 --get_aggregated_info può ricevere 4 parametri (Devices, generic, Network, Traffic)
 --TODO: fai gli adeguati distinguo per i 4 casi
@@ -351,11 +373,15 @@ elseif  request.intent_name == "get_aggregated_info - more" then response = hand
 --questo intent si differenzia dal "get_aggregated_info --> traffic" perché riguarda solo le applicazioni
 --check: ha senso accorparli nello stesso intent? stile get_aggregated_info, creando un'antità per distinguere apps/categories
 elseif  request.intent_name == "if_active_flow_top_application" then response = handler_if_active_flow_top_application()
-
 elseif  request.intent_name == "if_active_flow_top_categories"  then response = handler_if_active_flow_top_categories()
 
+
+  --TODO: metti altri intent per farsi dare elenchi/vai grafici 
+elseif  request.intent_name == "who_are - categories"  then response = handler_who_are_categories()
+elseif  request.intent_name == "who_are - protocols"  then response = handler_who_are_protocols()
 
   
 
 else response = dialogflow.send("Sorry, but I didn't understand, can you repeat?") 
 end
+

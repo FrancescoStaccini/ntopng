@@ -1415,6 +1415,7 @@ bool NetworkInterface::processPacket(u_int32_t bridge_iface_idx,
   u_int8_t *ip;
   bool is_fragment = false, new_flow;
   bool pass_verdict = true;
+  u_int16_t l4_len = 0;
   *hostFlow = NULL;
 
   /* VLAN disaggregation */
@@ -1474,6 +1475,8 @@ bool NetworkInterface::processPacket(u_int32_t bridge_iface_idx,
   }
 
   if(iph != NULL) {
+    u_int16_t ip_len, ip_tot_len;
+
     /* IPv4 */
     if(trusted_ip_len < 20) {
       incStats(ingressPacket,
@@ -1482,16 +1485,21 @@ bool NetworkInterface::processPacket(u_int32_t bridge_iface_idx,
       return(pass_verdict);
     }
 
+    ip_len = iph->ihl * 4;
+    ip_tot_len = ntohs(iph->tot_len);
+
     /* Use the actual h->len and not the h->caplen to determine
        whether a packet is fragmented. */
-    if(iph->ihl * 4 > (int)h->len - ip_offset
-       || (int)h->len - ip_offset < ntohs(iph->tot_len)
+    if(ip_len > (int)h->len - ip_offset
+       || (int)h->len - ip_offset < ip_tot_len
        || (iph->frag_off & htons(0x1FFF /* IP_OFFSET */))
        || (iph->frag_off & htons(0x2000 /* More Fragments: set */)))
       is_fragment = true;
 
     l4_proto = iph->protocol;
-    l4 = ((u_int8_t *) iph + iph->ihl * 4);
+    l4 = ((u_int8_t *) iph + ip_len);
+    l4_len = ip_tot_len - ip_len; /* use len from the ip header to compute sequence numbers */
+
     ip = (u_int8_t*)iph;
   } else {
     /* IPv6 */
@@ -1522,6 +1530,7 @@ bool NetworkInterface::processPacket(u_int32_t bridge_iface_idx,
     }
 
     l4 = (u_int8_t*)ip6 + ipv6_shift;
+    l4_len = packet + h->len - l4;
     ip = (u_int8_t*)ip6;
   }
 
@@ -1630,7 +1639,7 @@ bool NetworkInterface::processPacket(u_int32_t bridge_iface_idx,
     case IPPROTO_TCP:
       flow->updateTcpFlags(when, tcp_flags, src2dst_direction);
       flow->updateTcpSeqNum(when, ntohl(tcph->seq), ntohl(tcph->ack_seq), ntohs(tcph->window),
-			    tcp_flags, trusted_l4_packet_len - (4 * tcph->doff),
+			    tcp_flags, l4_len - (4 * tcph->doff),
 			    src2dst_direction);
       break;
 
@@ -3535,6 +3544,15 @@ void NetworkInterface::checkReloadHostsBroadcastDomain() {
 
 /* **************************************************** */
 
+void NetworkInterface::checkPointHostTalker(lua_State* vm, char *host_ip, u_int16_t vlan_id) {
+  Host *h;
+
+  if(host_ip && (h = getHost(host_ip, vlan_id, false /* Not an inline call */)))
+    h->checkpoint(vm);
+}
+
+/* **************************************************** */
+
 Host* NetworkInterface::findHostByIP(AddressTree *allowed_hosts,
 				      char *host_ip, u_int16_t vlan_id) {
   if(host_ip != NULL) {
@@ -5035,25 +5053,33 @@ void NetworkInterface::getFlowsStats(lua_State* vm) {
   lua_insert(vm, -2);
   lua_settable(vm, -3);
 }
+
 /* **************************************************** */
 
-void NetworkInterface::getNetworksStats(lua_State* vm) {
+void NetworkInterface::getNetworkStats(lua_State* vm, u_int8_t network_id) const {
   NetworkStats *network_stats;
-  u_int8_t num_local_networks = ntop->getNumLocalNetworks();
 
-  lua_newtable(vm);
-  for(u_int8_t network_id = 0; network_id < num_local_networks; network_id++) {
-    network_stats = getNetworkStats(network_id);
-    // do not add stats of networks that have not generated any traffic
-    if(!network_stats || !network_stats->trafficSeen())
-      continue;
+  if((network_stats = getNetworkStats(network_id)) && network_stats->trafficSeen()) {
     lua_newtable(vm);
+
     network_stats->lua(vm);
+
     lua_push_int32_table_entry(vm, "network_id", network_id);
     lua_pushstring(vm, ntop->getLocalNetworkName(network_id));
     lua_insert(vm, -2);
     lua_settable(vm, -3);
   }
+}
+
+/* **************************************************** */
+
+void NetworkInterface::getNetworksStats(lua_State* vm) const {
+  u_int8_t num_local_networks = ntop->getNumLocalNetworks();
+
+  lua_newtable(vm);
+
+  for(u_int8_t network_id = 0; network_id < num_local_networks; network_id++)
+    getNetworkStats(vm, network_id);
 }
 
 /* **************************************************** */
@@ -6060,11 +6086,14 @@ void NetworkInterface::allocateNetworkStats() {
       oom_warning_sent = true;
     }
   }
+
+  for(u_int8_t i = 0; i < numNetworks; i++)
+    networkStats[i].setNetworkId(i);
 }
 
 /* **************************************** */
 
-NetworkStats* NetworkInterface::getNetworkStats(u_int8_t networkId) {
+NetworkStats* NetworkInterface::getNetworkStats(u_int8_t networkId) const {
   if((networkStats == NULL) || (networkId >= ntop->getNumLocalNetworks()))
     return(NULL);
   else
@@ -7553,6 +7582,7 @@ bool NetworkInterface::dequeueeBPFFlow(ParsedFlow **f) {
 
 struct alert_check_param {
   ScriptPeriodicity p;
+  char script_path[MAX_PATH];
   const char *granularity;
   LuaEngine *le;
 };
@@ -7572,7 +7602,8 @@ static bool host_alert_check(GenericHashEntry *h, void *user_data, bool *matched
     lua_getglobal(L,  function_to_call); /* Called function */
     lua_pushstring(L, ap->granularity);  /* push 1st argument */
     
-    lua_pcall(L, 1 /* 1 argument */, 0 /* 0 results */, 0); /* Call the function now */
+    if(lua_pcall(L, 1 /* 1 argument */, 0 /* 0 results */, 0)) /* Call the function now */
+      ntop->getTrace()->traceEvent(TRACE_WARNING, "Script failure [%s][%s]", ap->script_path, lua_tostring(L, -1));
   }
   
   return(false); /* false = keep on walking */
@@ -7582,14 +7613,13 @@ static bool host_alert_check(GenericHashEntry *h, void *user_data, bool *matched
 
 void NetworkInterface::checkHostsAlerts(ScriptPeriodicity p) {
   LuaEngine le;
-  char script_path[256];
   u_int32_t begin_slot = 0;
   struct alert_check_param ap;
-  
-  snprintf(script_path, sizeof(script_path),
+
+  snprintf(ap.script_path, sizeof(ap.script_path),
 	   "%s/callbacks/interface/alerts/host.lua",
 	   ntop->getPrefs()->get_scripts_dir());
-  
+
   switch(p) {
   case 0: ap.granularity = "min";   break;
   case 1: ap.granularity = "5mins"; break;
@@ -7600,17 +7630,20 @@ void NetworkInterface::checkHostsAlerts(ScriptPeriodicity p) {
     break;
   }
 
-  le.load_script(script_path, this);
+  le.load_script(ap.script_path, this);
 
   /* Call global setup once... */
   {
     lua_State *L = le.getState();
-    
+
     lua_getglobal(L, "setup");         /* Called function   */
-    lua_pushstring(L, ap.granularity); /* push 1st argument */    
-    lua_pcall(L, 1 /* 1 argument */, 0 /* 0 results */, 0); /* Call the function now */
+    lua_pushstring(L, ap.granularity); /* push 1st argument */
+    if(lua_pcall(L, 1 /* 1 argument */, 0 /* 0 results */, 0)) { /* Call the function now */
+      ntop->getTrace()->traceEvent(TRACE_WARNING, "Script failure [%s][%s]", ap.script_path, lua_tostring(L, -1));
+      return;
+    }
   }
-  
+
   ap.p = p, ap.le = &le;
 
   /* ... then iterate all hosts */
@@ -7619,16 +7652,14 @@ void NetworkInterface::checkHostsAlerts(ScriptPeriodicity p) {
 
 /* *************************************** */
 
-void NetworkInterface::checkInterfaceAlerts(ScriptPeriodicity p) {
+void NetworkInterface::checkNetworksAlerts(ScriptPeriodicity p) {
   LuaEngine le;
-  char script_path[256];
   struct alert_check_param ap;
-  lua_State *L;
-  
-  snprintf(script_path, sizeof(script_path),
-	   "%s/callbacks/interface/alerts/interface.lua",
+
+  snprintf(ap.script_path, sizeof(ap.script_path),
+	   "%s/callbacks/interface/alerts/network.lua",
 	   ntop->getPrefs()->get_scripts_dir());
-  
+
   switch(p) {
   case 0: ap.granularity = "min";   break;
   case 1: ap.granularity = "5mins"; break;
@@ -7639,18 +7670,74 @@ void NetworkInterface::checkInterfaceAlerts(ScriptPeriodicity p) {
     break;
   }
 
-  le.load_script(script_path, this);
+  le.load_script(ap.script_path, this);
+
+  /* Call global setup once... */
+  lua_State *L = le.getState();
+
+  lua_getglobal(L, "setup");         /* Called function   */
+  lua_pushstring(L, ap.granularity); /* push 1st argument */
+  if(lua_pcall(L, 1 /* 1 argument */, 0 /* 0 results */, 0)) { /* Call the function now */
+    ntop->getTrace()->traceEvent(TRACE_WARNING, "Script failure [%s][%s]", ap.script_path, lua_tostring(L, -1));
+    return;
+  }
+
+  ap.p = p, ap.le = &le;
+
+  /* ... then iterate all networks */
+  u_int8_t num_local_networks = ntop->getNumLocalNetworks();
+
+  for(u_int8_t network_id = 0; network_id < num_local_networks; network_id++) {
+    const char *function_to_call = "checkNetworkAlerts";
+
+    ap.le->setNetwork(getNetworkStats(network_id));
+
+    /* https://www.lua.org/pil/25.2.html */
+    lua_getglobal(L,  function_to_call); /* Called function */
+    lua_pushstring(L, ap.granularity);  /* push 1st argument */
+
+    if(lua_pcall(L, 1 /* 1 argument */, 0 /* 0 results */, 0)) /* Call the function now */
+      ntop->getTrace()->traceEvent(TRACE_WARNING, "Script failure [%s][%s]", ap.script_path, lua_tostring(L, -1));
+  }
+}
+
+/* *************************************** */
+
+void NetworkInterface::checkInterfaceAlerts(ScriptPeriodicity p) {
+  LuaEngine le;
+  struct alert_check_param ap;
+  lua_State *L;
+
+  snprintf(ap.script_path, sizeof(ap.script_path),
+	   "%s/callbacks/interface/alerts/interface.lua",
+	   ntop->getPrefs()->get_scripts_dir());
+
+  switch(p) {
+  case 0: ap.granularity = "min";   break;
+  case 1: ap.granularity = "5mins"; break;
+  case 2: ap.granularity = "hour";  break;
+  case 3: ap.granularity = "day";   break;
+  default:
+    ntop->getTrace()->traceEvent(TRACE_WARNING, "INTERNAL ERROR: Missing value");
+    break;
+  }
+
+  le.load_script(ap.script_path, this);
 
   /* Call global setup once... */
   L = le.getState();
-  
+
   lua_getglobal(L, "setup");         /* Called function   */
-  lua_pushstring(L, ap.granularity); /* push 1st argument */    
-  lua_pcall(L, 1 /* 1 argument */, 0 /* 0 results */, 0); /* Call the function now */
-  
+  lua_pushstring(L, ap.granularity); /* push 1st argument */
+  if(lua_pcall(L, 1 /* 1 argument */, 0 /* 0 results */, 0)) { /* Call the function now */
+    ntop->getTrace()->traceEvent(TRACE_WARNING, "Script failure [%s][%s]", ap.script_path, lua_tostring(L, -1));
+    return;
+  }
+
   /* https://www.lua.org/pil/25.2.html */
   lua_getglobal(L,  "checkInterfaceAlerts"); /* Called function */
   lua_pushstring(L, ap.granularity);  /* push 1st argument */
-  
-  lua_pcall(L, 1 /* 1 argument */, 0 /* 0 results */, 0); /* Call the function now */
+
+  if(lua_pcall(L, 1 /* 1 argument */, 0 /* 0 results */, 0)) /* Call the function now */
+    ntop->getTrace()->traceEvent(TRACE_WARNING, "Script failure [%s][%s]", ap.script_path, lua_tostring(L, -1));
 }

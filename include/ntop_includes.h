@@ -182,19 +182,21 @@ using namespace std;
 #include "BroadcastDomains.h"
 #include "IpAddress.h"
 #include "Ping.h"
+#include "TrafficStats.h"
+#include "TcpPacketStats.h"
 #include "ntop_typedefs.h"
+#include "AlertableEntity.h"
+#include "NetworkStats.h"
 #include "Trace.h"
 #include "ProtoStats.h"
 #include "Utils.h"
 #include "NtopGlobals.h"
-#include "TrafficStats.h"
 #include "nDPIStats.h"
 #include "FlowStatusStats.h"
 #ifdef NTOPNG_PRO
 #include "CustomAppMaps.h"
 #include "CustomAppStats.h"
 #endif
-#include "TcpPacketStats.h"
 #include "GenericTrafficElement.h"
 #include "ContainerStats.h"
 #include "ParsedFlowCore.h"
@@ -228,7 +230,6 @@ using namespace std;
 #include "Prefs.h"
 #include "SerializableElement.h"
 #include "DnsStats.h"
-#include "NetworkStats.h"
 #ifndef HAVE_NEDGE
 #include "SNMP.h"
 #endif
@@ -255,7 +256,6 @@ using namespace std;
 #endif
 #include "InterfaceStatsHash.h"
 #include "GenericHashEntry.h"
-#include "AlertableEntity.h"
 #if defined(NTOPNG_PRO) && defined(HAVE_NINDEX)
 #include "nindex_api.h"
 #endif

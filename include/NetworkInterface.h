@@ -191,7 +191,6 @@ class NetworkInterface : public AlertableEntity {
   bool running, is_idle;
   NetworkStats *networkStats;
   InterfaceStatsHash *interfaceStats;
-  char checkpoint_compression_buffer[CONST_MAX_NUM_CHECKPOINTS][MAX_CHECKPOINT_COMPRESSION_BUFFER_SIZE];
   dhcp_range* dhcp_ranges, *dhcp_ranges_shadow;
 
   PROFILING_DECLARE(24);
@@ -350,6 +349,7 @@ class NetworkInterface : public AlertableEntity {
   void dumpAggregatedFlow(time_t when, AggregatedFlow *f, bool is_top_aggregated_flow, bool is_top_cli, bool is_top_srv);
   void flushFlowDump();
 #endif
+  void checkPointHostTalker(lua_State* vm, char *host_ip, u_int16_t vlan_id);
   int dumpLocalHosts2redis(bool disable_purge);
   inline void incRetransmittedPkts(u_int32_t num)   { tcpPacketStats.incRetr(num); };
   inline void incOOOPkts(u_int32_t num)             { tcpPacketStats.incOOO(num);  };
@@ -493,7 +493,8 @@ class NetworkInterface : public AlertableEntity {
 			   u_int8_t location_filter);
   int getMacsIpAddresses(lua_State *vm, int idx);
   void getFlowsStats(lua_State* vm);
-  void getNetworksStats(lua_State* vm);
+  void getNetworkStats(lua_State* vm, u_int8_t network_id) const;
+  void getNetworksStats(lua_State* vm) const;
   int getFlows(lua_State* vm,
 	       u_int32_t *begin_slot,
 	       bool walk_all,
@@ -597,7 +598,7 @@ class NetworkInterface : public AlertableEntity {
 #endif
     return(-1);
   };
-  NetworkStats* getNetworkStats(u_int8_t networkId);
+  NetworkStats* getNetworkStats(u_int8_t networkId) const;
   void allocateNetworkStats();
   void getsDPIStats(lua_State *vm);
 #ifdef NTOPNG_PRO
@@ -643,6 +644,7 @@ class NetworkInterface : public AlertableEntity {
   inline void checkHostsBlacklistReload()           { if(reload_hosts_blacklist) { reloadHostsBlacklist(); reload_hosts_blacklist = false; } }
   void reloadHostsBlacklist();
   void checkHostsAlerts(ScriptPeriodicity p);
+  void checkNetworksAlerts(ScriptPeriodicity p);
   void checkInterfaceAlerts(ScriptPeriodicity p);
   bool isHiddenFromTop(Host *host);
   inline virtual bool areTrafficDirectionsSupported() { return(false); };

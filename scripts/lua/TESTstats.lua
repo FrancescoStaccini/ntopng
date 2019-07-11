@@ -137,30 +137,61 @@ local function createStats(matrix)
 end
 
 
-
+local net_state = require "network_state"
 local json = require("dkjson")
 --print( json.encode(createStats(matrix), {indent = true} ) )
 --print( json.encode( interface.findHost("AC:9E:17:81:A1:76"), {indent = true} ) )
 --print( json.encode( interface.getnDPIProtocols(), {indent = true} ) )
 
 
---[[
--- Iterates each active host on the ifname interface.
--- Each host is passed to the callback with some more information.
-function callback_utils.foreachLocalHost(ifname, deadline, callback)
-]]
-local net_state = require "network_state"
-local params = {}
---params = {"bytes.sent", "ip", "ipkey", "names.dhcp" }
-params = {"name"}
+-- local params = {}
+-- --params = {"bytes.sent", "ip", "ipkey", "names.dhcp" }
+-- params = {"name"}
+-- local res = {}
+-- net_state.get_stats( "localhost", params, 2, res)
+-- print(  json.encode( res, {indent = true})  )
 
 
-local res = {}
-
-net_state.get_stats( "localhost", params, 2, res)
+--print(  json.encode( interface.getActiveFlowsStats(), {indent = true})  )
 
 
-print(  json.encode( res, {indent = true})  )
+
+--function network_state.get_stats( type, res, params, caller_deadline,  caller_callback) FIRMA
+-- local res = {}
+-- net_state.get_stats("flow", res)
+-- print(  json.encode( res, {indent = true})  )
+
+
+
+-- local res = {}
+-- local category = "Web"
+-- local function mycall(name, stats)
+--     if stats["ndpi_categories"] and stats["ndpi_categories"][category] and stats["ndpi_categories"][category]["bytes"]then 
+--         res[name] = stats["ndpi_categories"][category]["bytes"]
+--         --tprint(stats.ndpi_categories.Web.bytes)
+--     end
+
+--     --tprint(stats.ndpi_categories)
+
+--     return 
+-- end
+  
+-- net_state.get_stats("devices", nil, nil, nil, mycall)
+-- print(  json.encode( res, {indent = true}) )
+
+
+print(  json.encode( interface.getHostsInfo(), {indent = true}) )
+
+
+--print(  json.encode( interface.getStats(), {indent = true})  )
+
+
+
+
+--print(  json.encode( net_state.get_ndpi_proto_traffic_volume(), {indent = true})  )
+
+
+--print(  json.encode( net_state.check_top_application_protocol(), {indent = true})  )
 
 
 --tprint(t)

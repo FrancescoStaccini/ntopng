@@ -1,6 +1,7 @@
 --
 -- (C) 2019 - ntop.org
 --
+-- Genreic Utils & Language Utils
 
 dirs = ntop.getDirs()
 package.path = dirs.installdir .. "/scripts/lua/modules/?.lua;" .. package.path
@@ -23,25 +24,27 @@ function utils.url_encode(str)
 end
 
 
-
-
 function utils.create_top_traffic_speech_text(top_app)
     local text, top_num, j = "", 0, 1
+    local app_names, app_perc = {}, {}
 
-    --NOTE:tiene conto solo dei primi 3 proto per una questione di pesantezza cognitiva: l'assistente non deve parlare troppo 
-    if      top_app[3] then top_num = 3
-    elseif  top_app[2] then top_num = 2
-    elseif  top_app[1] then top_num = 1
+    for i,v in pairs(top_app) do
+      tprint(i)
+      tprint(v)
+      table.insert(app_names, i)
+      table.insert(app_perc, v.percentage)
+      top_num = top_num + 1
+      if top_num == 3 then break end
     end
-  
+    --NOTE:tiene conto solo dei primi 3 proto per una questione di pesantezza cognitiva: l'assistente non deve parlare troppo 
     if top_num == 1 then 
-      text = "I note only "..top_app[1][1].." with "..top_app[1][2] .." percent of traffic."
+      text = "I note only "..app_names[1].." with "..app_perc[1] .." % of traffic."
     end
   
     local text_name, text_perc
     if top_num > 1 then 
-      text_name = "The ".. top_num .." main applications are: "..(top_app[1][1] or "")..", "..(top_app[2][1] or "")..", and "..(top_app[3][1] or "")
-      text_perc = "; With a traffic, respectively, of "..(top_app[1][2] or "")..", "..(top_app[2][2] or "")..", "..(top_app[3][2] or "").. " percent"
+      text_name = "The ".. top_num .." main applications are: "..app_names[1]..", "..app_names[2].. ternary(app_names[3], ", and "..app_names[3], "" ) 
+      text_perc = "; With a traffic, respectively, of "..app_perc[1]..", "..app_perc[2].. ternary(app_perc[3], ", "..app_perc[3], "" ) .. " %"
       text = text_name..text_perc
     else 
       text = "No application deteced" 

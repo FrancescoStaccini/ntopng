@@ -5,65 +5,82 @@
 dirs = ntop.getDirs()
 package.path = dirs.installdir .. "/scripts/lua/?.lua;" .. package.path
 if((dirs.scriptdir ~= nil) and (dirs.scriptdir ~= "")) then package.path = dirs.scriptdir .. "/lua/modules/?.lua;" .. package.path end
-ignore_post_payload_parse = 1 -- TODO: controlla se deve stgare anche qui o basta solo in google_assistant_utils.lua
 require "lua_utils"
 
 local network_state = {}
 local if_stats = interface.getStats()
 
 --[[
-!!!TODO!!!: rivedi e usa get_stats() ove possibile
-
+--TODO: normalizza i nomi delle funzioni: aaa_bbb_ccc() e non aaaBbbCc()
 --TODO: documenta meglio le funzioni
 ]]
 --------------------------------------------------------------------------------------------------------------
+--os.time() --> [...] the number of seconds since some given start time (the "epoch")
 
---[[
-os.time() --> [...] the number of seconds since some given start time (the "epoch")
+--note: tieni conto che la guardia della deadline è (os.time() >= deadline))
+local deadline = 3 --seconds
+local group_of = 10 --paginazione 
+
+--[[ 
+
+idea: check quando/se la deadline è scaduta (e avverto l'utente), ma dovrei modificare callback_utils.lua 
+
+note: il chiamante può decidere la deadline (es. vuole fare più iterazioni, dovrà calcolarsi il tempo a modo suo) 
+
+"type"    contiene il tipo dell'entità su cui iterare, unico campo obbligatorio 
+"res"     tabella col risultato, indicizzato per "name". Necessario se si vuole il risultato della callback di default
+"params"  array contenente il nome (stringhe) dei parametri che interessano al chiamante
+          (se params cotiene un campo non presente tra le stats dell'entità, tale valore sarà nil)
 ]]
-
-
---[[ TODO: fai i check sui booleani di ritorno
-TODO: check quando la deadline è scaduta (avverto l'utente)
-note: deadline lo faccio decidere al chiamante (es. vuole fare più iterazioni, dovrà calcolarsi il tempo a modo suo) 
-NOTE: tieni conto che la guardia della deadline è (os.time() >= deadline))
-"params"  contiene i parametri relativi agli host che interessano al chiamante (deve essere un array)
-"res"     contiene il risultato, diviso per "name" (se un campo non era presente tra le stats, sarà nil) ]]
-function network_state.get_stats( type, params, deadline, res) 
+function network_state.get_stats( type, res, params, caller_deadline,  caller_callback) 
   local callback_utils = require "callback_utils"
-  local res = true
+  local ret = false
 
-  local function callback(name, stats)  
+  --note: works only for "first level" structure, don't works for inner tables
+  local function param_callback(name, stats) --note: is the default callback
     local tmp = {}
-    for _,v in pairs(params) do
-        tmp[v] = ternary( stats[v], stats[v], nil  ) 
+    if not res then return false end
+
+    if not params then
+      tmp = stats
+    else
+      for _,v in pairs(params) do
+        if stats[v] then 
+          tmp[v] = stats[v] 
+        end
+      end
     end
     
     res[name] = tmp
-    tmp = {}
-
     return true
   end 
+
+  local callback = param_callback
+  if caller_callback then callback = caller_callback end
+
+  local custom_deadline = deadline
+  if caller_deadline then custom_deadline = caller_deadline end 
 
   --note: l'iteratore per gli host remoti non è implementato come utils, ma c'è tra i batched iterator
   if type == "flow" then 
     --note: per i flow, nella callback -->  name = flow_key  &  stats = flow
-    res = callback_utils.foreachFlow(ifname, os.time() + deadline, callback )
+    ret = callback_utils.foreachFlow(ifname, os.time() + custom_deadline, callback )
   elseif type == "devices" then 
-    res = callback_utils.foreachDevice(ifname, os.time() + deadline, callback )
+    ret = callback_utils.foreachDevice(ifname, os.time() + custom_deadline, callback )
   elseif type == "host" then 
-    res = callback_utils.foreachHost(ifname, os.time() + deadline, callback )
+    ret = callback_utils.foreachHost(ifname, os.time() + custom_deadline, callback )
   elseif type == "localhost" then 
-    res = callback_utils.foreachLocalHost(ifname, os.time() + deadline, callback )
+    ret = callback_utils.foreachLocalHost(ifname, os.time() + custom_deadline, callback )
   elseif type == "localhost_ts" then
        --note: per i local rrd host, nella callback -->  stats = host_ts
-       --note: prende 4 campi, quello in più è per avere più dettagli?
-    res = callback_utils.foreachLocalRRDHost(ifname, os.time() + deadline, true, callback )
+       --TODO: decidi se tenere a true o false il terzo campo, quelli dei "dettagli"
+       --note: PARE che se è a true ti da i valori all'ultimo istante, a false ti da alcune(?) info sull'host stesso
+    ret = callback_utils.foreachLocalRRDHost(ifname, os.time() + custom_deadline, true, callback )
   else
-    res = false
+    ret = false
   end
 
-  return res
+  return ret
 end
 
 ----------------------------------------------------------------------------------------------------------
@@ -71,7 +88,6 @@ end
 --return ndpi categoty table [ "category_name" = "bytes" ]
 function network_state.check_ndpi_categories()
   local t = {} 
-  
   for i,v in pairs(if_stats.ndpi_categories) do
      t[tostring(i)] = if_stats.ndpi_categories[i].bytes 
   end
@@ -79,16 +95,13 @@ function network_state.check_ndpi_categories()
   return t
 end
 
---makes the sum of "i1" and "i2" (keys of table elements) for each ndpi proto
---return ndpi proto table [ "proto_name" = "i1 + i2" ]
-function network_state.check_ndpi_table(i1, i2)
+--return ndpi proto table [ "proto_name" = "bytes sent + rcvd" ]
+function network_state.get_ndpi_proto_traffic_volume()
   local t, ndpi_stats = {}, interface.getActiveFlowsStats() 
   local j = 1
-  for i,v in pairs( ndpi_stats.ndpi ) do
 
-     t[j] = { tostring(i),  v[i1] }
-     if (i2 ~= nil) then t[j][2] = t[j][2] +  v[i2] end
-     j = j + 1
+  for i,v in pairs( ndpi_stats.ndpi ) do
+    t[i] =  v["bytes.sent"] + v["bytes.rcvd"] 
   end
   
   return t
@@ -134,18 +147,17 @@ end
 --return an array-table of all ndpi_proto_name and traffic percentage
 function network_state.check_top_application_protocol()
   local t, tot = {}, 1
-  local proto_app = network_state.check_ndpi_table("bytes.sent", "bytes.rcvd" )
+  local proto_app = network_state.get_ndpi_proto_traffic_volume()
   local c, res = 0, {}
-  for i,v in pairs(proto_app) do tot = tot + v[2] end
 
-  local function compare(a,b) return a[2]>b[2] end
-  table.sort(proto_app, compare)
+  for i,v in pairs(proto_app) do tot = tot + v end
 
   for i,v in pairs(proto_app) do
-      local prc = math.floor( (v[2] / tot) * 100 )
-      c = c + 1
-      res[c] = { v[1] , prc, v[2] }
+    table.insert(res, {name = i, bytes = v, percentage = math.floor( (v / tot) * 100 ) } )
   end
+
+  local function compare(a,b) return a.bytes > b.bytes end
+  table.sort(res, compare)
 
   return res
 end
@@ -174,49 +186,10 @@ function network_state.check_devices_type()
   return res, if_stats.stats.devices
 end
 
-
---TODO: accorpa con quella sotto, inoltre le frasi devono essere composte sullo script dell'assistente e non qui! SPOSTALE
---return respectively: state of goodput, number of total flow, total number of bad goodput flow
-function network_state.check_TCP_flow_goodput()
+--return respectively: 1) total percentage of goodput, 2) num of bad goodput client, 3) num of bad goodput server, 4) num of total flow
+function network_state.get_aggregated_TCP_flow_goodput_percentage()
   local bad_gp_client, bad_gp_server, flow_tot, prbl = 0,0,0,0
-  local seen, deadline = 0, os.time() + 3000 --TODO: parametrizza la deadline (anche group_of?)
-  local group_of = 5
-
-  repeat
-    hoinfo = interface.getHostsInfo(true, "column_", group_of)
-    tot = hoinfo.numHosts
-
-    for i,v in pairs( hoinfo["hosts"] ) do
-      local afas, afac = hoinfo["hosts"][i]["active_flows.as_server"], hoinfo["hosts"][i]["active_flows.as_client"]
-      local bgc, bgs = hoinfo["hosts"][i]["low_goodput_flows.as_client"], hoinfo["hosts"][i]["low_goodput_flows.as_server"]
-  
-      flow_tot = flow_tot + afac + afas
-      bad_gp_client = bad_gp_client + bgc
-      bad_gp_server = bad_gp_server + bgs
-    end 
-    
-    seen = seen + group_of
-  until (seen < tot) or (os.time() > deadline)
-
-  local perc, state = 100 - math.floor( (bad_gp_client + bad_gp_server) / flow_tot) * 100 
-  if perc > 90 then 
-    state = "complessivamente ottima" 
-  elseif perc > 80 then 
-    state = "complessivamente buona"
-  elseif perc > 70 then
-    state = "complessivamente mediocre"
-  else 
-    state = "complessivamente bassa" 
-  end
-
-  return state, flow_tot, (bad_gp_client + bad_gp_server)
-end
-
---TODO: ACCORPA CON QUELLO SOPRA
-function network_state.check_TCP_flow_goodput_2()
-  local bad_gp_client, bad_gp_server, flow_tot, prbl = 0,0,0,0
-  local seen, deadline = 0, os.time() + 3000 --TODO: parametrizza la deadline (anche group_of?)
-  local group_of = 5
+  local seen = 0
 
   repeat
     hoinfo = interface.getHostsInfo(true, "column_", group_of)
@@ -236,8 +209,47 @@ function network_state.check_TCP_flow_goodput_2()
 
   local perc = 100 - math.floor( (bad_gp_client + bad_gp_server) / flow_tot) * 100 
 
-  return perc
+  return perc, bad_gp_client, bad_gp_server, flow_tot
 end
+
+
+--!!NOTE!!: La sto lasciando SOLO percompatibilità con nAssistant01, appena sistemato l'assistente in italiano va cancellata/spostata/rinominata
+--return respectively: state of goodput, number of total flow, total number of bad goodput flow
+function network_state.check_TCP_flow_goodput()
+  local bad_gp_client, bad_gp_server, flow_tot, prbl = 0,0,0,0
+  local seen = 0
+
+  repeat
+    hoinfo = interface.getHostsInfo(true, "column_", group_of)
+    tot = hoinfo.numHosts
+
+    for i,v in pairs( hoinfo["hosts"] ) do
+      local afas, afac = hoinfo["hosts"][i]["active_flows.as_server"], hoinfo["hosts"][i]["active_flows.as_client"]
+      local bgc, bgs = hoinfo["hosts"][i]["low_goodput_flows.as_client"], hoinfo["hosts"][i]["low_goodput_flows.as_server"]
+  
+      flow_tot = flow_tot + afac + afas
+      bad_gp_client = bad_gp_client + bgc
+      bad_gp_server = bad_gp_server + bgs
+    end 
+    
+    seen = seen + group_of
+  until (seen < tot) or (os.time() > deadline)
+
+  --'sta parte di dialogo va messa dentro l'assistente, in questo file non si tratta la parte grammaticale
+  local perc, state = 100 - math.floor( (bad_gp_client + bad_gp_server) / flow_tot) * 100 
+  if perc > 90 then 
+    state = "complessivamente ottima" 
+  elseif perc > 80 then 
+    state = "complessivamente buona"
+  elseif perc > 70 then
+    state = "complessivamente mediocre"
+  else 
+    state = "complessivamente bassa" 
+  end
+
+  return state, flow_tot, (bad_gp_client + bad_gp_server)
+end
+
 
 --return a table with tot traffic, remote/local percentage and pkt drop
 function network_state.check_net_communication()
@@ -264,7 +276,7 @@ function network_state.check_bad_hosts_and_app()
   local function mycallback( hostname, hoststats )
       if  hoststats.is_blacklisted then blacklisted = blacklisted + 1  end
   end
-  callback.foreachHost(ifname, os.time()+5000, mycallback )
+  network_state.get_stats("host", nil, nil, nil, mycallback)
 
   local j, breeds, tot, bytes = 1, {}, 0, 0
   for i,v in pairs(if_stats["ndpi"]) do
@@ -298,7 +310,6 @@ function network_state.check_dangerous_traffic()
 
   for i,v in pairs(if_stats["ndpi"]) do
     if v.breed == "Dangerous" then 
-
       tot_bytes = v["bytes.rcvd"] + v["bytes.sent"]
       v["total_bytes"] = tot_bytes 
       v["name"] = i
@@ -315,12 +326,12 @@ end
 
 ------------------------ALERTS----------------------------
 --TODO: NOTIFICHE se possibile. Notificare almeno gli allarmi importanti
---TODO: distingui/separa/etichetta gli allarmi engaged - released - di flusso...
---TODO; di sicuro c'è da far capire bene: Soggetto, stato allarme, gravità, tipo. [VEDI APPUNTI ALERT] 
+--      distingui/separa/etichetta gli allarmi engaged - released - di flusso...
+--      di sicuro c'è da far capire bene: Soggetto, stato allarme, gravità, tipo. [VEDI APPUNTI ALERT] 
 
 require "alert_utils"
 
-function network_state.check_alerts()
+function network_state.get_alerts()--TODO: cambia nome in get_aletrs
   local engaged_alerts = getAlerts("engaged", getTabParameters(_GET, "engaged"))
   local past_alerts    = getAlerts("historical", getTabParameters(_GET, "historical"))
   local flow_alerts    = getAlerts("historical-flows", getTabParameters(_GET, "historical-flows"))
@@ -328,8 +339,7 @@ function network_state.check_alerts()
   return engaged_alerts, past_alerts, flow_alerts
 end
 
-
-function network_state.check_num_alerts_and_severity()
+function network_state.get_num_alerts_and_severity()
   local num_engaged_alerts  = getNumAlerts("engaged", getTabParameters(_GET, "engaged"))
   local num_past_alerts     = getNumAlerts("historical", getTabParameters(_GET, "historical"))
   local num_flow_alerts     = getNumAlerts("historical-flows", getTabParameters(_GET,"historical-flows"))
@@ -361,7 +371,7 @@ function network_state.check_num_alerts_and_severity()
 end
 
 function network_state.alerts_details()
-  local engaged_alerts, past_alerts, flow_alerts = network_state.check_alerts() 
+  local engaged_alerts, past_alerts, flow_alerts = network_state.get_alerts() 
   local tmp_alerts, alerts = {}, {}
   local limit= 3 --temporary limit, add effective selection criterion (eg. text limit is 640 char )
 
@@ -429,3 +439,60 @@ end
 ------------------------------------------------------
 
 return network_state
+
+
+
+--[[
+
+--TODO: includi i flow status nelle info del traffico! prima però studiali
+-- questi status qui sotto si ottengono iterando sui singoli flussi (con get_stats(...)) o in maniera aggregata da interface.getFlowsStatus()
+
+--inoltre chiedi a luca se sono solo per ntop edge o se posso comunque usarli
+
+function getFlowStatusTypes()
+   local entries = {
+   [0]  = i18n("flow_details.normal"),
+   [1]  = i18n("flow_details.slow_tcp_connection"),
+   [2]  = i18n("flow_details.slow_application_header"),
+   [3]  = i18n("flow_details.slow_data_exchange"),
+   [4]  = i18n("flow_details.low_goodput"),
+   [5]  = i18n("flow_details.suspicious_tcp_syn_probing"),
+   [6]  = i18n("flow_details.tcp_connection_issues"),
+   [7]  = i18n("flow_details.suspicious_tcp_probing"),
+   [8]  = i18n("flow_details.flow_emitted"),
+   [9]  = i18n("flow_details.tcp_connection_refused"),
+   [10] = i18n("flow_details.ssl_certificate_mismatch"),
+   [11] = i18n("flow_details.dns_invalid_query"),
+   [12] = i18n("flow_details.remote_to_remote"),
+   [13] = i18n("flow_details.blacklisted_flow"),
+   [14] = i18n("flow_details.flow_blocked_by_bridge"),
+   [15] = i18n("flow_details.web_mining_detected"),
+   [16] = i18n("flow_details.suspicious_device_protocol"),
+   [17] = i18n("flow_details.elephant_flow_l2r"),
+   [18] = i18n("flow_details.elephant_flow_r2l"),
+   [19] = i18n("flow_details.longlived_flow"),
+   [20] = i18n("flow_details.not_purged"),
+   [21] = i18n("alerts_dashboard.ids_alert"),
+   [22] = i18n("flow_details.tcp_severe_connection_issues"),
+   [23] = i18n("flow_details.ssl_unsafe_ciphers"),
+   [24] = i18n("flow_details.data_exfiltration"),
+   [25] = i18n("flow_details.ssl_old_protocol_version"),
+   }
+
+   return entries
+end
+
+
+
+----------------------------------------------------------- -
+utile per gli alert:
+
+num_triggered_alerts table
+num_triggered_alerts.min number 0
+num_triggered_alerts.day number 0
+num_triggered_alerts.hour number 0
+num_triggered_alerts.5mins number 0
+
+pezzo di tabella proveniente dalle stats di network_state.get_stats() dell'itratore egli host_ts
+
+]]

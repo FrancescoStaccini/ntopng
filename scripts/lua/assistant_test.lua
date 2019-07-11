@@ -171,7 +171,7 @@ end
 
 local function handler_Network_State()
   local stats = net_state.check_ifstats_table()
-  local alert_num, severity = net_state.check_num_alerts_and_severity()
+  local alert_num, severity = net_state.get_num_alerts_and_severity()
   local alert_text = ""
 
   if alert_num > 0 then
@@ -230,7 +230,7 @@ end
 
 
 local function handler_traffic_app_info()
-  local stats = net_state.check_top_application_protocol()
+  local stats = net_state.check_top_application_protocol()--TODO: sistema
   local text, top_num, j = "", 0, 1
   
   if      stats[3] then top_num = 3
@@ -270,7 +270,7 @@ local function handler_traffic_app_info()
 end
 
 local function handler_traffic_app_info_more_info()
-  local stats, text = net_state.check_top_application_protocol(), ""
+  local stats, text = net_state.check_top_application_protocol(), "" --TODO: sistema
   local if_0 = "< 1%; "
 
   for i,v in pairs(stats) do
@@ -584,7 +584,7 @@ local function handler_alert_more_info()
 end
 
 local function handler_alert()
-  local alert_num, severity = net_state.check_num_alerts_and_severity()
+  local alert_num, severity = net_state.get_num_alerts_and_severity()
   local alert_text = ""
 
   if alert_num > 0 then

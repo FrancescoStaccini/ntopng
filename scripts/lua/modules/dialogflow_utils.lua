@@ -54,6 +54,8 @@ function utils.create_top_traffic_speech_text(top_app)
 end
 
 
+--TODO: fai meglio le uils per i chart, dallo script dell'assistente voglio solo passare una tabella con le opzioni e un paio di array per i dati e bona
+
 
 --NOTE: per ora funge col grafico a barre con UNA SOLA entità per punto
 --TODO: a lot! le possibili opzioni sono taaante

@@ -9,17 +9,35 @@ ignore_post_payload_parse = 1
 require "lua_utils"
 local dialogflow = require "dialogflow_APIv2"
 local net_state = require "network_state"
-
---TODO: poi spostali
-local df_utils = require("dialogflow_utils") --
+local df_utils = require "dialogflow_utils" --TODO: poi spostale le utils (o valuta se ha senso questo grado di modularità)
 
 local response, request
 
---TODO: CANCELLA I VECCHI FILE: google_assistant_utils.lua ecc.
---      sistema l'inglese
---      AGGIUNGI I SUGGERIMENTI 
---      telegram bot: guarda se, a posteriori dell'apertura della chat da parte dell'utente, è possibile prendersi il chatID (e il token come lo piglio? hardcoded? ma è pubblico il codice!)
+--note: rivedi i limiti una volta implementato il controllo sulla lunghezza delle labels
+local limit_num_devices_category_chart = 4
+local limit_num_devices_protocol_chart = 4
+local limit_num_chart_top_categories  = 6
 
+--TODO: 
+--      -RICH MESSAGE [https://cloud.dialogflow.com/dialogflow/docs/intents-rich-messages ] inoltre esempi json tra i preferiti
+--        idea: nell'URL dell'immagine metto il link al(lo scriptino lua nel) server ntop (o a quanto pare a quickchart.io" ) con alla fine i parametri necessari per fare il grafico
+--      -metti altri intent per farsi dare elenchi/vai grafici 
+--      -CANCELLA I VECCHI FILE: google_assistant_utils.lua ecc.
+--      -sistema (chiedi aiuto per) l'inglese
+--      -AGGIUNGI I SUGGERIMENTI (ovunque ha senso, soprattutto nei grafici)
+--      -nella creazione delle card per i grafici, controlla/taglia la lunghezza dellle labels per farle entrare nel grafico
+--      -telegram bot: guarda se, a posteriori dell'apertura della chat da parte dell'utente, è possibile prendersi il chatID (e il token come lo piglio? hardcoded? ma è pubblico il codice!)
+--      -sinonimi della entity ndpi_protocols (devono essere "assistant friendly" cioè pensa a come l'assistente comprende le parole). idea: per le lettere maiuscole, "abbassale" programmaticamente
+--      -idea: quickchart.io permette di fare anche qr_code: magari si possono usare per linkare roba interessante? pensaci su
+--      -intent (triggerabile da vari intent, magari guardo contesto/parametri) per farsi mandare grafici/elenchi via mail (o telegram ecc.)
+--      -Intents Rework. In alcuni casi è utile che l'utente PRIMA esprima l'intenzione di voler fare qualcosa, POI altro intent per prendere il parametro
+--      -fai il repeat per tutti gli intent (che abbia senso)
+--      -Aggiungere dimensione temporale nelle info (tipo traffico/app/categorie ecc.) così d adare un idea del tempo di monitoraggio
+--      -aggiungere la getHostAltName(ip,mac) dove serve ma occhio! mettila solo quando devi esporre i dati!
+--      -la possibilità di settare Alias per i dispositivi, direttamente dall'assistente
+
+--NOTE:
+--      - come ottengo il nome alias? con getHostAltName(ip,mac) ma ip può essere un mac e mac può essere nil
 --##########################################-nAssistant-utils-############################################################
 
 local function get_aggregated_info_traffic()
@@ -52,7 +70,6 @@ local function get_aggregated_info_traffic()
 end
 
 --#########################################################################################################
-
 
 local function get_aggregated_info_devices()
   local info, devices_num = net_state.check_devices_type()
@@ -132,7 +149,7 @@ end
   
 --#########################################################################################################
 
-local function et_aggregated_info_network()
+local function get_aggregated_info_network()
   local stats = net_state.check_ifstats_table()
   local alert_num, severity = net_state.get_num_alerts_and_severity()
   local alert_text = ""
@@ -171,7 +188,7 @@ local function et_aggregated_info_network()
 end
 
 --#########################################################################################################
-function get_aggregated_info_generic()
+local function get_aggregated_info_generic()
   local stats = net_state.check_ifstats_table()
   local alert_num, severity = net_state.get_num_alerts_and_severity()
   local top_apps = net_state.check_top_application_protocol()
@@ -199,16 +216,52 @@ function get_aggregated_info_generic()
   return text
 end
 
+--#########################################################################################################
+--return: num of macs found, macs info table --> [mac : getMacInfo(mac) + host_name]
+--NOTE: qui ho sia host info che mac info, posso combinarle se mi interessa
+local function find_mac_info(name) 
+
+  local hosts_names = interface.findHost(name) --it search "names" among (and inside) all the host names
+  if not hosts_names then return 0, nil end
+
+  local macs_table, tmp_host_info, tmp_mac_info = {}, {}, {}
+
+  for i,v in pairs(hosts_names) do
+    
+    tmp_host_info = interface.getHostInfo(i)
+
+    if tmp_host_info then
+      tmp_mac_info = interface.getMacInfo(tmp_host_info.mac)
+      if tmp_mac_info then
+        --[[TODO: piglia sol ole info che mi sono utili e non tutto
+                  per ora ciò "lo fa" il chiamante
+
+10:65:30:08:97:08.devtype number 0
+10:65:30:08:97:08.pool number 0
+10:65:30:08:97:08.seen.last number 1562935524
+10:65:30:08:97:08.ndpi_categories table
+10:65:30:08:97:08.name string kilian-IIT
+10:65:30:08:97:08.ndpi table (nella tprint di prova era vuota questa tavola. why?)
+
+        ]]
+
+        macs_table[tmp_mac_info.mac] = table.merge( interface.getMacInfo(tmp_host_info.mac), { name = getHostAltName( tmp_host_info.mac ) } ) 
+      end
+    end
+
+  end
+
+  if macs_table then 
+    return table.len(macs_table), macs_table
+  else
+    return 0, nil
+  end
+
+end
+
 --########################################-END-nAssistant-utils-##################################################
 ------------------------------------------------------------------------------------------------------------------
 --##############################################-Handlers-########################################################
-
-
---TODO: RICH MESSAGE!!!! [ https://cloud.dialogflow.com/dialogflow/docs/intents-rich-messages ] inoltre esempi json tra i preferiti
---idea: nell'URL dell'immagine metto il link al(lo scriptino lua nel) server ntop con alla fine i parametri 
---      necessari per fare il grafico
-
-
 
 
 --return an overview of the top ndpi_application regarding the active flows
@@ -304,7 +357,7 @@ function handler_get_aggregated_info_more()
   dialogflow.send(response_text)
 end
 
--- WIP+-
+--WIP
 function handler_if_active_flow_top_categories()
   local top_cat = net_state.check_traffic_categories()
   --note: top app is in decrescent order and contain, for each caregory, [name-perc-bytes]
@@ -326,7 +379,7 @@ function handler_if_active_flow_top_categories()
       table.insert(data.labels, v.name)
       table.insert(data.values, v.bytes/1024 ) --TODO: se necessario (tanto traffico) metti i MB invece dei KB
       i = i + 1
-      if i >= 6 or v.perc < 1 then break end    --NOTE: 6 and 1 are arbitrary
+      if i >= limit_num_chart_top_categories or v.perc < 1 then break end   
   end
 
   local url = df_utils.create_chart_url(data, options)
@@ -342,42 +395,20 @@ function handler_if_active_flow_top_categories()
   dialogflow.send(display_text, nil, nil, nil, card)
 end
 
-
 --WIP
 --todo: SISTEMA NOMI, METTILI IN UN GRAFICO, (E SE MIGLIORI LE PREFORMANCE ALLORA TOP, faccio una marea di iterazioni sugli host/devices)
-function handler_who_are_categories()
-  --TODO: cicla tra host/dispositivi per vedere CHI appartiene a tale categoria
-
+function handler_who_is_categories()
   local category = request.parameters.ndpi_category
-  local tmp, res, byte_tot = {}, {}. 0
+  local tmp, res, byte_tot = {}, {}, 0
 
   ----------------------------------------------------
   local function get_stats_callback(mac, stats)
-
-    local function find_name(mac)
-      local name,host = nil,nil
-
-      local t = interface.findHostByMac(mac)
-
-      if t then 
-
-        for i,v in pairs(t) do
-          host = interface.getHostInfo(i)
-          if host then 
-            name = host.name
-            break
-          end
-        end
-
-      end
-      return ternary( name ~= nil and name ~= "", name, mac)
-    end
-
     if stats["ndpi_categories"] and stats["ndpi_categories"][category] and stats["ndpi_categories"][category]["bytes"]then 
         table.insert(tmp, {
           bytes = stats["ndpi_categories"][category]["bytes"],
           manufacturer = stats.manufacturer,
-          name = find_name(mac)
+          --name = find_name(mac)
+          name = getHostAltName( mac )
       })
       byte_tot = byte_tot + stats["ndpi_categories"][category]["bytes"]
     end
@@ -385,232 +416,146 @@ function handler_who_are_categories()
   -----------------------------------------------------
   net_state.get_stats("devices", nil, nil, nil, get_stats_callback)
   
+  table.sort(tmp, function (a,b) return a.bytes > b.bytes end )
 
+  local labels, values, datasets = {},{},{}
+  local legend_label = "Traffic Volume (percentage)"
+  local data = {labels = {}, values = {}, legend_label = legend_label}
+  local options = { 
+      w = "600",
+      h = "280",
+      chart_type = "bar",
+      bkg_color = "white"
+  }
+  for i,v in ipairs(tmp) do
+      table.insert(data.labels,  v.name)
+      table.insert(data.values, math.floor(( v.bytes / byte_tot ) * 100)  ) 
+      if i >= limit_num_devices_category_chart then break end    
+  end
 
-  -- local labels, values, datasets = {},{},{}
-  -- local legend_label = "Traffic (KB)"
-  -- local data = {labels = {}, values = {}, legend_label = legend_label}
-  -- local options = { 
-  --     w = "600",
-  --     h = "280",
-  --     chart_type = "bar",
-  --     bkg_color = "white"
-  -- }
-  -- local i = 0
-  -- for _,v in ipairs(tmp) do
-  --     table.insert(data.labels, v.name)
-  --     table.insert(data.values, v.bytes/1024 ) --TODO: se necessario (tanto traffico) metti i MB invece dei KB
-  --     i = i + 1
-  --     if i >= 6 or v.perc < 1 then break end    --NOTE: 6 and 1 are arbitrary
-  -- end
+  local url = df_utils.create_chart_url(data, options)
+  local card = dialogflow.create_card(
+      "Top ".. category.." Device Chart",
+      url,
+      "Top ".. category.." Device Chart"
+  )
+  --local speech_text = df_utils.create_top_categories_speech_text(top_cat)
+  local display_text = "Here is the chart"
 
-  -- local url = df_utils.create_chart_url(data, options)
-  -- local card = dialogflow.create_card(
-  --     "Top Categories Chart",
-  --     url,
-  --     "Top Categories Chart"
-  -- )
-  -- --local speech_text = df_utils.create_top_categories_speech_text(top_cat)
-  -- local display_text = "Here is the chart"
-
-  -- --dialogflow.send(speech_text, display_text, nil, nil, card)
-  -- dialogflow.send(display_text, nil, nil, nil, card)
-
-
-  tprint(tmp)
-  --[[
-esempio di tmp:
-
- table
-10:65:30:08:97:08 table
-10:65:30:08:97:08.name string kilian-IIT
-10:65:30:08:97:08.manufacturer string Dell Inc.
-10:65:30:08:97:08.bytes number 960
-00:0C:29:60:74:90 table
-00:0C:29:60:74:90.name string 00:0C:29:60:74:90
-00:0C:29:60:74:90.manufacturer string VMware, Inc.
-00:0C:29:60:74:90.bytes number 17981
-D8:18:D3:78:C6:2F table
-D8:18:D3:78:C6:2F.name string 2a00:1450:400c:c06::9a
-D8:18:D3:78:C6:2F.manufacturer string Juniper Networks
-D8:18:D3:78:C6:2F.bytes number 241880
-00:0C:29:23:26:D5 table
-00:0C:29:23:26:D5.name string 00:0C:29:23:26:D5
-00:0C:29:23:26:D5.manufacturer string VMware, Inc.
-00:0C:29:23:26:D5.bytes number 4080
-00:00:5E:00:02:60 table
-00:00:5E:00:02:60.name string fe80::fd:60:0:0
-00:00:5E:00:02:60.manufacturer string ICANN, IANA Department
-00:00:5E:00:02:60.bytes number 222409
-00:22:15:03:C2:F4 table
-00:22:15:03:C2:F4.name string 00:22:15:03:C2:F4
-00:22:15:03:C2:F4.manufacturer string ASUSTek COMPUTER INC.
-00:22:15:03:C2:F4.bytes number 389
-18:60:24:8D:01:F8 table
-18:60:24:8D:01:F8.name string DESKTOP-67PRDJH
-18:60:24:8D:01:F8.manufacturer string Hewlett Packard
-18:60:24:8D:01:F8.bytes number 1137419
-18:60:24:7B:EB:39 table
-18:60:24:7B:EB:39.name string DESKTOP-7PGI4EI
-18:60:24:7B:EB:39.manufacturer string Hewlett Packard
-18:60:24:7B:EB:39.bytes number 311070
-C4:54:44:23:E4:2B table
-C4:54:44:23:E4:2B.name string wafivm5.iit.cnr.it
-C4:54:44:23:E4:2B.manufacturer string Quanta Computer Inc.
-C4:54:44:23:E4:2B.bytes number 3554
-A4:BA:DB:41:A6:C5 table
-A4:BA:DB:41:A6:C5.name string wafivm4.iit.cnr.it
-A4:BA:DB:41:A6:C5.manufacturer string Dell Inc.
-A4:BA:DB:41:A6:C5.bytes number 3551
-A0:CE:C8:11:3A:6A table
-A0:CE:C8:11:3A:6A.name string MBP-di-Matteo
-A0:CE:C8:11:3A:6A.manufacturer string Ce Link Limited
-A0:CE:C8:11:3A:6A.bytes number 868
-14:18:77:53:49:98 table
-14:18:77:53:49:98.name string 14:18:77:53:49:98
-14:18:77:53:49:98.manufacturer string Dell Inc.
-14:18:77:53:49:98.bytes number 13376
-00:00:5E:00:01:60 table
-00:00:5E:00:01:60.name string 00:00:5E:00:01:60
-00:00:5E:00:01:60.manufacturer string ICANN, IANA Department
-00:00:5E:00:01:60.bytes number 158178
-AC:9E:17:81:A1:76 table
-AC:9E:17:81:A1:76.name string AC:9E:17:81:A1:76
-AC:9E:17:81:A1:76.manufacturer string ASUSTek COMPUTER INC.
-AC:9E:17:81:A1:76.bytes number 2849993
-C0:33:5E:72:90:5E table
-C0:33:5E:72:90:5E.name string nuvirin
-C0:33:5E:72:90:5E.manufacturer string Microsoft
-C0:33:5E:72:90:5E.bytes number 58604
-54:04:A6:70:46:94 table
-54:04:A6:70:46:94.name string 54:04:A6:70:46:94
-54:04:A6:70:46:94.manufacturer string ASUSTek COMPUTER INC.
-54:04:A6:70:46:94.bytes number 2907
-90:1B:0E:99:23:94 table
-90:1B:0E:99:23:94.name string wafivm7.iit.cnr.it
-90:1B:0E:99:23:94.manufacturer string Fujitsu Technology Solutions GmbH
-90:1B:0E:99:23:94.bytes number 3164
-D8:18:D3:78:CB:2F table
-D8:18:D3:78:CB:2F.name string D8:18:D3:78:CB:2F
-D8:18:D3:78:CB:2F.manufacturer string Juniper Networks
-D8:18:D3:78:CB:2F.bytes number 2228939
-BC:AE:C5:27:8F:B7 table
-BC:AE:C5:27:8F:B7.name string djackcnr
-BC:AE:C5:27:8F:B7.manufacturer string ASUSTek COMPUTER INC.
-BC:AE:C5:27:8F:B7.bytes number 7849
-40:A8:F0:22:A0:60 table
-40:A8:F0:22:A0:60.name string fe80::42a8:f0ff:fe22:a060
-40:A8:F0:22:A0:60.manufacturer string Hewlett Packard
-40:A8:F0:22:A0:60.bytes number 498
-9C:93:4E:60:19:44 table
-9C:93:4E:60:19:44.name string 9C:93:4E:60:19:44
-9C:93:4E:60:19:44.manufacturer string Xerox Corporation
-9C:93:4E:60:19:44.bytes number 3747
-00:0E:C6:C7:F5:AD table
-00:0E:C6:C7:F5:AD.name string MBP-di-Maurizio
-00:0E:C6:C7:F5:AD.manufacturer string Asix Electronics Corp.
-00:0E:C6:C7:F5:AD.bytes number 7960
-00:19:BB:46:60:DF table
-00:19:BB:46:60:DF.name string dhcp84.iit.cnr.it
-00:19:BB:46:60:DF.manufacturer string Hewlett Packard
-00:19:BB:46:60:DF.bytes number 1596
-48:2A:E3:05:F5:78 table
-48:2A:E3:05:F5:78.name string 48:2A:E3:05:F5:78
-48:2A:E3:05:F5:78.manufacturer string Wistron InfoComm(Kunshan)Co.,Ltd.
-48:2A:E3:05:F5:78.bytes number 85
-C8:1F:66:BE:33:F4 table
-C8:1F:66:BE:33:F4.name string confmaster.iit.cnr.it
-C8:1F:66:BE:33:F4.manufacturer string Dell Inc.
-C8:1F:66:BE:33:F4.bytes number 32176
-52:54:00:7F:72:83 table
-52:54:00:7F:72:83.name string 52:54:00:7F:72:83
-52:54:00:7F:72:83.manufacturer string Realtek (UpTech? also reported)
-52:54:00:7F:72:83.bytes number 374
-38:D5:47:32:2D:FE table
-38:D5:47:32:2D:FE.name string DESKTOP-38KKIFE
-38:D5:47:32:2D:FE.manufacturer string ASUSTek COMPUTER INC.
-38:D5:47:32:2D:FE.bytes number 4529
-64:00:6A:97:10:EF table
-64:00:6A:97:10:EF.name string 64:00:6A:97:10:EF
-64:00:6A:97:10:EF.manufacturer string Dell Inc.
-64:00:6A:97:10:EF.bytes number 6034
-D0:94:66:3F:AB:1A table
-D0:94:66:3F:AB:1A.name string wafivm9.iit.cnr.it
-D0:94:66:3F:AB:1A.manufacturer string Dell Inc.
-D0:94:66:3F:AB:1A.bytes number 5015
-F4:30:B9:D7:6F:53 table
-F4:30:B9:D7:6F:53.name string DESKTOP-0L3V5B5
-F4:30:B9:D7:6F:53.manufacturer string Hewlett Packard
-F4:30:B9:D7:6F:53.bytes number 6942
-E8:39:35:20:D0:24 table
-E8:39:35:20:D0:24.name string ibiza.iit.cnr.it
-E8:39:35:20:D0:24.manufacturer string Hewlett Packard
-E8:39:35:20:D0:24.bytes number 935840
-D8:9E:F3:3E:CE:7A table
-D8:9E:F3:3E:CE:7A.name string DESKTOP-VT7O3KB
-D8:9E:F3:3E:CE:7A.manufacturer string Dell Inc.
-D8:9E:F3:3E:CE:7A.bytes number 4635
-78:E3:B5:8F:8D:02 table
-78:E3:B5:8F:8D:02.name string Prosperi-PC
-78:E3:B5:8F:8D:02.manufacturer string Hewlett Packard
-78:E3:B5:8F:8D:02.bytes number 13431
-18:60:24:7B:EB:3B table
-18:60:24:7B:EB:3B.name string DESKTOP-U7QMNDS
-18:60:24:7B:EB:3B.manufacturer string Hewlett Packard
-18:60:24:7B:EB:3B.bytes number 274309
-B4:B6:86:13:8D:C7 table
-B4:B6:86:13:8D:C7.name string fabio-notebook
-B4:B6:86:13:8D:C7.manufacturer string Hewlett Packard
-B4:B6:86:13:8D:C7.bytes number 2828
-A8:60:B6:2C:5E:87 table
-A8:60:B6:2C:5E:87.name string MBP-di-Marina
-A8:60:B6:2C:5E:87.manufacturer string Apple, Inc.
-A8:60:B6:2C:5E:87.bytes number 911852
-00:0C:29:92:D4:04 table
-00:0C:29:92:D4:04.name string 00:0C:29:92:D4:04
-00:0C:29:92:D4:04.manufacturer string VMware, Inc.
-00:0C:29:92:D4:04.bytes number 78099
-2C:41:38:98:99:19 table
-2C:41:38:98:99:19.name string DESKTOP-QEUC29T
-2C:41:38:98:99:19.manufacturer string Hewlett Packard
-2C:41:38:98:99:19.bytes number 934164
-0C:4D:E9:A2:5B:82 table
-0C:4D:E9:A2:5B:82.name string andrea-Macmini
-0C:4D:E9:A2:5B:82.manufacturer string Apple, Inc.
-0C:4D:E9:A2:5B:82.bytes number 25341
-00:E0:4C:14:37:41 table
-00:E0:4C:14:37:41.name string MacBook-Pro-5
-00:E0:4C:14:37:41.manufacturer string Realtek Semiconductor Corp.
-00:E0:4C:14:37:41.bytes number 85359
-52:54:00:6B:AA:F4 table
-52:54:00:6B:AA:F4.name string 52:54:00:6B:AA:F4
-52:54:00:6B:AA:F4.manufacturer string Realtek (UpTech? also reported)
-52:54:00:6B:AA:F4.bytes number 14395
-
-
-  ]]
-
-
-  dialogflow.send("Work in progress")
+  --TODO: aggiungi i suggerimenti coi nomi dei dispositivi e la parte vocale
+  --dialogflow.send(speech_text, display_text, nil, nil, card)
+  dialogflow.send(display_text, nil, nil, nil, card)
 end
 
 --WIP
-function handler_who_are_protocols()
-    --TODO: cicla tra host/dispositivi per vedere CHI ha usato il protocollo
+--todo: sistema il grafico: i nomi sono lunghi e le label "sballano il grafico" ed a volte si sballa per non so quale motivo :(
+function handler_who_is_protocols()
+  local protocol = request.parameters.ndpi_protocol
+  local tmp, res, byte_tot = {}, {}, 0
 
-    
+  ----------------------------------------------------
+  local function get_stats_callback(ip)
+
+    local host_stats = interface.getHostInfo(ip)
+
+    if not host_stats then return false end
+
+    if host_stats["ndpi"] and host_stats["ndpi"][protocol] then 
+        table.insert(tmp, {
+          bytes = host_stats["ndpi"][protocol]["bytes.sent"] + host_stats["ndpi"][protocol]["bytes.rcvd"],
+          --name = ternary(host_stats.name ~= "", host_stats.name, ip)
+          name = getHostAltName(ip)
+      })
+      byte_tot = byte_tot +  host_stats["ndpi"][protocol]["bytes.sent"] + host_stats["ndpi"][protocol]["bytes.rcvd"] 
+    end
+
+    return true
+  end
+  -----------------------------------------------------
+  net_state.get_stats("localhost", nil, nil, nil, get_stats_callback)
   
+  table.sort(tmp, function (a,b) return a.bytes > b.bytes end )
 
-  dialogflow.send("Work in progress")
+  local labels, values, datasets = {},{},{}
+  local legend_label = "Traffic Volume (percentage)"
+  local data = {labels = {}, values = {}, legend_label = legend_label}
+  local options = { 
+      w = "600",
+      h = "280",
+      chart_type = "bar",
+      bkg_color = "white"
+  }
+  for i,v in ipairs(tmp) do
+      table.insert(data.labels, v.name)
+      table.insert(data.values, math.floor(( v.bytes / byte_tot ) * 100)  ) 
+      if i >= limit_num_devices_protocol_chart  then break end    
+  end
+
+  local url = df_utils.create_chart_url(data, options)
+  local card = dialogflow.create_card(
+      "Top ".. protocol.." Device Chart",
+      url,
+      "Top ".. protocol.." Device Chart"
+  )
+  --local speech_text = df_utils.create_top_categories_speech_text(top_cat)
+  local display_text = "Here is the chart"
+
+  --TODO: aggiungi i suggerimenti coi nomi dei dispositivi e la parte vocale
+  --dialogflow.send(speech_text, display_text, nil, nil, card)
+  dialogflow.send(display_text, nil, nil, nil, card)
 end
 
 
+--IDEA/TODO: fallo a fallback, fai un intent dove l'utente esprime l'intenzione di comunicare un nome/ip/mac, poi
+--           QUESTO handler sarà la fallback del followup di quell'intent, così da essere in un contesto noto e isolato
+--Attualmente NON è fatto a fallback, ma è con un intent diretto: l'utente dovrà essere più specifico e "statico", ma per me è più semplice da proggrammare
+function handler_single_device_info()
+
+  local text = "I didn't find any device with that name"
+
+-- local contexts = response.outputContexts
+  -- local param = nil
+  -- for i,v in pairs(contexts) do 
+  --   if v.parameters and v.parameters.Aggregators then
+  --     param = v.parameters.Aggregators
+  --     break
+  --   end
+  --  end
+  -- if not param or param ~= "devices" then 
+  --   dialogflow.send("Something went wrong, ask me again please")
+  -- end
+  --   --qui prendo il testo o da query text o da parameters (non ho ancora deciso )
+--########### PARTE COMMENTATA PERCHÉ PER ORA L'INTENT È ACCESSIBILE DAL CONTESTO PRINCIPALE ########
+
+  local device_name = request.parameters.device_name
+
+  local macs_table_len, macs_table = find_mac_info(device_name)
+
+  if macs_table_len > 1 then 
+    --TODO: metti suggerimenti (ed elenco testuale) e fai in modo che il suggerimento selezionato venga accettato/inteso
+    text = "I found this, please select one of the suggestions"
+
+  elseif macs_table_len == 1 then
+    
+    
+
+    for i,v in pairs(macs_table) do --change the type to String
+      
+      text = "Name: ".. v.name .. "\nManufacturer: " .. v.manufacturer.."\nType: "..v.devtype.."\n all the other info... (WIP)"
+
+    end
+
+
+
+  end
+
+--  tprint(macs_table)
+  dialogflow.send(text)
+
+end
+
 --########################################################-Intents-Dispatcher-####################################################################
 request = dialogflow.receive()
-
---TODO: intent (triggerabile da vari intent, magari guardo contesto/parametri) per farsi mandare grafici/elenchi via mail (o telegram ecc.)
---TODO: Rework. In alcuni casi è utile che l'utente PRIMA esprima l'intenzione di voler fare qualcosa, POI altro intent per prendere il parametro
---TODO: fai il repeat per tutti (che abbia senso)
 
 --get_aggregated_info può ricevere 4 parametri (Devices, generic, Network, Traffic)
 --TODO: fai gli adeguati distinguo per i 4 casi
@@ -620,18 +565,22 @@ elseif  request.intent_name == "get_aggregated_info - more" then response = hand
 
 
 --questo intent si differenzia dal "get_aggregated_info --> traffic" perché riguarda solo le applicazioni
---check: ha senso accorparli nello stesso intent? stile get_aggregated_info, creando un'antità per distinguere apps/categories
+--check: ha senso accorparli nello stesso intent? stile get_aggregated_info, creando un'entità per distinguere apps/categories per ora direi di NO,
+--       i due intent sui aspettano entity diverse, se le accorpo come faccio a distinguere? --> composite entity! non va perché il nome del proto/categoria deve essere obbligatorio MA è in base a cosa ha detto l'utente! se vuole i proto o le categorie!
 elseif  request.intent_name == "if_active_flow_top_application" then response = handler_if_active_flow_top_application()
 elseif  request.intent_name == "if_active_flow_top_categories"  then response = handler_if_active_flow_top_categories()
 
 
-  --TODO: metti altri intent per farsi dare elenchi/vai grafici 
-elseif  request.intent_name == "who_are - categories"  then response = handler_who_are_categories()--WIP
-elseif  request.intent_name == "who_are - protocols"  then response = handler_who_are_protocols()--WIP
+  --TODO: finisci gli intent sulla console dialogflow: hanno poche frasi 
+elseif  request.intent_name == "who_is - categories"  then response = handler_who_is_categories()--WIP
+elseif  request.intent_name == "who_is - protocols"  then response = handler_who_is_protocols()--WIP
 
 
-  
+  --TODO: nuovo contesto per gli "who_is" così da poter triggerare l'individuazione del nome dell'host/device da lì (es tappando sul suggerimento)
+--elseif  request.intent_name == "who_is - devices"  then response = handler_who_is_devices()--WIP (è una fallback )
+elseif  request.intent_name == "single_device_info" then response = handler_single_device_info()
 
-else response = dialogflow.send("Sorry, but I didn't understand, can you repeat?") 
+
+else response = dialogflow.send("Sorry, but I didn't understand, can you repeat please?") 
 end
 

@@ -176,7 +176,8 @@ function ga_module.send(speech_text, display_text, expect_response, suggestions_
 
 end
 
---TODO!!!: salva il contesto appena arriva un intent e cancella il precedente (insomma voglio che il precedente contesto sia a disposizione)
+--TODO: dovrei chiamare request ciò che qua soto chiamo response
+--TODO: salva il contesto appena arriva un intent e cancella il precedente (insomma voglio che il precedente contesto sia a disposizione)
 function ga_module.receive()
 
   local info, pos, err = json.decode(_POST["payload"], 1, nil)--I assume only ONE outputContext
@@ -185,7 +186,8 @@ function ga_module.receive()
   response["queryText"] = info.queryResult.queryText
   if info.queryResult.parameters ~= nil then response["parameters"] = info.queryResult.parameters end
   if info.queryResult.outputContexts and info.queryResult.outputContexts[1].name then response["context"] = info.queryResult.outputContexts[1].name end
-  ---response["outputContext_name"] = info.queryResult.outputContexts[1].name  
+  if info.queryResult.outputContexts then response["outputContext"] = info.queryResult.outputContexts end
+  ---response["outputContext"] = info.queryResult.outputContexts[1].name  
   --response["outputContext_parameters"] = info.queryResult.outputContexts[1].parameters.number
   response["intent_name"] = info.queryResult.intent.displayName
   response["session"] = info.session

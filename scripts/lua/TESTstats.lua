@@ -140,7 +140,9 @@ end
 local net_state = require "network_state"
 local json = require("dkjson")
 --print( json.encode(createStats(matrix), {indent = true} ) )
---print( json.encode( interface.findHost("AC:9E:17:81:A1:76"), {indent = true} ) )
+--print( json.encode( interface.findHost("bucci-PC"), {indent = true} ) )
+--print( json.encode( table.len(interface.findHost("pc")), {indent = true} ) )
+
 --print( json.encode( interface.getnDPIProtocols(), {indent = true} ) )
 
 
@@ -180,10 +182,16 @@ local json = require("dkjson")
 -- print(  json.encode( res, {indent = true}) )
 
 
-print(  json.encode( interface.getHostsInfo(), {indent = true}) )
+--print(  json.encode( interface.getHostsInfo(), {indent = true}) )
+
+
+--print(  json.encode( interface.getHostInfo("146.48.99.100"), {indent = true}) )
+
 
 
 --print(  json.encode( interface.getStats(), {indent = true})  )
+
+
 
 
 
@@ -203,7 +211,10 @@ print(  json.encode( interface.getHostsInfo(), {indent = true}) )
 
 
 --print( json.encode( interface.getMacsInfo(), {indent = true}) )
---print( json.encode( interface.getMacInfo("00:00:5E:00:01:61" ), {indent = true}) )
+--print( json.encode( interface.getMacInfo("AC:9E:17:81:A1:76" ), {indent = true}) )
+
+
+print( json.encode( getHostAltName("14:18:77:53:49:9C"), {indent = true}) ) 
 
 
 --

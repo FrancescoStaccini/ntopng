@@ -49,6 +49,8 @@ AlertsManager::AlertsManager(int interface_id, const char *filename) : StoreMana
   unlink(filePath);
   sprintf(&filePath[base_offset], "%s", "alerts_v9.db");
   unlink(filePath);
+  sprintf(&filePath[base_offset], "%s", "alerts_v10.db");
+  unlink(filePath);
   filePath[base_offset] = 0;
 
   /* open the newest */
@@ -78,6 +80,18 @@ AlertsManager::AlertsManager(int interface_id, const char *filename) : StoreMana
 				 fileFullPath);
 
   snprintf(queue_name, sizeof(queue_name), ALERTS_MANAGER_QUEUE_NAME, ifid);
+
+  /* After startup it's necessary to have 0 engaged alerts so that
+   * the database state is in sync with the Alertable state. */
+  releaseEngagedAlerts(time(NULL));
+}
+
+/* **************************************************** */
+
+AlertsManager::~AlertsManager() {
+  /* It's better to perform a clean release during shutdown, so that
+   * the end timestamp will be correctly set. */
+  releaseEngagedAlerts(time(NULL));
 }
 
 /* **************************************************** */
@@ -95,24 +109,24 @@ int AlertsManager::openStore() {
 	   "CREATE TABLE IF NOT EXISTS %s ("
 	   "alert_type       INTEGER NOT NULL, "
 	   "alert_subtype    TEXT NOT NULL, "
-	   "alert_periodicity INTEGER NOT NULL, "
+	   "alert_granularity INTEGER NOT NULL, "
 	   "alert_entity     INTEGER NOT NULL, "
 	   "alert_entity_val TEXT NOT NULL,    "
 	   "alert_severity   INTEGER NOT NULL, "
 	   "alert_tstamp     INTEGER NOT NULL, "
 	   "alert_tstamp_end INTEGER DEFAULT NULL, "
-	   "alert_untriggered INTEGER DEFAULT 0, "
+	   "alert_released   INTEGER DEFAULT 0, "
 	   "alert_json       TEXT DEFAULT NULL"
 	   ");"
 	   "CREATE INDEX IF NOT EXISTS t2i_type     ON %s(alert_type); "
 	   "CREATE INDEX IF NOT EXISTS t2i_subtype  ON %s(alert_subtype); "
-	   "CREATE INDEX IF NOT EXISTS t2i_periodicity ON %s(alert_periodicity); "
+	   "CREATE INDEX IF NOT EXISTS t2i_granularity ON %s(alert_granularity); "
 	   "CREATE INDEX IF NOT EXISTS t2i_alert_entity ON %s(alert_entity, alert_entity_val); "
 	   "CREATE INDEX IF NOT EXISTS t2i_severity ON %s(alert_severity); "
 	   "CREATE INDEX IF NOT EXISTS t2i_tstamp   ON %s(alert_tstamp); "
 	   "CREATE INDEX IF NOT EXISTS t2i_tstamp_e ON %s(alert_tstamp_end); "
-	   "CREATE INDEX IF NOT EXISTS t2i_engaged  ON %s(alert_tstamp_end, alert_periodicity, alert_untriggered); "
-	   "CREATE INDEX IF NOT EXISTS t2i_hash     ON %s(alert_type, alert_subtype, alert_periodicity, alert_entity, alert_entity_val); ",
+	   "CREATE INDEX IF NOT EXISTS t2i_engaged  ON %s(alert_granularity, alert_released); "
+	   "CREATE INDEX IF NOT EXISTS t2i_existing ON %s(alert_type, alert_subtype, alert_granularity, alert_entity, alert_entity_val, alert_released); ",
 	   ALERTS_MANAGER_TABLE_NAME, ALERTS_MANAGER_TABLE_NAME, ALERTS_MANAGER_TABLE_NAME,
 	   ALERTS_MANAGER_TABLE_NAME, ALERTS_MANAGER_TABLE_NAME, ALERTS_MANAGER_TABLE_NAME,
 	   ALERTS_MANAGER_TABLE_NAME, ALERTS_MANAGER_TABLE_NAME, ALERTS_MANAGER_TABLE_NAME,
@@ -196,7 +210,7 @@ int AlertsManager::openStore() {
 /* **************************************************** */
 
 int AlertsManager::isAlertEngaged(time_t when, AlertType alert_type, const char *subtype,
-    int periodicity, AlertEntity alert_entity, const char * const alert_entity_value,
+    int granularity, AlertEntity alert_entity, const char * const alert_entity_value,
     char * const query_buf, ssize_t query_buf_len,
     bool * const is_existing, u_int64_t * const cur_rowid) const {
   int rc = 0, step;
@@ -207,20 +221,18 @@ int AlertsManager::isAlertEngaged(time_t when, AlertType alert_type, const char 
 	   "SELECT rowid "
 	   "FROM %s "
 	   "WHERE alert_type = ? AND alert_subtype = ? "
-	   "AND alert_periodicity = ? "
+	   "AND alert_granularity = ? "
 	   "AND alert_entity = ? AND alert_entity_val = ? "
-	   "AND alert_tstamp_end >= ? "
-	   "AND alert_untriggered = 0 "
+	   "AND alert_released = 0 "
 	   "LIMIT 1; ",
 	   ALERTS_MANAGER_TABLE_NAME);
 
   if(sqlite3_prepare_v2(db, query_buf, -1, &stmt, 0)
      || sqlite3_bind_int(stmt,   1, static_cast<int>(alert_type))
      || sqlite3_bind_text(stmt,  2, subtype, -1, SQLITE_STATIC)
-     || sqlite3_bind_int(stmt,   3, periodicity)
+     || sqlite3_bind_int(stmt,   3, granularity)
      || sqlite3_bind_int(stmt,   4, static_cast<int>(alert_entity))
-     || sqlite3_bind_text(stmt,  5, alert_entity_value, -1, SQLITE_STATIC)
-     || sqlite3_bind_int64(stmt, 6, static_cast<long int>(when) - 2*periodicity)) {
+     || sqlite3_bind_text(stmt,  5, alert_entity_value, -1, SQLITE_STATIC)) {
     ntop->getTrace()->traceEvent(TRACE_ERROR, "SQL Error: %s", sqlite3_errmsg(db));
     rc = -1;
     goto out;
@@ -287,6 +299,46 @@ int AlertsManager::updateExistingAlert(u_int64_t rowid, time_t new_timestamp_end
   
 /* **************************************************** */
 
+int AlertsManager::releaseEngagedAlerts(time_t when) {
+  char query[STORE_MANAGER_MAX_QUERY];
+  int rc = 0, step;
+  sqlite3_stmt *stmt = NULL;
+
+  if(!store_initialized || !store_opened)
+    return(-1);
+
+  m.lock(__FILE__, __LINE__);
+
+  snprintf(query, sizeof(query),
+     "UPDATE %s "
+     "SET alert_tstamp_end = ?, alert_released = 1 "
+     "WHERE alert_released = 0",
+     ALERTS_MANAGER_TABLE_NAME);
+
+  if(sqlite3_prepare_v2(db, query, -1, &stmt, 0)
+     || sqlite3_bind_int64(stmt, 1, static_cast<long int>(when))) {
+    ntop->getTrace()->traceEvent(TRACE_ERROR, "SQL Error: %s", sqlite3_errmsg(db));
+    rc = -3;
+    goto out;
+  }
+
+  while((step = sqlite3_step(stmt)) != SQLITE_DONE) {
+    if(step == SQLITE_ERROR) {
+      ntop->getTrace()->traceEvent(TRACE_ERROR, "SQL Error: %s", sqlite3_errmsg(db));
+      rc = -4;
+      goto out;
+    }
+  }
+
+out:
+  if(stmt) sqlite3_finalize(stmt);
+  m.unlock(__FILE__, __LINE__);
+
+  return(rc);
+}
+
+/* **************************************************** */
+
 void AlertsManager::markForMakeRoom(bool on_flows) {
   Redis *r = ntop->getRedis();
   char k[128], buf[512];
@@ -339,13 +391,52 @@ bool AlertsManager::incHostTotalAlerts(const char *hostkey) {
 
 /* **************************************************** */
 
+bool AlertsManager::hasAlerts() {
+  char query[STORE_MANAGER_MAX_QUERY];
+  int step;
+  bool rc = false;
+  sqlite3_stmt *stmt = NULL;
+
+  if(!store_initialized || !store_opened)
+    return(-1);
+
+  m.lock(__FILE__, __LINE__);
+
+  snprintf(query, sizeof(query),
+     "SELECT rowid "
+     "FROM %s "
+     "LIMIT 1",
+     ALERTS_MANAGER_TABLE_NAME);
+
+  if(sqlite3_prepare_v2(db, query, -1, &stmt, 0)) {
+    ntop->getTrace()->traceEvent(TRACE_ERROR, "SQL Error: %s", sqlite3_errmsg(db));
+    goto out;
+  }
+
+  if((step = sqlite3_step(stmt)) != SQLITE_DONE) {
+    if(step == SQLITE_ERROR)
+      ntop->getTrace()->traceEvent(TRACE_ERROR, "SQL Error: %s", sqlite3_errmsg(db));
+    else
+      rc = true;
+  }
+
+out:
+  if(stmt) sqlite3_finalize(stmt);
+  m.unlock(__FILE__, __LINE__);
+
+  return(rc);
+}
+
+/* **************************************************** */
+
 /* NOTE: do not call this from C, use alert queues in LUA */
-int AlertsManager::triggerAlert(time_t when, int periodicity, AlertType alert_type, const char *subtype,
+int AlertsManager::triggerAlert(time_t when, int granularity, AlertType alert_type, const char *subtype,
       AlertLevel alert_severity, AlertEntity alert_entity, const char *alert_entity_value,
       const char *alert_json, bool *new_alert,
       bool ignore_disabled, bool check_maximum) {
   *new_alert = false;
   int rc = 0;
+  bool is_stored_alert = (granularity == 0);
 
   if(ignore_disabled || !ntop->getPrefs()->are_alerts_disabled()) {
     char query[STORE_MANAGER_MAX_QUERY];
@@ -360,12 +451,14 @@ int AlertsManager::triggerAlert(time_t when, int periodicity, AlertType alert_ty
 
     m.lock(__FILE__, __LINE__);
 
-    if(periodicity > 0) {
+    if(!is_stored_alert) {
       /* Check if this alert already exists ...*/
-      if((rc = isAlertEngaged(when, alert_type, subtype, periodicity, alert_entity,
+      if((rc = isAlertEngaged(when, alert_type, subtype, granularity, alert_entity,
           alert_entity_value, query, sizeof(query), &is_existing, &cur_rowid)))
         goto out;
     }
+
+    iface->setHasAlerts(true);
 
     if(is_existing) { /* Already existing record found */
       if((rc = updateExistingAlert(cur_rowid, when, query, sizeof(query))))
@@ -376,12 +469,12 @@ int AlertsManager::triggerAlert(time_t when, int periodicity, AlertType alert_ty
       /* This alert is being engaged/stored */
       snprintf(query, sizeof(query),
 	       "INSERT INTO %s "
-	       "(alert_periodicity, alert_tstamp, alert_tstamp_end, alert_type, alert_severity, alert_entity, alert_entity_val, alert_json, alert_subtype) "
-	       "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?); ",
+	       "(alert_granularity, alert_tstamp, alert_tstamp_end, alert_type, alert_severity, alert_entity, alert_entity_val, alert_json, alert_subtype, alert_released) "
+	       "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?); ",
 	       ALERTS_MANAGER_TABLE_NAME);
 
       if(sqlite3_prepare_v2(db, query, -1,  &stmt, 0)
-	 || sqlite3_bind_int(stmt,   1,  periodicity)
+	 || sqlite3_bind_int(stmt,   1,  granularity)
 	 || sqlite3_bind_int64(stmt, 2,  static_cast<long int>(when))
 	 || sqlite3_bind_int64(stmt, 3,  static_cast<long int>(when))
 	 || sqlite3_bind_int(stmt,   4,  static_cast<int>(alert_type))
@@ -389,7 +482,8 @@ int AlertsManager::triggerAlert(time_t when, int periodicity, AlertType alert_ty
 	 || sqlite3_bind_int(stmt,   6,  static_cast<int>(alert_entity))
 	 || sqlite3_bind_text(stmt,  7,  alert_entity_value, -1, SQLITE_STATIC)
 	 || sqlite3_bind_text(stmt,  8,  alert_json, -1, SQLITE_STATIC)
-	 || sqlite3_bind_text(stmt,  9,  subtype, -1, SQLITE_STATIC)) {
+	 || sqlite3_bind_text(stmt,  9,  subtype, -1, SQLITE_STATIC)
+	 || sqlite3_bind_int(stmt,  10,  is_stored_alert ? 1 : 0)) {
 	ntop->getTrace()->traceEvent(TRACE_ERROR, "SQL Error: %s", sqlite3_errmsg(db));
 	rc = -2;
 	goto out;
@@ -420,7 +514,7 @@ int AlertsManager::triggerAlert(time_t when, int periodicity, AlertType alert_ty
 
 /* **************************************************** */
 
-int AlertsManager::releaseAlert(time_t when, int periodicity, AlertType alert_type, const char *subtype,
+int AlertsManager::releaseAlert(time_t when, int granularity, AlertType alert_type, const char *subtype,
       AlertLevel alert_severity, AlertEntity alert_entity, const char *alert_entity_value, u_int64_t *row_id) {
   int rc = 0;
 
@@ -433,7 +527,7 @@ int AlertsManager::releaseAlert(time_t when, int periodicity, AlertType alert_ty
     if(!store_initialized || !store_opened)
       return(-1);
 
-    if(periodicity <= 0) {
+    if(granularity <= 0) {
       ntop->getTrace()->traceEvent(TRACE_WARNING, "Aperiodic alerts cannot be released");
       return(-2);
     }
@@ -441,13 +535,13 @@ int AlertsManager::releaseAlert(time_t when, int periodicity, AlertType alert_ty
     m.lock(__FILE__, __LINE__);
 
     /* Check if this alert already exists */
-    if((rc = isAlertEngaged(when, alert_type, subtype, periodicity, alert_entity,
+    if((rc = isAlertEngaged(when, alert_type, subtype, granularity, alert_entity,
         alert_entity_value, query, sizeof(query), &is_existing, row_id)))
       goto out;
 
     snprintf(query, sizeof(query),
        "UPDATE %s "
-       "SET alert_tstamp_end = max(alert_tstamp_end, ?), alert_untriggered = 1 "
+       "SET alert_tstamp_end = max(alert_tstamp_end, ?), alert_released = 1 "
        "WHERE rowid = ? ",
        ALERTS_MANAGER_TABLE_NAME);
 

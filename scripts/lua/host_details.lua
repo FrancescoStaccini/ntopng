@@ -55,6 +55,8 @@ local ifstats = interface.getStats()
 
 ifId = ifstats.id
 
+local is_pcap_dump = interface.isPcapDumpInterface()
+
 local host = nil
 local family = nil
 
@@ -77,7 +79,6 @@ if(debug_hosts) then traceError(TRACE_DEBUG,TRACE_CONSOLE, i18n("host_details.tr
 
 
 local host = interface.getHostInfo(host_info["host"], host_vlan)
-
 local tskey
 
 if _GET["tskey"] then
@@ -396,8 +397,6 @@ if(not(isLoopback(ifname))) then
 	 print("<li><a href=\""..url.."&page=geomap\"><i class='fa fa-globe fa-lg'></i></a></li>")
       end
    end
-else
-
 end
 
 if (host["ip"] ~= nil) and areAlertsEnabled() and not ifstats.isView then
@@ -418,7 +417,7 @@ if((page == "historical") or ts_utils.exists("host:traffic", {ifid=ifId, host=ts
    end
 end
 
-if not only_historical then
+if not only_historical and not is_pcap_dump then
    if host["localhost"] and ts_utils.getDriverName() == "rrd" then
       if ntop.isEnterprise() or ntop.isnEdge() then
 	 if(page == "traffic_report") then
@@ -1163,7 +1162,7 @@ elseif((page == "ndpi")) then
       end
 
       print('<div class="dt-toolbar btn-toolbar pull-right">')
-      print('<div class="btn-group"><button class="btn btn-link dropdown-toggle" data-toggle="dropdown">Direction ' .. direction_filter .. '<span class="caret"></span></button> <ul class="dropdown-menu" role="menu" id="direction_dropdown">')
+      print('<div class="btn-group pull-right"><button class="btn btn-link dropdown-toggle" data-toggle="dropdown">Direction ' .. direction_filter .. '<span class="caret"></span></button> <ul class="dropdown-menu" role="menu" id="direction_dropdown">')
       print('<li><a href="'..base_url..'">'..i18n("all")..'</a></li>')
       print('<li><a href="'..base_url..'&direction=sent">'..i18n("ndpi_page.sent_only")..'</a></li>')
       print('<li><a href="'..base_url..'&direction=recv">'..i18n("ndpi_page.received_only")..'</a></li>')
@@ -1517,6 +1516,7 @@ local page_params = {
    vlan = _GET["vlan"],
    traffic_type = _GET["traffic_type"],
    version = _GET["version"],
+   l4proto = _GET["l4proto"],
    host = hostinfo2hostkey(host_info),
    tskey = _GET["tskey"],
 }
@@ -1539,13 +1539,11 @@ end
 
 local active_flows_msg = getFlowsTableTitle()
 
-if false then
-else
 print [[
   flow_rows_option["type"] = 'host';
 	 $("#table-flows").datatable({
          url: url_update,
-         buttons: [ ]] printActiveFlowsDropdown(base_url, page_params, interface.getStats(), interface.getActiveFlowsStats()) print[[ ],
+         buttons: [ ]] printActiveFlowsDropdown(base_url, page_params, interface.getStats(), interface.getActiveFlowsStats(hostinfo2hostkey(host_info))) print[[ ],
          rowCallback: function ( row ) { return flow_table_setID(row); },
          tableCallback: function()  { $("#dt-bottom-details > .pull-left > p").first().append('. ]]
 print(i18n('flows_page.idle_flows_not_listed'))
@@ -1670,7 +1668,6 @@ print[[
 
    ]]
 
-end
 elseif(page == "snmp" and ntop.isEnterprise() and isAllowedSystemInterface()) then
    local snmp_devices = get_snmp_devices()
 

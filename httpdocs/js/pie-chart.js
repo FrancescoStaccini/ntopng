@@ -64,11 +64,20 @@ function PieChart(name, update_url, url_params, units, refresh) {
     this.update();
 
     // var updateInterval = window.setInterval(update, refresh);
-   
+
+    function compare_by_label(a, b) {
+      if (a.label < b.label){
+        return -1;
+      } else if (a.label > b.label) {
+        return 1;
+      } else {
+        return 0;
+      }
+    }
 
     function update_pie_chart(data) {
+        data.sort(compare_by_label);
 	streakerDataAdded = data;
-
 	oldPieData = filteredPieData;
 	pieData = donut(streakerDataAdded);
 

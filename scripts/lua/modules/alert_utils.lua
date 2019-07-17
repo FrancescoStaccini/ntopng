@@ -181,133 +181,20 @@ end
 
 -- ##############################################################################
 
-local function ndpival_bytes(json, protoname)
-   key = "ndpiStats"
-
-   -- Host
-   if((json[key] == nil) or (json[key][protoname] == nil)) then
-      if(verbose) then print("## ("..protoname..") Empty<br>\n") end
-      return(0)
-   else
-      local v = (json[key][protoname]["bytes"]["sent"] or 0) + (json[key][protoname]["bytes"]["rcvd"] or 0)
-      if(verbose) then print("##  ("..protoname..") "..v.."<br>\n") end
-      return(v)
-   end
-end
-
-local function proto_bytes(old, new, protoname)
-   return(ndpival_bytes(new, protoname) - ndpival_bytes(old, protoname))
-end
-
---
--- NOTE
---
--- These functions are called by the load function to evaluate
--- threshold crosses.
--- When reading a field from the "old" parameter, an "or" operator should be used
--- to avoid working on nil value. Nil values can be found, for example, when a
--- new entity appear and it has not previous dump or across ntopng reboot.
---
-
--- TODO remove after gui rework
-
-function bytes(old, new, interval)
-   -- io.write(debug.traceback().."\n")
-   if(verbose) then print("bytes("..interval..")") end
-
-   if(new["sent"] ~= nil) then
-      -- Host
-      return((new["sent"]["bytes"] + new["rcvd"]["bytes"]) - ((old["sent"] and old["sent"]["bytes"] or 0) + (old["rcvd"] and old["rcvd"]["bytes"] or 0)))
-   else
-      -- Interface
-      return(new.stats.bytes - (old.stats and old.stats.bytes or 0))
-   end
-end
-
-function packets(old, new, interval)
-   if(verbose) then print("packets("..interval..")") end
-   if(new["sent"] ~= nil) then
-      -- Host
-      return((new["sent"]["packets"] + new["rcvd"]["packets"]) - ((old["sent"] and old["sent"]["packets"] or 0) + (old["rcvd"] and old["rcvd"]["packets"] or 0)))
-   else
-      -- Interface
-      return(new.stats.packets - (old.stats and old.stats.packets or 0))
-   end
-end
-
-function active(old, new, interval)
-   if(verbose) then print("active("..interval..")") end
-   local diff = (new["total_activity_time"] or 0) - (old["total_activity_time"] or 0)
-   return(diff)
-end
-
-function idle(old, new, interval)
-   if(verbose) then print("idle("..interval..")") end
-   local diff = os.time()-new["seen.last"]
-   return(diff)
-end
-
-function dns(old, new, interval)
-   if(verbose) then print("dns("..interval..")") end
-   return(proto_bytes(old, new, "DNS"))
-end
-
-function p2p(old, new, interval)
-   if(verbose) then print("p2p("..interval..")") end
-   return(proto_bytes(old, new, "eDonkey") + proto_bytes(old, new, "BitTorrent") + proto_bytes(old, new, "Skype"))
-end
-
-function throughput(old, new, interval)
-   if(verbose) then print("throughput("..interval..")") end
-
-   return((bytes(old, new, interval) * 8)/ (interval*1000000))
-end
-
-function ingress(old, new, interval)
-   return new["ingress"] - (old["ingress"] or 0)
-end
-
-function egress(old, new, interval)
-   return new["egress"] - (old["egress"] or 0)
-end
-
-function inner(old, new, interval)
-   return new["inner"] - (old["inner"] or 0)
-end
-
-function flows(old, new, interval)
-   local new_flows = new["flows.as_client"] + new["flows.as_server"]
-   local old_flows = (old["flows.as_client"] or 0) + (old["flows.as_server"] or 0)
-   return new_flows - old_flows
-end
-
-function active_local_hosts(old, new, interval)
-   return new["local_hosts"]
-end
-
--- ##############################################################################
-
 local function getInterfacePacketDropPercAlertKey(ifname)
    return "ntopng.prefs.iface_" .. getInterfaceId(ifname) .. ".packet_drops_alert"
 end
 
 -- ##############################################################################
 
-local function getAlertReleaseQueryTime()
-   return("(alert_tstamp_end + 2*alert_periodicity)")
-end
-
 -- Apply a "engaged only" or "closed only" filter
 function statusFilter(query, engaged, now)
-  local comparison = ternary(engaged, ">=", "<")
-  now = now or os.time()
-  local filter = string.format("%s %s %u", getAlertReleaseQueryTime(), comparison, now)
-  local alert_untriggered_val = ""
+  local alert_released_val
 
   if engaged then
-    alert_untriggered_val = " AND (alert_untriggered=0)"
+    alert_released_val = "alert_released=0"
   else
-    alert_untriggered_val = " OR (alert_untriggered=1)"
+    alert_released_val = "alert_released=1"
   end
 
   local group_by_pos = string.find(query, "group by") or string.find(query, "GROUP BY")
@@ -326,7 +213,7 @@ function statusFilter(query, engaged, now)
     prefix_part = prefix_part .. " AND"
   end
 
-  return(string.format("%s (%s%s) %s", prefix_part, filter, alert_untriggered_val, suffix_part))
+  return(string.format("%s %s %s", prefix_part, alert_released_val, suffix_part))
 end
 
 -- ##############################################################################
@@ -342,15 +229,6 @@ require "persistence"
 
 function is_allowed_timespan(timespan)
    return(alert_consts.alerts_granularities[timespan] ~= nil)
-end
-
-function is_allowed_alarmable_metric(metric)
-   for _, allowed_metric in pairs(alert_consts.alarmable_metrics) do
-      if metric == allowed_metric then
-	 return true
-      end
-   end
-   return false
 end
 
 function get_alerts_hash_name(timespan, ifname, entity_type)
@@ -546,17 +424,50 @@ function getNumAlerts(what, options)
    end
 
    local num = 0
-   local opts = getUnpagedAlertOptions(options or {})
-   local res = performAlertsQuery("SELECT COUNT(*) AS count", what, opts)
-   if((res ~= nil) and (#res == 1) and (res[1].count ~= nil)) then num = tonumber(res[1].count) end
+
+   if(what == "engaged") then
+     local entity_type_filter = tonumber(options.entity)
+     local entity_value_filter = options.entity_val
+     local res = interface.getEngagedAlertsCount(entity_type_filter, entity_value_filter)
+
+     if(res ~= nil) then num = res.num_alerts end
+   else
+     local opts = getUnpagedAlertOptions(options or {})
+     local res = performAlertsQuery("SELECT COUNT(*) AS count", what, opts)
+     if((res ~= nil) and (#res == 1) and (res[1].count ~= nil)) then num = tonumber(res[1].count) end
+   end
 
    return num
 end
 
 -- #################################
 
+local function engagedAlertsQuery(params)
+  local type_filter = tonumber(params.alert_type)
+  local severity_filter = tonumber(params.alert_severity)
+  local entity_type_filter = tonumber(params.entity)
+  local entity_value_filter = params.entity_val
+
+  -- TODO
+  local per_page = params.perPage
+  local sort_order = params.sortOrder
+  local current_page = params.currentPage
+
+  --~ tprint(string.format("type=%s sev=%s entity=%s val=%s", type_filter, severity_filter, entity_type_filter, entity_value_filter))
+
+  local alerts = interface.getEngagedAlerts(entity_type_filter, entity_value_filter, type_filter, severity_filter)
+
+  return(alerts)
+end
+
+-- #################################
+
 function getAlerts(what, options)
-   return performAlertsQuery("SELECT rowid, *", what, options)
+   if what == "engaged" then
+      return engagedAlertsQuery(options)
+   else
+      return performAlertsQuery("SELECT rowid, *", what, options)
+   end
 end
 
 -- #################################
@@ -964,15 +875,7 @@ end
 
 -- #################################
 
-local function drawDropdown(status, selection_name, active_entry, entries_table, button_label)
-   -- alert_consts.alert_severity_keys and alert_consts.alert_type_keys are defined in lua_utils
-   local id_to_label
-   if selection_name == "severity" then
-      id_to_label = alertSeverityLabel
-   elseif selection_name == "type" then
-      id_to_label = alertTypeLabel
-   end
-
+local function getMenuEntries(status, selection_name)
    -- compute counters to avoid printing items that have zero entries in the database
    local actual_entries = {}
    if status == "historical-flows" then
@@ -996,8 +899,37 @@ local function drawDropdown(status, selection_name, active_entry, entries_table,
       elseif selection_name == "type" then
 	 actual_entries = interface.queryAlertsRaw("select alert_type id, count(*) count", statusFilter("group by alert_type", engaged))
       end
-
    end
+
+   return(actual_entries)
+end
+
+-- #################################
+
+local function dropdownUrlParams(get_params)
+  local buttons = ""
+
+  for param, val in pairs(get_params) do
+    if((param ~= "alert_severity") and (param ~= "alert_type")) then
+      buttons = buttons.."&"..param.."="..val
+    end
+  end
+
+  return(buttons)
+end
+
+-- #################################
+
+local function drawDropdown(status, selection_name, active_entry, entries_table, button_label, get_params, actual_entries)
+   -- alert_consts.alert_severity_keys and alert_consts.alert_type_keys are defined in lua_utils
+   local id_to_label
+   if selection_name == "severity" then
+      id_to_label = alertSeverityLabel
+   elseif selection_name == "type" then
+      id_to_label = alertTypeLabel
+   end
+
+   actual_entries = actual_entries or getMenuEntries(status, selection_name)
 
    local buttons = '<div class="btn-group">'
 
@@ -1013,7 +945,7 @@ local function drawDropdown(status, selection_name, active_entry, entries_table,
 
    local class_active = ""
    if active_entry == nil then class_active = ' class="active"' end
-   buttons = buttons..'<li'..class_active..'><a href="?status='..status..'">All</a></i>'
+   buttons = buttons..'<li'..class_active..'><a href="?status='..status..dropdownUrlParams(get_params)..'">All</a></i>'
 
    for _, entry in pairs(actual_entries) do
       local id = tonumber(entry["id"])
@@ -1024,6 +956,7 @@ local function drawDropdown(status, selection_name, active_entry, entries_table,
       if label == active_entry then class_active = ' class="active"' end
       -- buttons = buttons..'<li'..class_active..'><a href="'..ntop.getHttpPrefix()..'/lua/show_alerts.lua?status='..status
       buttons = buttons..'<li'..class_active..'><a href="?status='..status
+      buttons = buttons..dropdownUrlParams(get_params)
       buttons = buttons..'&alert_'..selection_name..'='..id..'">'
       buttons = buttons..firstToUpper(label)..' ('..count..')</a></li>'
    end
@@ -1049,24 +982,8 @@ function drawAlertSourceSettings(entity_type, alert_source, delete_button_msg, d
    local have_nedge = ntop.isnEdge()
    options = options or {}
 
-   -- This code controls which entries to show under the tabs Every Minute/Hourly/Daily
-   local descr
-   if entity_type == "network" then
-      descr = table.clone(alert_consts.network_alert_functions_description)
-   elseif entity_type == "interface" then
-      -- interface
-      descr = table.merge(alert_consts.alert_functions_description, alert_consts.iface_alert_functions_description)
-      descr["active"] = nil
-      descr["flows"] = nil
-   else
-      -- host
-      descr = table.clone(alert_consts.alert_functions_description)
-   end
+   local descr = alerts.load_check_modules(entity_type)
 
-   local flow_rate_attacker_key = "flow_attacker_threshold"
-   local flow_rate_victim_key = "flow_victim_threshold"
-   local syn_attacker_key = "syn_attacker_threshold"
-   local syn_victim_key = "syn_victim_threshold"
    local anomaly_config_key = nil
    local flow_rate_alert_thresh, syn_alert_thresh
 
@@ -1097,8 +1014,8 @@ function drawAlertSourceSettings(entity_type, alert_source, delete_button_msg, d
 
       -- possibly add a tab if there are alerts configured for the host
       num_engaged_alerts = getNumAlerts("engaged", getTabParameters(_GET, "engaged"))
-      num_past_alerts = getNumAlerts("historical", getTabParameters(_GET, "historical"))
-      num_flow_alerts = getNumAlerts("historical-flows", getTabParameters(_GET, "historical-flows"))
+      --~ num_past_alerts = getNumAlerts("historical", getTabParameters(_GET, "historical"))
+      --~ num_flow_alerts = getNumAlerts("historical-flows", getTabParameters(_GET, "historical-flows"))
 
       if num_past_alerts > 0 or num_engaged_alerts > 0 or num_flow_alerts > 0 then
          if(tab == nil) then
@@ -1106,7 +1023,7 @@ function drawAlertSourceSettings(entity_type, alert_source, delete_button_msg, d
             tab = "alert_list"
          end
 
-         printTab("alert_list", "Detected Alerts", tab)
+         printTab("alert_list", i18n("show_alerts.engaged_alerts"), tab)
       else
          -- if there are no alerts, we show the alert settings
          if(tab=="alert_list") then tab = nil end
@@ -1156,27 +1073,6 @@ function drawAlertSourceSettings(entity_type, alert_source, delete_button_msg, d
 
    -- keep defaults in sync with ntop_defines.h
    local anomalies_config = {
-      {
-         title = i18n("entity_thresholds.flow_attacker_title"),
-         descr = i18n("entity_thresholds.flow_attacker_description"),
-         key = flow_rate_attacker_key,
-         global_default = 25, step = 1
-      }, {
-         title = i18n("entity_thresholds.flow_victim_title"),
-         descr = i18n("entity_thresholds.flow_victim_description"),
-         key = flow_rate_victim_key,
-         global_default = 25, step = 1
-	 }, {
-         title = i18n("entity_thresholds.syn_attacker_title"),
-         descr = i18n("entity_thresholds.syn_attacker_description"),
-         key = syn_attacker_key,
-         global_default = 25, step = 5
-	    }, {
-         title = i18n("entity_thresholds.syn_victim_title"),
-         descr = i18n("entity_thresholds.syn_victim_description"),
-         key = syn_victim_key,
-         global_default = 25, step = 5
-	       }
    }
 
    local global_redis_hash = getGlobalAlertsConfigurationHash(tab, entity_type, alert_source)
@@ -1184,7 +1080,7 @@ function drawAlertSourceSettings(entity_type, alert_source, delete_button_msg, d
    print('</ul>')
 
    if((show_entity) and (tab == "alert_list")) then
-      drawAlertTables(num_past_alerts, num_engaged_alerts, num_flow_alerts, _GET, true)
+      drawAlertTables(num_past_alerts, num_engaged_alerts, num_flow_alerts, _GET, true, nil, { engaged_only = true })
    else
       -- Before doing anything we need to check if we need to save values
 
@@ -1223,7 +1119,8 @@ function drawAlertSourceSettings(entity_type, alert_source, delete_button_msg, d
 	    to_save = true
 	 end
 
-         for k,_ in pairs(descr) do
+         -- TODO refactor this into the threshold cross checker
+         for k, check_module in pairs(descr) do
 	    value    = _POST["value_"..k]
 	    operator = _POST["op_"..k]
 
@@ -1334,25 +1231,42 @@ function drawAlertSourceSettings(entity_type, alert_source, delete_button_msg, d
       print('<input id="csrf" name="csrf" type="hidden" value="'..ntop.getRandomCSRFValue()..'" />\n')
 
    if not options.remote_host then
-      for key,v in pairsByKeys(descr, asc) do
-         print("<tr><td><b>".. alert_consts.alert_functions_info[key].label .."</b><br>")
-         print("<small>"..v.."</small>\n")
+      for key, check_module in pairsByKeys(descr, asc) do
+        local gui_conf = check_module.gui
+	local show_input = true
 
-	 for _, prefix in pairs({"", "global_"}) do
-	    local k = prefix..key
-	    print("</td><td>")
-	    print("<select name=op_".. k ..">\n")
-	    if((vals[k] ~= nil) and (vals[k][1] == "gt")) then print("<option selected=\"selected\"") else print("<option ") end
-	    print("value=\"gt\">&gt;</option>\n")
+	if check_module.granularity then
+	   -- check if the check is performed and thus has to
+	   -- be configured at this granularity
+	   show_input = false
 
-	    if((vals[k] ~= nil) and (vals[k][1] == "lt")) then print("<option selected=\"selected\"") else print("<option ") end
-	    print("value=\"lt\">&lt;</option>\n")
-	    print("</select>\n")
-	    print("<input type=number min=1 step=1 class=\"text-right form-control\" style=\"display:inline; width:12em;\" name=\"value_"..k.."\" value=\"")
-	    if(vals[k] ~= nil) then print(vals[k][2]) end
-	    print("\">\n")
-	 end
+	   for _, gran in pairs(check_module.granularity) do
+	      if gran == tab then
+		 show_input = true
+		 break
+	      end
+	   end
+	end
+
+        if not gui_conf or not show_input then
+          goto next_module
+        end
+
+         print("<tr><td><b>".. i18n(gui_conf.i18n_title) .."</b><br>")
+         print("<small>"..i18n(gui_conf.i18n_description).."</small>\n")
+
+         for _, prefix in pairs({"", "global_"}) do
+            if check_module.gui.input_builder then
+              local k = prefix..key
+              local value = vals[k]
+              print("</td><td>")
+
+              print(check_module.gui.input_builder(check_module.gui or {}, k, value))
+            end
+         end
+
          print("</td></tr>\n")
+         ::next_module::
       end
    end
 
@@ -1440,10 +1354,9 @@ function drawAlertSourceSettings(entity_type, alert_source, delete_button_msg, d
       print("<li>" .. i18n("alerts_thresholds_config.note_consecutive_checks") .. "</li>")
 
       if (entity_type == "host") then
-         print("<li>" .. i18n("alerts_thresholds_config.note_deltas_of_idle_host_become_active") .. "</li>")
 	 print("<li>" .. i18n("alerts_thresholds_config.note_checks_on_active_hosts") .. "</li>")
-	 print("<li>" .. i18n("alerts_thresholds_config.note_attacker_victime_threshold") .. "</li>")
       end
+
       print("</ul></div>")
 
       print[[
@@ -1522,6 +1435,21 @@ end
 
 -- #################################
 
+local function menuEntriesToDbFormat(entries)
+  local res = {}
+
+  for entry_id, entry_val in pairs(entries) do
+    res[#res + 1] = {
+      id = tostring(entry_id),
+      count = tostring(entry_val),
+    }
+  end
+
+  return(res)
+end
+
+-- #################################
+
 function drawAlertTables(num_past_alerts, num_engaged_alerts, num_flow_alerts, get_params, hide_extended_title, alt_nav_tabs, options)
    local alert_items = {}
    local url_params = {}
@@ -1555,9 +1483,11 @@ function drawAlertTables(num_past_alerts, num_engaged_alerts, num_flow_alerts, g
 
    for k,v in pairs(get_params) do if k ~= "csrf" then url_params[k] = v end end
       if not alt_nav_tabs then
+      if not options.engaged_only then
+        print("<br>")
+      end
 	 print[[
-<br>
-<ul class="nav nav-tabs" role="tablist" id="alert-tabs">
+<ul class="nav nav-tabs" role="tablist" id="alert-tabs" class="]] print(ternary(options.engaged_only, 'hidden', '')) print[[">
 <!-- will be populated later with javascript -->
 </ul>
 ]]
@@ -1637,9 +1567,10 @@ function getCurrentStatus() {
 }
 </script>
 ]]
+
       if not alt_nav_tabs then print [[<div class="tab-content">]] end
 
-      local status = _GET["status"]
+      local status = ternary(options.engaged_only, "engaged", _GET["status"])
       local status_reset = (status == nil)
 
       if num_engaged_alerts > 0 then
@@ -1684,7 +1615,7 @@ function getCurrentStatus() {
             form.appendTo('body').submit();
          }
 
-         $("#]] print(nav_tab_id) print[[").append('<li><a href="#tab-]] print(t["div-id"]) print[[" clicked="]] print(clicked) print[[" role="tab" data-toggle="tab">]] print(t["label"]) print[[</a></li>')
+         $("#]] print(nav_tab_id) print[[").append('<li class="]] print(ternary(options.engaged_only, 'hidden', '')) print[["><a href="#tab-]] print(t["div-id"]) print[[" clicked="]] print(clicked) print[[" role="tab" data-toggle="tab">]] print(t["label"]) print[[</a></li>')
 
          $('a[href="#tab-]] print(t["div-id"]) print[["]').on('shown.bs.tab', function (e) {
          // append the li to the tabs
@@ -1698,12 +1629,14 @@ function getCurrentStatus() {
 	 local title = t["label"]
 
 	 -- TODO this condition should be removed and page integration support implemented
-	 if(((isEmptyString(_GET["entity"])) and isEmptyString(_GET["epoch_begin"]) and isEmptyString(_GET["epoch_end"])) and (options.hide_filters ~= true))  then
+	 if(options.hide_filters ~= true)  then
 	    -- alert_consts.alert_severity_keys and alert_consts.alert_type_keys are defined in lua_utils
 	    local alert_severities = {}
 	    for s, _ in pairs(alert_consts.alert_severities) do alert_severities[#alert_severities +1 ] = s end
 	    local alert_types = {}
 	    for s, _ in pairs(alert_consts.alert_types) do alert_types[#alert_types +1 ] = s end
+      local type_menu_entries = nil
+      local sev_menu_entries = nil
 
 	    local a_type, a_severity = nil, nil
 	    if clicked == "1" then
@@ -1711,13 +1644,26 @@ function getCurrentStatus() {
 	       if tonumber(_GET["alert_severity"]) ~= nil then a_severity = alertSeverityLabel(_GET["alert_severity"], true) end
 	    end
 
-	    print(drawDropdown(t["status"], "type", a_type, alert_types, i18n("alerts_dashboard.alert_type")))
-	    print(drawDropdown(t["status"], "severity", a_severity, alert_severities, i18n("alerts_dashboard.alert_severity")))
+      if t["status"] == "engaged" then
+        local res = interface.getEngagedAlertsCount(tonumber(_GET["entity"]), _GET["entity_val"])
+
+        if(res ~= nil) then
+          type_menu_entries = menuEntriesToDbFormat(res.type)
+          sev_menu_entries = menuEntriesToDbFormat(res.severities)
+        end
+      end
+
+	    print(drawDropdown(t["status"], "type", a_type, alert_types, i18n("alerts_dashboard.alert_type"), get_params, type_menu_entries))
+	    print(drawDropdown(t["status"], "severity", a_severity, alert_severities, i18n("alerts_dashboard.alert_severity"), get_params, sev_menu_entries))
 	 elseif((not isEmptyString(_GET["entity_val"])) and (not hide_extended_title)) then
 	    if entity == "host" then
 	       title = title .. " - " .. firstToUpper(formatAlertEntity(getInterfaceId(ifname), entity, _GET["entity_val"], nil))
 	    end
 	 end
+
+   if options.engaged_only then
+     title = ""
+   end
 
 	 print[['],
 /*
@@ -2115,7 +2061,7 @@ function check_networks_alerts(granularity)
       ntop.checkNetworksAlerts5Min()
    elseif(granularity == "hour") then
       ntop.checkNetworksAlertsHour()
-   elseif(granularity == "days") then
+   elseif(granularity == "day") then
       ntop.checkNetworksAlertsDay()
    else
       traceError(TRACE_ERROR, TRACE_CONSOLE, "Unknown granularity " .. granularity)
@@ -2131,7 +2077,7 @@ function check_interface_alerts(granularity)
       interface.checkAlerts5Min()
    elseif(granularity == "hour") then
       interface.checkAlertsHour()
-   elseif(granularity == "days") then
+   elseif(granularity == "day") then
       interface.checkAlertsDay()
    else
       traceError(TRACE_ERROR, TRACE_CONSOLE, "Unknown granularity " .. granularity)
@@ -2147,7 +2093,7 @@ function check_hosts_alerts(granularity)
       ntop.checkHostsAlerts5Min()
    elseif(granularity == "hour") then
       ntop.checkHostsAlertsHour()
-   elseif(granularity == "days") then
+   elseif(granularity == "day") then
       ntop.checkHostsAlertsDay()
    else
       traceError(TRACE_ERROR, TRACE_CONSOLE, "Unknown granularity " .. granularity)
@@ -2941,86 +2887,8 @@ end
 
 -- ##############################################
 
-local UPDATE_ALERT_STATS_FREQUENCY = 30
-
--- NOTE: this is executed in a system VM, with no interfaces references
-local function updateAlertStats(now)
-   local last_run = tonumber(ntop.getCache("ntopng.cache.update_alerts_stats_time"))
-
-   if(last_run == nil) then
-      last_run = now - UPDATE_ALERT_STATS_FREQUENCY
-   end
-
-   if((now - last_run) >= UPDATE_ALERT_STATS_FREQUENCY) then
-      local ifnames = interface.getIfNames()
-
-      for ifid,ifname in pairs(ifnames) do
-         local hosts_to_update = {}
-         interface.select(ifname)
-
-         -- Get the number of engaged alerts on the interface
-         local iface_num_engaged = getNumAlerts("engaged")
-         interface.setInterfaceEngagedAlerts(iface_num_engaged, iface_num_engaged)
-
-         if(tonumber(ntop.getCache(string.format("ntopng.cache.alerts.ifid_%d.has_alerts", ifid))) == nil) then
-            if((iface_num_engaged > 0) or (getNumAlerts() > 0)) then
-               interface.setInterfaceHasAlerts(true)
-            else
-               interface.setInterfaceHasAlerts(false)
-            end
-         else
-            interface.setInterfaceHasAlerts(true)
-         end
-
-         -- Get the active alerts per host
-         local rv = interface.queryAlertsRaw("select alert_entity_val, COUNT(*) as count",
-            statusFilter("where alert_entity=" .. alertEntity("host") .. "", true, now) .. " group by alert_entity_val")
-
-         for _, res in pairs(rv or {}) do
-            hosts_to_update[res.alert_entity_val] = {
-               num_engaged = tonumber(res.count),
-            }
-         end
-
-         -- Get the released alerts since last run
-         rv = interface.queryAlertsRaw("select *",
-            statusFilter("where ".. getAlertReleaseQueryTime() .. " >= " .. last_run, false, now) .. " group by alert_entity_val")
-
-         if not table.empty(rv) then
-            for _, alert in pairs(rv) do
-               if tonumber(alert.alert_entity) == alertEntity("host") then
-                  local host = alert.alert_entity_val
-
-                  if(hosts_to_update[host] == nil) then
-                     -- Must refresh this host as well
-                     hosts_to_update[host] = {num_engaged = 0}
-                  end
-               end
-
-               -- convert the alert in the notification format
-               local message = alertToNotification(ifid, "release", alert)
-
-               -- Dispatch
-               alert_endpoints.dispatchNotification(message, json.encode(message))
-            end
-         end
-
-         -- Refresh the host counters
-         for host, num_alerts in pairs(hosts_to_update) do
-            interface.setHostAlerts(host, num_alerts.num_engaged)
-         end
-      end
-
-      ntop.setCache("ntopng.cache.update_alerts_stats_time", string.format("%u", now))
-   end
-end
-
--- ##############################################
-
 -- NOTE: this is executed in a system VM, with no interfaces references
 function processAlertNotifications(now, periodic_frequency, force_export)
-   updateAlertStats(now)
-
    alerts.processPendingAlertEvents(now + periodic_frequency)
 
    -- Get new alerts

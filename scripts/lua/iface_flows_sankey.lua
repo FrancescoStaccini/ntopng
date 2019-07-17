@@ -17,6 +17,8 @@ max_num_links = 32
 
 peers = getTopFlowPeers(tracked_host, max_num_peers, true --[[ high details for cli2srv.last/srv2cli.last fields ]])
 
+local is_pcap_dump = interface.isPcapDumpInterface()
+
 local debug = false
 
 -- 1. compute total traffic
@@ -24,13 +26,20 @@ total_traffic = 0
 
 for _, values in ipairs(peers) do
    local key
+   local bytes
    if(values["cli.ip"] == tracked_host) then
       key = hostinfo2hostkey(values, "srv")
    else
       key = hostinfo2hostkey(values, "cli")
    end
 
-   total_traffic = total_traffic + values["bytes.last"]
+   if is_pcap_dump then
+      bytes = values["bytes"]
+   else
+      bytes = values["bytes.last"]
+   end
+
+   total_traffic = total_traffic + bytes
    if(debug) then io.write("->"..key.."\t[".. (values["bytes.last"]) .."][".. values["duration"].."]" .. "\n") end
 end
 
@@ -63,13 +72,15 @@ while(num == 0) do
       end
 
       -- print("[" .. key .. "][" .. values["client"] .. ",".. values["client.vlan_id"] .. "][" .. values["server"] .. ",".. values["client.vlan_id"] .. "]\n")
-      last = values["bytes.last"]
-      if((last == 0) and (values.duration < 3)) then
-	 last = values["bytes"]
+      local bytes
+      if(values["bytes.last"] == 0 and values.duration < 3) or is_pcap_dump then
+	 bytes = values["bytes"]
+      else
+         bytes = values["bytes.last"]
       end
-      if(last > threshold) then
 
-	 if(debug) then io.write("==>"..key.."\t[T:"..tracked_host.. (values["bytes.last"]) .."][".. values["duration"].."][" .. last.. "]\n") end
+      if(bytes > threshold) then
+	 if(debug) then io.write("==>" .. key .. "\t[T:" .. tracked_host .. "][" .. values["duration"] .. "][" .. bytes .. "]\n") end
 	 if((debug) and (findString(key, tracked_host) ~= nil))then io.write("findString(key, tracked_host)==>"..findString(key, tracked_host)) end
 	 if((debug) and (findString(values["cli.ip"], tracked_host) ~= nil)) then io.write("findString(values[cli.ip], tracked_host)==>"..findString(values["cli.ip"], tracked_host)) end
 	 if((debug) and (findString(values["srv.ip"], tracked_host) ~= nil)) then io.write("findString(values[srv.ip], tracked_host)==>"..findString(values["srv.ip"], tracked_host)) end
@@ -180,7 +191,12 @@ num = 0
 reverse_nodes = {}
 for _, values in ipairs(peers) do
    key = {hostinfo2hostkey(values, "cli"), hostinfo2hostkey(values, "srv")}  --string.split(key, " ")
-   val = values["bytes.last"]
+   local val
+   if is_pcap_dump then
+     val = values["bytes"]
+   else
+     val = values["bytes.last"]
+   end
 
    if(((val == 0) or (val > threshold)) or ((top_host ~= nil) and (findString(table.concat(key, " "), top_host) ~= nil)) and (num < max_num_links)) then
       e = {}
@@ -199,8 +215,13 @@ for _, values in ipairs(peers) do
 
 	 reverse_nodes[e[1]..":"..e[0]] = 1
 
-	 sentv = values["cli2srv.last"]
-	 recvv = values["srv2cli.last"]
+         if is_pcap_dump then
+	    sentv = values["cli2srv.last"]
+	    recvv = values["srv2cli.last"]
+         else
+	    sentv = values["cli2srv.bytes"]
+	    recvv = values["srv2cli.bytes"]
+         end
 
 	 if(val == 0) then
 	    val = 1

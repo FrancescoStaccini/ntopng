@@ -31,7 +31,7 @@ function utils.create_top_traffic_speech_text(top_app)
     for i,v in pairs(top_app) do
       tprint(i)
       tprint(v)
-      table.insert(app_names, i)
+      table.insert(app_names, v.name)
       table.insert(app_perc, v.percentage)
       top_num = top_num + 1
       if top_num == 3 then break end
@@ -54,7 +54,7 @@ function utils.create_top_traffic_speech_text(top_app)
 end
 
 
---TODO: fai meglio le uils per i chart, dallo script dell'assistente voglio solo passare una tabella con le opzioni e un paio di array per i dati e bona
+--TODO: fai meglio le utils per i chart, dallo script dell'assistente voglio solo passare una tabella con le opzioni e un paio di array per i dati e bona
 
 
 --NOTE: per ora funge col grafico a barre con UNA SOLA entità per punto
@@ -98,7 +98,6 @@ function utils.create_chart_url(data, options)
             }
           }
     end
-
 
     local jn = json.encode(c)
 

@@ -182,17 +182,14 @@ local json = require("dkjson")
 -- print(  json.encode( res, {indent = true}) )
 
 
---print(  json.encode( interface.getHostsInfo(), {indent = true}) )
+--print(  json.encode(  interface.getMacInfo("A2:37:B9:7E:EA:F7 " ), {indent = true}) )
 
 
---print(  json.encode( interface.getHostInfo("146.48.99.100"), {indent = true}) )
+print(  json.encode( interface.getHostInfo("146.48.99.49"), {indent = true}) )
 
 
 
 --print(  json.encode( interface.getStats(), {indent = true})  )
-
-
-
 
 
 
@@ -214,7 +211,9 @@ local json = require("dkjson")
 --print( json.encode( interface.getMacInfo("AC:9E:17:81:A1:76" ), {indent = true}) )
 
 
-print( json.encode( getHostAltName("14:18:77:53:49:9C"), {indent = true}) ) 
+--print( json.encode( getHostAltName("D8:18:D3:78:CB:2F"), {indent = true}) ) 
+
+--print( json.encode( interface.findHost("zero"), {indent = true}) ) 
 
 
 --

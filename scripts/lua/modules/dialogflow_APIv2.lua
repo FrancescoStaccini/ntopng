@@ -114,10 +114,9 @@ function ga_module.create_card(card_title, card_url_image, accessibility_image_t
   return card
 end
 
---To set an arbitrary context (and overwrite the old one) call setContext()
---To cancel an existing/outgoing context ---> set the lifespan to 0
+--Used to set an arbitrary context (and overwrite the old one) call setContext() (TODO: check se è ancora così)
 --For complex structures use as many prefs as there are fields to save
-function ga_module.setContext(name, lifespan, parameter) --TODO: support for more parameters
+function ga_module.setContext(name, lifespan, parameter) 
 
   if name then 
     ntop.setCache("context_name", name, 60 * 20) --(max context lifespan: 20 min)
@@ -125,6 +124,8 @@ function ga_module.setContext(name, lifespan, parameter) --TODO: support for mor
   if lifespan then 
     ntop.setCache("context_lifespan", tostring(lifespan), 60 * 20)
   end
+
+  --TODO:  nel caso sia una tabella di parametri, metti un for in cui salvo tutti i parametri della tabella parameter,
   if parameter then 
     ntop.setCache("context_param", parameter, 60 * 20)
   end
@@ -156,6 +157,11 @@ function ga_module.getContext()
   return mycontext
 end
 
+--!! TODO !! tieni sempre in cache il precedente intent + parameters,
+--           in pratica voglio sapere lo stato precedente del dialogo e non solo il corrente
+--  TRY SOLUZIONE: SE FACCI OL'ALBERO DEL DIALOGO A MODO (USANDO I FOLLOW-UP), È L'AGENTE CHE MI INVIA I PRECEDENTI PARAMETRI
+--                  m idevo disegnare la struttura sotto del dialogo, dei singoli dialoghi e sotto varie viste (contesti, parametri, collegamenti possibili tra contesti) 
+
 --[[PARAM
   speech_text, diplay_text: self explanatory
   expect_response: boolean to let the assistant listen
@@ -168,10 +174,10 @@ function ga_module.send(speech_text, display_text, expect_response, suggestions_
   print(res.."\n")
 
     if debug then 
-    io.write("\n")
-    io.write("NTOPNG RESPONSE\n")
-    tprint(res)
-    io.write("\n---------------------------------------------------------\n")
+      io.write("\n")
+      io.write("NTOPNG RESPONSE\n")
+      tprint(res)
+      io.write("\n---------------------------------------------------------\n")
     end
 
 end
@@ -195,10 +201,10 @@ function ga_module.receive()
   ntop.setCache("session_id", info.session )
 
     if debug then   
-    io.write("\n")
-    io.write("DIALOGFLOW REQUEST")
-    tprint(response)
-    io.write("\n")
+      io.write("\n")
+      io.write("DIALOGFLOW REQUEST")
+      tprint(response)
+      io.write("\n")
     end
 
   return response

@@ -113,10 +113,16 @@ end
 
 local function formatThresholdCross(ifid, alert, threshold_info)
   local entity = formatAlertEntity(ifid, alertEntityRaw(alert["alert_entity"]), alert["alert_entity_val"])
-  local engine_label = alertEngineLabel(alertEngine(sec2granularity(alert["alert_periodicity"])))
+  local engine_label = alertEngineLabel(alertEngine(sec2granularity(alert["alert_granularity"])))
 
-  return engine_label.." <b>".. threshold_info.metric .."</b> crossed by ".. entity ..
-    " ["..threshold_info.value.." &"..(threshold_info.operator).."; "..threshold_info.threshold.."]"
+  return i18n("alert_messages.threshold_crossed", {
+    granularity = engine_label,
+    metric = threshold_info.metric,
+    entity = entity,
+    value = string.format("%u", math.ceil(threshold_info.value)),
+    op = "&"..threshold_info.operator..";",
+    threshold = threshold_info.threshold,
+  })
 end
 
 -- ##############################################
@@ -377,7 +383,7 @@ alert_consts.alert_types = {
   }, test_failed = {
     alert_id = 28,
     severity = alert_consts.alert_severities.warning,
-    i18n_title = "Test failed",
+    i18n_title = "alert_messages.test_failed",
     icon = "fa-exclamation",
   }, inactivity = {
     alert_id = 29,
@@ -504,95 +510,45 @@ alert_consts.alert_entities = {
 
 -- Keep in sync with C
 alert_consts.alerts_granularities = {
-  ["min"] = {
-    granularity_id = 0,
-    granularity_seconds = 60,
-    i18n_title = "show_alerts.minute",
-    i18n_description = "alerts_thresholds_config.every_minute",
-  }, ["5mins"] = {
-    granularity_id = 1,
-    granularity_seconds = 300,
-    i18n_title = "show_alerts.5_min",
-    i18n_description = "alerts_thresholds_config.every_5_minutes",
-  }, ["hour"] = {
-    granularity_id = 2,
-    granularity_seconds = 3600,
-    i18n_title = "show_alerts.hourly",
-    i18n_description = "alerts_thresholds_config.hourly",
-  }, ["day"] = {
-    granularity_id = 3,
-    granularity_seconds = 86400,
-    i18n_title = "show_alerts.daily",
-    i18n_description = "alerts_thresholds_config.daily",
-  }
-}
-
--- Note: keep in sync with alarmable_metrics and alert_functions_infoes
-alert_consts.alert_functions_description = {
-   ["active"]  = i18n("alerts_thresholds_config.alert_active_description"),
-   ["bytes"]   = i18n("alerts_thresholds_config.alert_bytes_description"),
-   ["dns"]     = i18n("alerts_thresholds_config.alert_dns_description"),
-   ["idle"]    = i18n("alerts_thresholds_config.alert_idle_description"),
-   ["packets"] = i18n("alerts_thresholds_config.alert_packets_description"),
-   ["p2p"]     = i18n("alerts_thresholds_config.alert_p2p_description"),
-   ["throughput"]   = i18n("alerts_thresholds_config.alert_throughput_description"),
-   ["flows"]   = i18n("alerts_thresholds_config.alert_flows_description"),
-}
-
-alert_consts.iface_alert_functions_description = {
-   ["active_local_hosts"] = i18n("alerts_thresholds_config.active_local_hosts_threshold_descr"),
-}
-
-alert_consts.network_alert_functions_description = {
-   ["ingress"] = i18n("alerts_thresholds_config.alert_network_ingress_description"),
-   ["egress"]  = i18n("alerts_thresholds_config.alert_network_egress_description"),
-   ["inner"]   = i18n("alerts_thresholds_config.alert_network_inner_description"),
+   ["min"] = {
+      granularity_id = 0,
+      granularity_seconds = 60,
+      i18n_title = "show_alerts.minute",
+      i18n_description = "alerts_thresholds_config.every_minute",
+   },
+   ["5mins"] = {
+      granularity_id = 1,
+      granularity_seconds = 300,
+      i18n_title = "show_alerts.5_min",
+      i18n_description = "alerts_thresholds_config.every_5_minutes",
+   },
+   ["hour"] = {
+      granularity_id = 2,
+      granularity_seconds = 3600,
+      i18n_title = "show_alerts.hourly",
+      i18n_description = "alerts_thresholds_config.hourly",
+   },
+   ["day"] = {
+      granularity_id = 3,
+      granularity_seconds = 86400,
+      i18n_title = "show_alerts.daily",
+      i18n_description = "alerts_thresholds_config.daily",
+   }
 }
 
 -- ################################################################################
 
-alert_consts.alarmable_metrics = {'bytes', 'dns', 'active', 'idle', 'packets', 'p2p', 'throughput',
-				  'ingress', 'egress', 'inner',
-				  'flows'}
-
-alert_consts.alert_functions_info = {
-   ["active"] = {
-      label = i18n("alerts_thresholds_config.activity_time"),
-      fmt = format_utils.secondsToTime,
-   }, ["bytes"] = {
-      label = i18n("traffic"),
-      fmt = format_utils.bytesToSize,
-   }, ["dns"] = {
-      label = i18n("alerts_thresholds_config.dns_traffic"),
-      fmt = format_utils.bytesToSize,
-   }, ["idle"] = {
-      label = i18n("alerts_thresholds_config.idle_time"),
-      fmt = format_utils.secondsToTime,
-   }, ["packets"] = {
-      label = i18n("packets"),
-      fmt = format_utils.formatPackets,
-   }, ["p2p"] = {
-      label = i18n("alerts_thresholds_config.p2p_traffic"),
-      fmt = format_utils.bytesToSize,
-   }, ["throughput"] = {
-      label = i18n("alerts_thresholds_config.throughput"),
-      fmt = function(val) return format_utils.bitsToSize(1000000 * val) end,
-   }, ["flows"] = {
-      label = i18n("flows"),
-      fmt = format_utils.formatFlows,
-   }, ["inner"] = {
-      label = i18n("alerts_thresholds_config.inner_traffic"),
-      fmt = format_utils.bytesToSize
-   }, ["ingress"] = {
-      label = i18n("alerts_thresholds_config.ingress_traffic"),
-      fmt = format_utils.bytesToSize
-   }, ["egress"] = {
-      label = i18n("alerts_thresholds_config.egress_traffic"),
-      fmt = format_utils.bytesToSize
-   }, ["active_local_hosts"] = {
-      label = i18n("alerts_thresholds_config.active_local_hosts"),
-      fmt = format_utils.formatValue
-   }
+alert_consts.field_units = {
+  seconds = "field_units.seconds",
+  bytes = "field_units.bytes",
+  flows = "field_units.flows",
+  packets = "field_units.packets",
+  mbits = "field_units.mbits",
+  hosts = "field_units.hosts",
+  syn_sec = "field_units.syn_sec",
+  flow_sec = "field_units.flow_sec",
 }
+
+-- ################################################################################
 
 return alert_consts

@@ -46,8 +46,9 @@ local function countHosts()
    return res
 end
 
-function dumpInterfaceStats(interface_name)
-   interface.select(interface_name..'')
+function dumpInterfaceStats(ifid)
+   local interface_name = getInterfaceName(ifid)
+   interface.select(ifid..'')
 
    local ifstats = interface.getStats()
 
@@ -61,6 +62,7 @@ function dumpInterfaceStats(interface_name)
       local flows_pctg = math.floor(1+((ifstats.stats.flows*100)/prefs.max_num_flows))
       local macs_pctg = math.floor(1+((ifstats.stats.current_macs*100)/prefs.max_num_hosts))
 
+      res["ifid"]  = ifid
       res["ifname"]  = interface_name
       res["speed"]  = getInterfaceSpeed(ifstats.id)
       -- network load is used by web pages that are shown to the user
@@ -187,11 +189,11 @@ if(_GET["iffilter"] == "all") then
 elseif not isEmptyString(_GET["iffilter"]) then
    res = dumpInterfaceStats(_GET["iffilter"])
 else
-   local ifname = nil
+   local ifid = nil
    if not isEmptyString(_GET["ifid"]) then
-      ifname = _GET["ifid"]
+      ifid = getInterfaceName(_GET["ifid"])
    end
-   res = dumpInterfaceStats(ifname)
+   res = dumpInterfaceStats(ifid)
 
 end
 

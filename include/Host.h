@@ -48,7 +48,6 @@ class Host : public GenericHashEntry, public AlertableEntity {
   bool host_label_set;
   /* END Host data: */
 
-  u_int32_t num_alerts_detected;
   AlertCounter *syn_flood_attacker_alert, *syn_flood_victim_alert;
   AlertCounter *flow_flood_attacker_alert, *flow_flood_victim_alert;
   bool trigger_host_alerts;
@@ -204,7 +203,7 @@ class Host : public GenericHashEntry, public AlertableEntity {
   inline bool isPrivateHost()                  { return(ip.isPrivateAddress()); }
   bool isLocalInterfaceAddress();
   char* get_visual_name(char *buf, u_int buf_len);
-  inline char* get_string_key(char *buf, u_int buf_len) { return(ip.print(buf, buf_len)); };
+  virtual char* get_string_key(char *buf, u_int buf_len) const { return(ip.print(buf, buf_len)); };
   char* get_hostkey(char *buf, u_int buf_len, bool force_vlan=false);
   char* get_tskey(char *buf, size_t bufsize);
   bool idle();
@@ -294,8 +293,7 @@ class Host : public GenericHashEntry, public AlertableEntity {
   void luaAnomalies(lua_State* vm);
   bool triggerAlerts()                                   { return(trigger_host_alerts);       };
   void refreshHostAlertPrefs();
-  u_int32_t getNumAlerts(bool from_alertsmanager = false);
-  void setNumAlerts(u_int32_t num)                       { num_alerts_detected = num;         };
+  void housekeepAlerts(ScriptPeriodicity p);
   inline u_int getNumDropboxPeers()                      { return(dropbox_namespaces.size()); };
   virtual void inlineSetOS(const char * const _os) {};
   void inlineSetSSDPLocation(const char * const url);
@@ -306,5 +304,7 @@ class Host : public GenericHashEntry, public AlertableEntity {
   void dissectDropbox(const char *payload, u_int16_t payload_len);
   void dumpDropbox(lua_State *vm);
   inline Fingerprint* getSSLFingerprint() { return(&fingerprints.ssl); }
+  virtual void setFlowPort(bool as_server, u_int8_t proto, u_int16_t port, u_int16_t l7_proto) { ; }
+  virtual void luaPortsDump(lua_State* vm) { lua_pushnil(vm); }    
 };
 #endif /* _HOST_H_ */

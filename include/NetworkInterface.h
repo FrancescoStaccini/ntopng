@@ -76,7 +76,7 @@ class NetworkInterface : public AlertableEntity {
   u_int8_t purgeRuns;
   u_int32_t bridge_lan_interface_id, bridge_wan_interface_id;
   u_int32_t num_hashes;
-  u_int32_t num_alerts_engaged;
+  u_int32_t num_alerts_engaged[MAX_NUM_PERIODIC_SCRIPTS];
   bool has_alerts;
 
   /* Disaggregations */
@@ -430,12 +430,12 @@ class NetworkInterface : public AlertableEntity {
 		     Host **srcHost, Host **dstHost, Flow **flow);
   void processFlow(ParsedFlow *zflow, bool zmq_flow);
   void processInterfaceStats(sFlowInterfaceStats *stats);
-  void getActiveFlowsStats(nDPIStats *stats, FlowStatusStats *status_stats, AddressTree *allowed_hosts, const char *host_ip, u_int16_t vlan_id);
+  void getActiveFlowsStats(nDPIStats *stats, FlowStats *status_stats, AddressTree *allowed_hosts, const char *host_ip, u_int16_t vlan_id);
   void periodicStatsUpdate();
   virtual void lua(lua_State* vm);
   void getnDPIProtocols(lua_State *vm, ndpi_protocol_category_t filter, bool skip_critical);
   void setnDPIProtocolCategory(u_int16_t protoId, ndpi_protocol_category_t protoCategory);
-  void guessAllnDPIProtocols();
+  void processAllActiveFlows();
   void guessAllBroadcastDomainHosts();
 
   int getActiveHostsList(lua_State* vm,
@@ -582,10 +582,6 @@ class NetworkInterface : public AlertableEntity {
   inline void setBridgeWanInterfaceId(u_int32_t v) { bridge_wan_interface_id = v;     };
   inline u_int32_t getBridgeWanInterfaceId()       { return(bridge_wan_interface_id); };
   inline HostHash* get_hosts_hash()                { return(hosts_hash);              }
-  inline MacHash*  get_macs_hash()                 { return(macs_hash);               }
-  inline VlanHash*  get_vlans_hash()               { return(vlans_hash);              }
-  inline AutonomousSystemHash* get_ases_hash()     { return(ases_hash);               }
-  inline CountriesHash* get_countries_hash()       { return(countries_hash);          }
   inline bool is_bridge_interface()                { return(bridge_interface);        }
   inline const char* getLocalIPAddresses()         { return(ip_addresses.c_str());    }
   void addInterfaceAddress(char * const addr);
@@ -746,9 +742,15 @@ class NetworkInterface : public AlertableEntity {
   void nDPILoadHostnameCategory(char *category, ndpi_protocol_category_t id);
 
   inline void setHasAlerts(bool has_alerts)               { this->has_alerts = has_alerts; }
-  inline void setNumAlertsEngaged(u_int32_t num_alerts)   { num_alerts_engaged = num_alerts; }
+  inline void incNumAlertsEngaged(ScriptPeriodicity p)    { num_alerts_engaged[(u_int)p]++; }
+  inline void decNumAlertsEngaged(ScriptPeriodicity p)    { num_alerts_engaged[(u_int)p]--; }
   inline bool hasAlerts()                                 { return(has_alerts); }
-  inline u_int32_t getNumEngagedAlerts()                  { return(num_alerts_engaged); }
+  inline void refreshHasAlerts()                          { has_alerts = alertsManager ? alertsManager->hasAlerts() : false; }
+  void getEngagedAlertsCount(lua_State *vm, int entity_type, const char *entity_value);
+  void getEngagedAlerts(lua_State *vm, int entity_type, const char *entity_value, int alert_type, int alert_severity);
+
+  virtual bool reproducePcapOriginalSpeed()               { return(false); }
+  u_int32_t getNumEngagedAlerts();
 };
 
 #endif /* _NETWORK_INTERFACE_H_ */

@@ -13,7 +13,7 @@ local do_trace = false
 
 local alerts = {}
 
-local MAX_NUM_ENQUEUED_ALERTS_EVENTS = 100
+local MAX_NUM_ENQUEUED_ALERTS_EVENTS = 1024
 local ALERTS_EVENTS_QUEUE = "ntopng.cache.alerts_events_queue"
 local ALERT_CHECKS_MODULES_BASEDIR = dirs.installdir .. "/scripts/callbacks/interface/alerts"
 
@@ -105,8 +105,8 @@ function alerts:trigger(entity_value, alert_message, when)
   end
 
   local rv = interface.triggerAlert(when, self.periodicity,
-    self.type_id, self.severity_id,
-    self.entity_type_id, entity_value, msg, self.subtype)
+    self.type_id, self.subtype or "", self.severity_id,
+    self.entity_type_id, entity_value, msg)
 
   if(rv ~= nil) then
     if(rv.success and rv.new_alert) then
@@ -140,7 +140,7 @@ function alerts:release(entity_value, when)
   when = when or os.time()
 
   local rv = interface.releaseAlert(when, self.periodicity,
-    self.type_id, self.severity_id, self.entity_type_id, entity_value)
+    self.type_id, self.subtype or "", self.severity_id, self.entity_type_id, entity_value)
 
   if(rv ~= nil) then
     if(rv.success and rv.rowid) then
@@ -209,17 +209,33 @@ end
 
 -- ##############################################
 
-function get_alert_triggered_key(type_info)
-  return(string.format("%d_%s", type_info.alert_type.alert_id, type_info.alert_subtype or ""))
+local function get_alert_triggered_key(type_info)
+  return(string.format("%d@%s", type_info.alert_type.alert_id, type_info.alert_subtype or ""))
+end
+
+-- ##############################################
+
+function alerts.triggerIdToAlertType(trigger_id)
+  local parts = string.split(trigger_id, "@")
+
+  if((parts ~= nil) and (#parts == 2)) then
+    -- alert_type, alert_subtype
+    return tonumber(parts[1]), parts[2]
+  end
 end
 
 -- ##############################################
 
 local function enqueueAlertEvent(alert_event)
   local event_json = json.encode(alert_event)
+  local trim = nil
 
-  ntop.rpushCache(ALERTS_EVENTS_QUEUE, event_json, MAX_NUM_ENQUEUED_ALERTS_EVENTS)
+  if(ntop.llenCache(ALERTS_EVENTS_QUEUE) > MAX_NUM_ENQUEUED_ALERTS_EVENTS) then
+    trim = math.ceil(MAX_NUM_ENQUEUED_ALERTS_EVENTS/2)
+    traceError(TRACE_WARNING, TRACE_CONSOLE, string.format("Alerts event queue too long: dropping %u alerts", trim))
+  end
 
+  ntop.rpushCache(ALERTS_EVENTS_QUEUE, event_json, trim)
   return(true)
 end
 
@@ -250,9 +266,9 @@ function alerts.processPendingAlertEvents(deadline)
 
     rv = to_call(
       event.tstamp, event.granularity,
-      event.type, event.severity,
+      event.type, event.subtype or "", event.severity,
       event.entity_type, event.entity_value,
-      event.message, event.subtype)
+      event.message) -- event.message: nil for "release"
 
     if(rv.success) then
       alert_endpoints.dispatchNotification(event, event_json)
@@ -278,25 +294,32 @@ function alerts.new_trigger(entity_info, type_info, when)
   when = when or os.time()
   local granularity_sec = type_info.alert_granularity and type_info.alert_granularity.granularity_seconds or 0
   local granularity_id = type_info.alert_granularity and type_info.alert_granularity.granularity_id or nil
+  local subtype = type_info.alert_subtype or ""
+  local alert_json = json.encode(type_info.alert_type_params)
 
   if(granularity_id ~= nil) then
     local triggered = true
     local alert_key_name = get_alert_triggered_key(type_info)
+    local params = {alert_key_name, granularity_id,
+      type_info.alert_type.severity.severity_id, type_info.alert_type.alert_id,
+      subtype, alert_json
+    }
 
     if((host.storeTriggeredAlert) and (entity_info.alert_entity.entity_id == alertEntity("host"))) then
-      triggered = host.storeTriggeredAlert(alert_key_name, granularity_id)
+      triggered = host.storeTriggeredAlert(table.unpack(params))
     elseif((interface.storeTriggeredAlert) and (entity_info.alert_entity.entity_id == alertEntity("interface"))) then
-      triggered = interface.storeTriggeredAlert(alert_key_name, granularity_id)
-    elseif((network.storeTriggerAlert) and (entity_info.alert_entity.entity_id == alertEntity("network"))) then
-      triggered = network.storeTriggerAlert(alert_key_name, granularity_id)
+      triggered = interface.storeTriggeredAlert(table.unpack(params))
+    elseif((network.storeTriggeredAlert) and (entity_info.alert_entity.entity_id == alertEntity("network"))) then
+      triggered = network.storeTriggeredAlert(table.unpack(params))
     end
 
     if(not triggered) then
+      if(do_trace) then print("[DON'T Trigger alert (already triggered?) @ "..granularity_sec.."] "..
+        entity_info.alert_entity_val .."@"..type_info.alert_type.i18n_title.."\n") end
       return(false)
     end
   end
 
-  local alert_json = json.encode(type_info.alert_type_params)
   local action = ternary((granularity_id ~= nil), "engaged", "stored")
 
   local alert_event = {
@@ -307,7 +330,7 @@ function alerts.new_trigger(entity_info, type_info, when)
     type = type_info.alert_type.alert_id,
     severity = type_info.alert_type.severity.severity_id,
     message = alert_json,
-    subtype = type_info.alert_subtype or "",
+    subtype = subtype,
     tstamp = when,
     action = action,
   }
@@ -341,6 +364,8 @@ function alerts.new_release(entity_info, type_info)
     end
 
     if(not released) then
+      if(do_trace) then print("[DON'T Release alert (already not triggered?) @ "..granularity_sec.."] "..
+        entity_info.alert_entity_val .."@"..type_info.alert_type.i18n_title.."\n") end
       return(false)
     end
   end
@@ -352,7 +377,6 @@ function alerts.new_release(entity_info, type_info)
     entity_value = entity_info.alert_entity_val,
     type = type_info.alert_type.alert_id,
     severity = type_info.alert_type.severity.severity_id,
-    message = alert_json,
     subtype = type_info.alert_subtype or "",
     tstamp = when,
     action = "release",
@@ -398,7 +422,7 @@ function alerts.thresholdCrossType(granularity, metric, value, operator, thresho
   local res = {
     alert_type = alert_consts.alert_types.threshold_cross,
     alert_subtype = string.format("%s_%s", granularity, metric),
-    alert_granularity = alert_consts.alerts_granularities.min,
+    alert_granularity = alert_consts.alerts_granularities[granularity],
     alert_type_params = {
       metric = metric, value = value,
       operator = operator, threshold = threshold,
@@ -409,34 +433,69 @@ end
 
 -- ##############################################
 
-function alerts.load_check_modules(subdir)
+function alerts.anomalyType(anomal_name, alert_type, value, threshold)
+  local res = {
+    alert_type = alert_type,
+    alert_subtype = anomal_name,
+    alert_granularity = alert_consts.alerts_granularities.min,
+    alert_type_params = {
+      value = value,
+      threshold = threshold,
+    }
+  }
+
+  return(res)
+end
+
+-- ##############################################
+
+function alerts.load_check_modules(subdir, str_granularity)
   local checks_dir = os_utils.fixPath(ALERT_CHECKS_MODULES_BASEDIR .. "/" .. subdir)
   local available_modules = {}
 
   package.path = checks_dir .. "/?.lua;" .. package.path
 
   for fname in pairs(ntop.readdir(checks_dir)) do
-    if(ends(fname, ".lua")) then
+    if ends(fname, ".lua") then
       local modname = string.sub(fname, 1, string.len(fname) - 4)
       local check_module = require(modname)
 
-      if(check_module.check_function ~= nil) then
-        available_modules[fname] = check_module
+      if check_module.check_function then
+	 if check_module.granularity and str_granularity then
+	    -- When the module specify one or more granularities
+	    -- at which checks have to be run, the module is only
+	    -- loaded after checking the granularity
+	    for _, gran in pairs(check_module.granularity) do
+	       if gran == str_granularity then
+		  available_modules[modname] = check_module
+		  break
+	       end
+	    end
+	 else
+	    -- When no granularity is explicitly specified
+	    -- in the module, then the check it is assumed to
+	    -- be run for every granularity and the module is
+	    -- always loaded
+	    available_modules[modname] = check_module
+	 end
       end
     end
   end
 
-  return(available_modules)
+  return available_modules
 end
 
 -- ##############################################
 
-function alerts.check_threshold_cross(granularity, function_name, alert_entity, value, threshold_config)
+function alerts.threshold_check_function(params)
   local alarmed = false
+  local value = params.check_module.get_threshold_value(params.granularity, params.entity_info)
+  local threshold_config = params.alert_config
 
   local threshold_edge = tonumber(threshold_config.edge)
+  local threshold_type = alerts.thresholdCrossType(params.granularity, params.check_module.key, value, threshold_config.operator, threshold_edge)
 
-  if(do_trace) then print("[Alert @ "..granularity.."] ".. alert_entity.alert_entity_val .." ["..function_name.."]\n") end
+  if(do_trace) then print("[Alert @ "..params.granularity.."] ".. params.alert_entity.alert_entity_val .." ["..params.check_module.key.."]\n") end
 
   if(threshold_config.operator == "lt") then
     if(value < threshold_edge) then alarmed = true end
@@ -447,17 +506,31 @@ function alerts.check_threshold_cross(granularity, function_name, alert_entity, 
   if(alarmed) then
     if(do_trace) then print("Trigger alert [value: "..tostring(value).."]\n") end
 
-    return(alerts.new_trigger(
-      alert_entity,
-      alerts.thresholdCrossType(granularity, function_name, value, threshold_config.operator, threshold_edge)
-    ))
+    return(alerts.new_trigger(params.alert_entity, threshold_type))
   else
-    if(do_trace) then print("DON'T trigger alert [value: "..tostring(value).."]\n") end
+    if(do_trace) then print("Release alert [value: "..tostring(value).."]\n") end
 
-    return(alerts.new_release(
-      alert_entity,
-      alerts.thresholdCrossType(granularity, function_name, value, threshold_config.operator, threshold_edge)
-    ))
+    return(alerts.new_release(params.alert_entity, threshold_type))
+  end
+end
+
+-- ##############################################
+
+function alerts.check_anomaly(anomal_name, alert_type, alert_entity, entity_anomalies, anomal_config)
+  local anomaly = entity_anomalies[anomal_name] or {value = 0}
+  local value = anomaly.value
+  local anomaly_type = alerts.anomalyType(anomal_name, alert_type, value, anomal_config.threshold)
+
+  if(do_trace) then print("[Anomaly check] ".. alert_entity.alert_entity_val .." ["..anomal_name.."]\n") end
+
+  if(anomaly ~= nil) then
+    if(do_trace) then print("Trigger alert anomaly [value: "..tostring(value).."]\n") end
+
+    return(alerts.new_trigger(alert_entity, anomaly_type))
+  else
+    if(do_trace) then print("Release alert anomaly [value: "..tostring(value).."]\n") end
+
+    return(alerts.new_release(alert_entity, threshold_type))
   end
 end
 
@@ -501,6 +574,37 @@ function alerts.application_bytes(info, application_name)
    end
 
    return curr_val
+end
+
+-- ##############################################
+
+function alerts.category_bytes(info, category_name)
+   local curr_val = 0
+
+   if info["ndpi_categories"] and info["ndpi_categories"][category_name] then
+      curr_val = info["ndpi_categories"][category_name]["bytes.sent"] + info["ndpi_categories"][category_name]["bytes.rcvd"]
+   end
+
+   return curr_val
+end
+
+-- ##############################################
+
+function alerts.threshold_cross_input_builder(gui_conf, input_id, value)
+  value = value or {}
+  local gt_selected = ternary(value[1] == "gt", ' selected="selected"', '')
+  local lt_selected = ternary(value[1] == "lt", ' selected="selected"', '')
+  local input_op = "op_" .. input_id
+  local input_val = "value_" .. input_id
+
+  return(string.format([[<select name="%s">
+  <option value="gt"%s>&gt;</option>
+  <option value="lt"%s>&lt;</option>
+</select> <input type="number" class="text-right form-control" min="%s" max="%s" step="%s" style="display:inline; width:12em;" name="%s" value="%s"/> <span>%s</span>]],
+    input_op, gt_selected, lt_selected,
+    gui_conf.field_min or "0", gui_conf.field_max or "", gui_conf.field_step or "1",
+    input_val, value[2], i18n(gui_conf.i18n_field_unit))
+  )
 end
 
 -- ##############################################

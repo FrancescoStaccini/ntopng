@@ -7,11 +7,13 @@ package.path = dirs.installdir .. "/scripts/lua/modules/?.lua;" .. package.path
 require "lua_utils"
 require "alert_utils"
 
-alerts_api = require("alerts_api")
+local alerts_api = require("alerts_api")
+local alert_consts = require("alert_consts")
 
 local do_trace      = false
 local config_alerts = nil
 local ifname        = nil
+local available_modules = nil
 
 -- The function below ia called once (#pragma once)
 function setup(str_granularity)
@@ -20,76 +22,7 @@ function setup(str_granularity)
    config_alerts = getNetworksConfiguredAlertThresholds(ifname, str_granularity)
 
    -- Load the threshold checking functions
-   package.path = dirs.installdir .. "/scripts/callbacks/interface/alerts/network/?.lua;" .. package.path
-   checks = require("check")
-end
-
--- #################################################################
-
--- The function below is called once per network
-local function checkNetworkAlertsThreshold(network_key, network_info, granularity, num_granularity, rules)
-   if do_trace then print("checkNetworkAlertsThreshold()\n") end
-
-   for function_name, params in pairs(rules) do
-      -- IMPORTANT: do not use "local" with the variables below
-      --            as they need to be accessible by the evaluated function
-      threshold_value    = params["edge"]
-      alert_key_name     = params["key"]
-      threshold_operator = params["operator"]
-      metric_name        = params["metric"]
-      threshold_gran     = granularity
-      threshold_num_gran = num_granularity
-      n_info             = network_info
-
-      if do_trace then print("[Alert @ "..granularity.."] ".. network_key .." ["..function_name.."]\n") end
-
-      if true then
-         -- This is where magic happens: load() evaluates the string
-         local what = 'return checks.'..function_name..'(metric_name, n_info, threshold_gran, threshold_num_gran)'
-         local func, err = load(what, 't')
-
-         if func then
-            local ok, value = pcall(func)
-
-            if ok then
-               local alarmed = false
-               local network_alert = alerts_api:newAlert({entity = "network", type = "threshold_cross", severity = "error"})
-
-               if do_trace then print("Execution OK. value: "..tostring(value)..", operator: "..threshold_operator..", threshold: "..threshold_value.."]\n") end
-
-               threshold_value = tonumber(threshold_value)
-
-               if threshold_operator == "lt" then
-                  if value < threshold_value then alarmed = true end
-               else
-                  if value > threshold_value then alarmed = true end
-               end
-
-               if alarmed then
-                  if do_trace then  print("Trigger alert [value: "..tostring(value).."]\n") end
-
-                  alerts_api.new_trigger(
-                      alerts_api.networkAlertEntity(network_key),
-                      alerts_api.thresholdCrossType(granularity, function_name, value, threshold_operator, threshold_value)
-                  )
-               else
-                  if do_trace then  print("DON'T trigger alert [value: "..tostring(value).."]\n") end
-
-                  alerts_api.new_trigger(
-                      alerts_api.networkAlertEntity(network_key),
-                      alerts_api.thresholdCrossType(granularity, function_name, value, threshold_operator, threshold_value)
-                  )
-               end
-            else
-               if do_trace then print("Execution error:  "..tostring(rc).."\n") end
-            end
-         else
-            print("Compilation error:", err)
-         end
-      end
-
-      if do_trace then print("=============\n") end
-   end
+   available_modules = alerts_api.load_check_modules("network", str_granularity)
 end
 
 -- #################################################################
@@ -103,17 +36,39 @@ function checkNetworkAlerts(granularity)
       return
    end
 
-   local network_alert = config_alerts[network_key]
-   local num_granularity = granularity2id(granularity)
+   local network_config = config_alerts[network_key] or {}
+   local global_config = config_alerts["local_networks"] or {}
+   local has_configured_alerts = (table.len(network_config) or table.len(global_config))
+   local entity_info = alerts_api.networkAlertEntity(network_key)
 
-   -- specific network alerts
-   if network_alert and table.len(network_alert) > 0 then
-      checkNetworkAlertsThreshold(network_key, info, granularity, num_granularity, network_alert)
+   if(has_configured_alerts) then
+      network.setAlertableInfo(entity_info.alert_entity.entity_id, entity_info.alert_entity_val)
+
+      for _, check in pairs(available_modules) do
+        local config = network_config[check.key] or global_config[check.key]
+
+        if config then
+           check.check_function({
+              granularity = granularity,
+              alert_entity = entity_info,
+              entity_info = info,
+              alert_config = config,
+              check_module = check,
+           })
+        end
+      end
    end
 
-   -- generic network alerts
-   network_alert = config_alerts["local_networks"]
-   if network_alert and table.len(network_alert) > 0 then
-      checkNetworkAlertsThreshold(network_key, info, granularity, num_granularity, network_alert)
+
+   for alert in pairs(network.getExpiredAlerts(granularity2id(granularity))) do
+      local alert_type, alert_subtype = alerts_api.triggerIdToAlertType(alert)
+
+      if(do_trace) then print("Expired Alert@"..granularity..": ".. alert .." called\n") end
+
+      alerts_api.new_release(entity_info, {
+         alert_type = alert_consts.alert_types[alertTypeRaw(alert_type)],
+         alert_subtype = alert_subtype,
+         alert_granularity = alert_consts.alerts_granularities[granularity],
+      })
    end
 end

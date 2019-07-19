@@ -19,6 +19,7 @@ local limit_num_devices_protocol_chart = 4
 local limit_num_chart_top_categories  = 6
 
 --TODO: 
+--      - la + grande indecisione: mettere gli aggregatori in un dato contesto, così che non si attivino per sbaglio durante il resto del discorso. capita trroppo spesso!
 --      -RICH MESSAGE [https://cloud.dialogflow.com/dialogflow/docs/intents-rich-messages ] inoltre esempi json tra i preferiti
 --        idea: nell'URL dell'immagine metto il link al(lo scriptino lua nel) server ntop (o a quanto pare a quickchart.io" ) con alla fine i parametri necessari per fare il grafico
 --      -metti altri intent per farsi dare elenchi/vai grafici 
@@ -38,6 +39,7 @@ local limit_num_chart_top_categories  = 6
 --      -la possibilità di settare Alias per i dispositivi, direttamente dall'assistente
 
 --NOTE:
+-- !!!  - È possibile salvare dati sul dispositivo dell'utente! [ https://developers.google.com/actions/assistant/save-data ]
 --      - come ottengo il nome alias? con getHostAltName(ip,mac) ma ip può essere un mac e mac può essere nil
 --      - (dalla docs dei reprompt) Reprompts aren't supported on all Actions on Google surfaces. We recommend you handle no-input errors but keep in mind that they may not appear on all user devices.
 
@@ -161,7 +163,7 @@ local function get_aggregated_info_network()
   local alert_text = ""
 
   if alert_num > 0 then
-    alert_text = alert_num .. " alarms triggered, of which "
+    alert_text = alert_num .. " alerts triggered, of which "
 
     for i,v in pairs(severity) do
       if v > 0 then  alert_text = alert_text .. v .. " " .. i .. ", " end
@@ -172,7 +174,7 @@ local function get_aggregated_info_network()
     alert_text = alert_text..".\n"
 
   else
-    alert_text = "0 alarm triggered\n"
+    alert_text = "0 alerts triggered\n"
   end
 
   local app_host_good_text, b, danger = are_app_and_hosts_good() --TODO: "b" a che serve? rimuovila in caso
@@ -202,9 +204,9 @@ local function get_aggregated_info_generic()
   local alert_text = ""
 
   if alert_num > 0 then
-    alert_text = alert_num .. " alarms triggered, "
+    alert_text = alert_num .. " alerts triggered, "
   else
-    alert_text = "0 alarms triggered, \n"
+    alert_text = "0 alerts triggered, \n"
   end
 
   local app_host_good_text, b, danger = are_app_and_hosts_good()
@@ -223,12 +225,10 @@ local function get_aggregated_info_generic()
 end
 
 --#########################################################################################################
+
 --return: a table with every host(IP and name) for a specific MAC
+
 --NOTE: qui ho sia host info che mac info, posso combinarle se mi interessa
-
-
---todo: REWORK! FAI CHE RITORNA SOLO GLI INDIRIZZI TROVATI, POI UN'ALTRA FUNZIONE CHE MERGIA LE INFO DI TUTTI GLI HOST DI TALE MAC
-
 --"name" può essere una stringa qualunque, è data dall'utente e il chiamante, attualmente, non la controlla
 local function find_mac_hosts(name) 
 
@@ -265,8 +265,6 @@ local function merge_hosts_info(ip_table)
 
   for _,v in ipairs(ip_table) do   --fondo insieme le tavole
     --[[
-    
-
       TODO: controlla se il num di bytes torna con le ndpi app e coi i bytes inviai/ricevuti su getMAc/HostInfo(..) )   )
 
       TODO: le varie info per stabilire se la connessione è buona. aspetto che tale lavoro (anche se aggregato) venga fatto su network_state perché
@@ -333,9 +331,9 @@ local function merge_hosts_info(ip_table)
         end
         ndpi_tot_bytes = ndpi_tot_bytes + info["bytes.sent"]  + info["bytes.rcvd"] 
       end
-      ---------------
+      -------alerts--------
       if tmp.is_blacklisted and tmp.is_blacklisted == "true" then res["is_blacklisted"] =  "true" end -- lo metto solo se è true
-      res["num_alerts"] = res["num_alerts"] + tmp["num_alerts"]
+      res["num_alerts"] = res["num_alerts"] + tmp["num_alerts"] --TODO: ma num_aletrs si riferisce all'host, farne la somma non credo abbia senso
       res["total_alerts"] = res["total_alerts"] + tmp["total_alerts"]
 
       --note faccio ciò per togliere il tag [...] a seguito del nome ( es. nome & nome [IPv6] )
@@ -365,7 +363,6 @@ local function merge_hosts_info(ip_table)
 
   return res
 end
-
 
 --+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 --#######################################- INTENTS HANDLERS -##############################################
@@ -424,7 +421,7 @@ function handler_get_aggregated_info()
   elseif aggregator == "Traffic" then --traffic / communication
       response_text = get_aggregated_info_traffic()
 
-  elseif aggregator == "Network" then -- security (bad host, dangerous flow)/ alarm 
+  elseif aggregator == "Network" then -- security (bad host, dangerous flow)/ alerts
       response_text = get_aggregated_info_network()
 
   elseif aggregator == "Devices" then --devices/hosts
@@ -632,52 +629,271 @@ function handler_ask_for_single_device_info() --in realtà è la fallback dell'i
   local d_info = {}
 
   if macs_table_len > 1 then 
-    --TODO: metti suggerimenti (ed elenco testuale) e fai in modo che il suggerimento selezionato venga accettato/inteso
+    --TODO: metti suggerimenti e diversifica la risposta audio
     text = "I found this, please select one of the suggestions"
 
-  elseif macs_table_len == 1 then
-    
+  elseif macs_table_len == 1 then 
     d_info = merge_hosts_info(macs_table[mac])
   
     text = "\tName: ".. d_info.name .. "\nType: "..d_info.devtype_name.."\nManufacturer: ".. d_info.manufacturer
-    
     if d_info.model then text = text .."\nModel: "..d_info.model end
-
     if d_info.ndpi then text = text .. "\nMost used app: "..d_info.ndpi[1].name end
-    if d_info.ndpi_categories then text = text .. "\nMost traffic is about: "..d_info.ndpi_categories[1].name end
-
+    if d_info.ndpi_categories then text = text .. "\nMost traffic belong to category: "..d_info.ndpi_categories[1].name end
+    --TODO: add host pool
   end
-
   --TODO: salva un qualche id (mac + i vari host ip? non sarebbe male) del device. serve per il followup intent "more"
   ntop.setCache("nAssistant_device_info_mac", mac, 60*20 ) -- 20 min tempo max di vita
-  tprint(mac)
 
-  --tprint(d_info)
   dialogflow.send(text)
 
 end
 
 --#########################################################################################################
+        --[[
+          macs_table:
+          10:65:30:08:97:08 table
+          10:65:30:08:97:08.1 table
+          10:65:30:08:97:08.1.ip string 146.48.99.133
+          10:65:30:08:97:08.1.name string kilian-IIT
+        ]]
+        --[[ d_info ha una (casuale) tabella info di un host MA ndpi e ndpi_categories sono unite tra tutti gli host
 
+          longitude number 12.109700202942
+          ifid number 1
+          other_ip.bytes.rcvd.anomaly_index number 0
+          flows.as_client number 1665
+          name string kilian-IIT
+          icmp.bytes.rcvd.anomaly_index number 0
+          throughput_pps number 0.1999549716711
+          host_unreachable_flows.as_server number 0
+          model string Unknown
+          unreachable_flows.as_client number 1
+          asname string Consortium GARR
+          tcp.bytes.rcvd number 0
+          host_pool_id number 0
+          dns table
+          [...]
+          tcp.bytes.rcvd.anomaly_index number 0
+          is_broadcast boolean false
+          childSafe boolean false
+          anomalous_flows.as_server number 427
+          udpBytesSent.non_unicast number 2299931
+          bytes.sent number 2301499
+          ndpi table
+              [...]
+          flows.as_server number 470
+          icmp.packets.sent number 0
+          bytes.rcvd number 51700
+          manufacturer string Dell Inc.
+          total_flows.as_client number 1665
+          low_goodput_flows.as_client number 0
+          tcp.bytes.sent number 0
+          icmp.bytes.rcvd number 0
+          sites.old string { }
+          devtype number 0
+          packets.rcvd number 663
+          operatingSystem string Unknown
+          asn number 137
+          other_ip.bytes.sent.anomaly_index number 0
+          localhost boolean true
+          throughput_bps number 63.385726928711
+          systemhost boolean false
+          udp.packets.sent number 175
+          tcpPacketStats.sent table
+          tcpPacketStats.sent.retransmissions number 0
+          tcpPacketStats.sent.keep_alive number 0
+          tcpPacketStats.sent.lost number 0
+          tcpPacketStats.sent.out_of_order number 0
+          has_dropbox_shares boolean false
+          tcp.bytes.sent.anomaly_index number 0
+          other_ip.packets.rcvd number 0
+          seen.last number 1563380319
+          bytes.rcvd.anomaly_index number 0
+          city string 
+          low_goodput_flows.as_server.anomaly_index number 0
+          host_unreachable_flows.as_client number 0
+          broadcast_domain_host boolean true
+          low_goodput_flows.as_client.anomaly_index number 0
+          packets.sent.anomaly_index number 66
+          dhcpHost boolean true
+          os string 
+          privatehost boolean false
+          throughput_trend_bps number 1
+          tcpPacketStats.rcvd table
+          tcpPacketStats.rcvd.retransmissions number 114
+          tcpPacketStats.rcvd.keep_alive number 0
+          tcpPacketStats.rcvd.lost number 8
+          tcpPacketStats.rcvd.out_of_order number 3
+          tcp.packets.sent number 0
+          devtype_name string Unknown
+          ndpi_categories table
+              [...]
+          other_ip.packets.sent number 0
+          country string IT
+          bytes.ndpi.unknown number 51151
+          continent string EU
+          names table
+          names.dhcp string kilian-IIT
+          duration number 2512289
+          mac string 10:65:30:08:97:08
+          ssl_fingerprint table
+          udpBytesSent.unicast number 0
+          icmp.bytes.sent.anomaly_index number 0
+          num_triggered_alerts table
+          num_triggered_alerts.day number 0
+          num_triggered_alerts.min number 0
+          num_triggered_alerts.hour number 0
+          num_triggered_alerts.5mins number 0
+          anomalous_flows.as_client number 9
+          http table
+          http.virtual_hosts table
+          http.receiver table
+          http.receiver.query table
+          http.receiver.query.num_other number 0
+          http.receiver.query.num_head number 0
+          http.receiver.query.num_put number 0
+          http.receiver.query.num_post number 0
+          http.receiver.query.total number 0
+          http.receiver.query.num_get number 0
+          http.receiver.response table
+          http.receiver.response.num_1xx number 0
+          http.receiver.response.num_2xx number 0
+          http.receiver.response.num_4xx number 0
+          http.receiver.response.num_5xx number 0
+          http.receiver.response.total number 0
+          http.receiver.response.num_3xx number 0
+          http.receiver.rate table
+          http.receiver.rate.response table
+          http.receiver.rate.response.1xx number 0
+          http.receiver.rate.response.2xx number 0
+          http.receiver.rate.response.3xx number 0
+          http.receiver.rate.response.4xx number 0
+          http.receiver.rate.response.5xx number 0
+          http.receiver.rate.query table
+          http.receiver.rate.query.put number 0
+          http.receiver.rate.query.other number 0
+          http.receiver.rate.query.head number 0
+          http.receiver.rate.query.get number 0
+          http.receiver.rate.query.post number 0
+          http.sender table
+          http.sender.query table
+          http.sender.query.num_other number 0
+          http.sender.query.num_head number 0
+          http.sender.query.num_put number 0
+          http.sender.query.num_post number 0
+          http.sender.query.total number 0
+          http.sender.query.num_get number 0
+          http.sender.response table
+          http.sender.response.num_1xx number 0
+          http.sender.response.num_2xx number 0
+          http.sender.response.num_4xx number 0
+          http.sender.response.num_5xx number 0
+          http.sender.response.total number 0
+          http.sender.response.num_3xx number 0
+          http.sender.rate table
+          http.sender.rate.response table
+          http.sender.rate.response.1xx number 0
+          http.sender.rate.response.2xx number 0
+          http.sender.rate.response.3xx number 0
+          http.sender.rate.response.4xx number 0
+          http.sender.rate.response.5xx number 0
+          http.sender.rate.query table
+          http.sender.rate.query.put number 0
+          http.sender.rate.query.other number 0
+          http.sender.rate.query.head number 0
+          http.sender.rate.query.get number 0
+          http.sender.rate.query.post number 0
+          hiddenFromTop boolean false
+          udp.packets.rcvd number 0
+          active_http_hosts number 0
+          other_ip.bytes.sent number 0
+          icmp.bytes.sent number 0
+          latitude number 43.147899627686
+          local_network_id number 2
+          packets.rcvd.anomaly_index number 0
+          icmp.packets.rcvd number 0
+          udp.bytes.rcvd number 0
+          bytes.sent.anomaly_index number 60
+          udp.bytes.sent number 30048
+          total_alerts number 426
+          drop_all_host_traffic boolean false
+          local_network_name string 146.48.96.0/22
+          packets.sent number 8002
+          throughput_trend_pps number 2
+          total_activity_time number 22510
+          contacts.as_server number 0
+          contacts.as_client number 2
+          ip string 146.48.99.133
+          active_flows.as_server number 0
+          sites string { }
+          seen.first number 1560868031
+          udp.bytes.sent.anomaly_index number 60
+          pktStats.sent table
+          pktStats.sent.upTo9000 number 0
+          pktStats.sent.upTo1518 number 3
+          pktStats.sent.upTo512 number 8
+          pktStats.sent.upTo256 number 48
+          pktStats.sent.above9000 number 0
+          pktStats.sent.rst number 0
+          pktStats.sent.finack number 0
+          pktStats.sent.upTo64 number 0
+          pktStats.sent.upTo6500 number 0
+          pktStats.sent.upTo128 number 111
+          pktStats.sent.synack number 0
+          pktStats.sent.upTo2500 number 0
+          pktStats.sent.upTo1024 number 5
+          pktStats.sent.syn number 0
+          low_goodput_flows.as_server number 0
+          is_blacklisted boolean false
+          unreachable_flows.as_server number 0
+          active_flows.as_client number 5
+          total_flows.as_server number 470
+          udp.bytes.rcvd.anomaly_index number 0
+          other_ip.bytes.rcvd number 0
+          tcp.packets.seq_problems boolean true
+          vlan number 0
+          tcp.packets.rcvd number 0
+          num_alerts number 0
+          ipkey number 2452644741
+          last_throughput_pps number 0.19995501637459
+          last_throughput_bps number 17.196130752563
+          pktStats.recv table
+          pktStats.recv.upTo9000 number 0
+          pktStats.recv.upTo1518 number 0
+          pktStats.recv.upTo512 number 0
+          pktStats.recv.upTo256 number 0
+          pktStats.recv.above9000 number 0
+          pktStats.recv.rst number 0
+          pktStats.recv.finack number 0
+          pktStats.recv.upTo64 number 0
+          pktStats.recv.upTo6500 number 0
+          pktStats.recv.upTo128 number 0
+          pktStats.recv.synack number 0
+          pktStats.recv.upTo2500 number 0
+          pktStats.recv.upTo1024 number 0
+          pktStats.recv.syn number 0
+          throughput_trend_bps_diff number 46.189598083496
+          tskey string 10:65:30:08:97:08_v4
+          is_multicast boolean false
+        ]]
+
+--TODO! controlla se possibile 
+--nel param device_info trovi cosa devi controllare, in chache troverai l'id (mac + i vari host ip? non sarebbe male, così no ndevo ricalcolarlo, però non è fondamentale)
 function handler_ask_for_single_device_info_more()
-  --nel param device_info trovi cosa devi controllare, in chache troverai l'id (mac + i vari host ip? non sarebbe male)
-  local info_type = request.parameters.device_info
-  --note: info type = alarm - application - security - specification - traffic category
-
-
+  local info_type = request.parameters.device_info--note: info type = alerts - applications - security - tech-specs - categories - network
   local mac = ntop.getCache("nAssistant_device_info_mac")
-
-  tprint(mac)
-
   local macs_table_len, macs_table = find_mac_hosts(mac)
   local d_info = merge_hosts_info(macs_table[mac])
+  local is_chart = false
+  local speech_text, display_text = "WIP", "WIP"
 
-
---il seguente è un copia incolla dei top app/categories: FAI DELLE FOTTUTE API!
+--il seguente è un copia incolla degli intent top app/categories: FAI DELLE FOTTUTE API!
   if not d_info then 
     dialogflow.send("I have not found any active communication! Please try again later")
     return
   end
+  ------------------------------------------
+  --TODO: usa una sorta di paradigma factory per i chart
   local labels, values, datasets = {},{},{}
   local legend_label = "Traffic (KB)"
   local data = {labels = {}, values = {}, legend_label = legend_label}
@@ -688,48 +904,98 @@ function handler_ask_for_single_device_info_more()
       bkg_color = "white"
   }
   local t = {}
-  --TODO: vari check per vedere se tali tabelle non sono nil
-  if info_type == "application" then t = d_info.ndpi end 
-  --MA OCCHIO CHE PER COME VENGONO CARICATI I VALUES QUA SOTTO, NELLE ndpi_categories NON CI SONO I bytes ma i bytes.rcvd e send!!!!
-
-  tprint(d_info.ndpi)
-
   local i = 0
-  for _,v in ipairs(t) do
-      table.insert(data.labels, v.name)
-      
+  local card_title, chart_description = "Chart", "Chart"
+
+  --TODO: vari check per vedere se tali tabelle non sono nil
+  if info_type == "applications" then
+    is_chart = true
+    chart_description = "Top Application for ".. d_info.name 
+    card_title = "Top Application for ".. d_info.name
+
+     for _,v in ipairs(d_info.ndpi) do
+      table.insert(data.labels, v.name) 
       table.insert(data.values, (v.info["bytes.rcvd"]+v.info["bytes.sent"])/1024 )
-
-      --SOPRA C'È SOLUZIONE TEMPORANEA, DA SISTEMARE
-      --table.insert(data.values, v.bytes/1024 ) --TODO: se necessario (tanto traffico) metti i MB invece dei KB
       i = i + 1
-      if i >= 6 or v.percentage < 1 then break end    --NOTE: 6 and 1 are arbitrary
+      if i >= 6 or v.percentage < 1 then break end    --NOTE: 6 and 1 are arbitrary 
+    end
+
+  elseif info_type == "categories" then
+    is_chart = true
+    chart_description = "Top Categories for ".. d_info.name 
+    card_title = "Top Categories for ".. d_info.name
+
+    for _,v in ipairs(d_info.ndpi_categories) do
+      table.insert(data.labels, v.name)
+      table.insert(data.values, v.info.bytes/1024 ) --TODO: se necessario (tanto traffico) metti i MB invece dei KB
+
+      i = i + 1
+      if i >= 6 or v.percentage < 1 then break end    --NOTE: 6 and 1 are arbitrary 
+    end
+
+  elseif info_type == "alerts" then
+
+    local total_alerts, num_triggered_alerts, tot_triggered_alert = d_info.total_alerts, d_info.num_triggered_alerts,0
+
+    for _,v in pairs(num_triggered_alerts)do tot_triggered_alert = tot_triggered_alert + v end
+
+    display_text = "The device have "..total_alerts.." cumulated alerts and " .. tot_triggered_alert.. " triggered."
+
+    --TODO: il resto delle info per gli alert, ma attualmente le API sono WIP 
+
+  elseif info_type == "security" then
+
+    dialogflow.send("WIP - security")
+    return
+
+  elseif info_type == "network" then
+    --TODO: sempre i vari check sulle tabelle prima di iterarci
+
+    --TODO: pensa un modo elencare LE interfacce attive
+    -- local if_name = interface.getIfNames()[d_info.ifid]
+
+    display_text = "Interface Name = "..ifname.."\nAddresses:\nMAC = "..mac
+    local i = 1
+    for _,v in pairs(macs_table) do
+      display_text = display_text .. "\n\tIP Host("..i..") = "..v[i].ip
+    end
+
+    local tot_sent, tot_rcvd = 0,0
+    for i,v in pairs(d_info.ndpi_categories) do --scelgo le categories perché quasi certamente contiene meno elementi
+      tot_sent = tot_sent + v.info["bytes.sent"]
+      tot_rcvd = tot_rcvd + v.info["bytes.rcvd"]
+    end
+
+    display_text = display_text .. "\nApplications Traffic Volume(KB):\n\tsent/rcvd = "..
+      string.format("%.2f",tot_sent/1024).." / "..string.format("%.2f",tot_rcvd/1024)
+
+  elseif info_type == "tech-specs" then -- ha senso?
+
+    display_text = "WIP - hw specs"
+  else
+    --problemi! in teoria qui non dovrei mai capitarci
+  end 
+
+  if is_chart then 
+    local url = df_utils.create_chart_url(data, options)
+    local card = dialogflow.create_card(card_title, url, chart_description)
+    -- TODO speech_text 
+    display_text = "Here is the chart"
+
+    dialogflow.send(speech_text, display_text, nil, nil, card)
+  else
+    -- TODO speech_text
+    dialogflow.send(display_text)
   end
-
-  local url = df_utils.create_chart_url(data, options)
-  local card = dialogflow.create_card(
-      "Top Application for ".. d_info.name ,
-      url,
-      "Top Application Chart"
-  )
-  local speech_text = "WIP"
-  local display_text = "Here is the chart"
-
-  dialogflow.send(speech_text, display_text, nil, nil, card)
-
-
-
-
-
-  dialogflow.send("WIP, man!")
 end
+
 --+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 --########################################################-Intents-Dispatcher-###################################################################
 --+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 request = dialogflow.receive()
 
 --get_aggregated_info può ricevere 4 parametri (Devices, generic, Network, Traffic)
---TODO: fai gli adeguati distinguo per i 4 casi
+--TODO: nell'intent "ask_for_aggregated_info" prova a mettere "l'aggregatore" come parametro opzionale per dare subito l'info
 if      request.intent_name == "get_aggregated_info" then response = handler_get_aggregated_info()
 elseif  request.intent_name == "get_aggregated_info - repeat" then response = handler_get_aggregated_info() 
 elseif  request.intent_name == "get_aggregated_info - more" then response = handler_get_aggregated_info_more() --WIP & todo handler

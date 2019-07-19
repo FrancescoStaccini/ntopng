@@ -12,8 +12,10 @@ sendHTTPContentTypeHeader('Application/json')
 
 local arp_matrix_utils =    require "arp_matrix_utils" 
 local discover =            require "discover_utils" 
+local net_state = require "network_state"
+local json = require("dkjson")
 
-local matrix = interface.getArpStatsMatrixInfo()
+--local matrix = interface.getArpStatsMatrixInfo()
 
 
 
@@ -136,15 +138,16 @@ local function createStats(matrix)
     return t_res
 end
 
-
-local net_state = require "network_state"
-local json = require("dkjson")
+--print(json.encode( interface.getIfNames() ))
+--[[
+    {"1":"enp3s0","2":"lo"}
+]]
+--print( tostring(ifname) )
 --print( json.encode(createStats(matrix), {indent = true} ) )
 --print( json.encode( interface.findHost("bucci-PC"), {indent = true} ) )
 --print( json.encode( table.len(interface.findHost("pc")), {indent = true} ) )
 
 --print( json.encode( interface.getnDPIProtocols(), {indent = true} ) )
-
 
 -- local params = {}
 -- --params = {"bytes.sent", "ip", "ipkey", "names.dhcp" }
@@ -153,17 +156,12 @@ local json = require("dkjson")
 -- net_state.get_stats( "localhost", params, 2, res)
 -- print(  json.encode( res, {indent = true})  )
 
-
 --print(  json.encode( interface.getActiveFlowsStats(), {indent = true})  )
-
-
 
 --function network_state.get_stats( type, res, params, caller_deadline,  caller_callback) FIRMA
 -- local res = {}
 -- net_state.get_stats("flow", res)
 -- print(  json.encode( res, {indent = true})  )
-
-
 
 -- local res = {}
 -- local category = "Web"
@@ -181,23 +179,14 @@ local json = require("dkjson")
 -- net_state.get_stats("devices", nil, nil, nil, mycall)
 -- print(  json.encode( res, {indent = true}) )
 
-
 --print(  json.encode(  interface.getMacInfo("A2:37:B9:7E:EA:F7 " ), {indent = true}) )
+print(  json.encode( interface.getHostInfo("146.48.99.133"), {indent = true}) )
 
-
-print(  json.encode( interface.getHostInfo("146.48.99.49"), {indent = true}) )
-
-
+--print(  json.encode( ntop.getPref("ntopng.prefs.ndpi_flows_rrd_creation"), {indent = true}) )
 
 --print(  json.encode( interface.getStats(), {indent = true})  )
-
-
-
 --print(  json.encode( net_state.get_ndpi_proto_traffic_volume(), {indent = true})  )
-
-
 --print(  json.encode( net_state.check_top_application_protocol(), {indent = true})  )
-
 
 --tprint(t)
 --print( json.encode( t, {indent = true}) )
@@ -206,20 +195,11 @@ print(  json.encode( interface.getHostInfo("146.48.99.49"), {indent = true}) )
 -- local macs = interface.getMacsInfo().macs
 -- for i,v in pairs(macs)do print(v.mac..";") end
 
-
 --print( json.encode( interface.getMacsInfo(), {indent = true}) )
 --print( json.encode( interface.getMacInfo("AC:9E:17:81:A1:76" ), {indent = true}) )
-
-
 --print( json.encode( getHostAltName("D8:18:D3:78:CB:2F"), {indent = true}) ) 
-
---print( json.encode( interface.findHost("zero"), {indent = true}) ) 
-
-
---
+--print( json.encode( interface.findHost("zero"), {indent = true}) )
 --print( json.encode( interface.getMacDeviceTypes(), {indent = true}) )
-
-
 --print( json.encode( arp_matrix_utils.getLocalTalkersDeviceType(), {indent = true} ) )
 
 --test tocheck dropbox namespaces
@@ -228,12 +208,62 @@ print(  json.encode( interface.getHostInfo("146.48.99.49"), {indent = true}) )
 --print( json.encode(  dropbox.getNamespaces(), {indent = true}) )
 
 
+--++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+--[[ROBA PER DEBUGGARE CIÒ
+string 0|72
+17/Jul/2019 12:00:01 [LuaEngine.cpp:9552] WARNING: Script failure [/home/f/my_ntop/ntopng/scripts/callbacks/interface/5min.lua][/home/f/my_ntop/ntopng/scripts/lua/modules/ntop_utils.lua:199: bad argument #1 to 'floor' (number expected, got string)]
+
+ string 63954|0
+17/Jul/2019 12:10:00 [LuaEngine.cpp:9552] WARNING: Script failure [/home/f/my_ntop/ntopng/scripts/callbacks/interface/5min.lua][/home/f/my_ntop/ntopng/scripts/lua/modules/ntop_utils.lua:199: bad argument #1 to 'floor' (number expected, got string)]
+
+ string 1211|0
+17/Jul/2019 12:15:01 [LuaEngine.cpp:9552] WARNING: Script failure [/home/f/my_ntop/ntopng/scripts/callbacks/interface/5min.lua][/home/f/my_ntop/ntopng/scripts/lua/modules/ntop_utils.lua:199: bad argument #1 to 'floor' (number expected, got string)]
+
+string 0|173
+17/Jul/2019 12:20:01 [LuaEngine.cpp:9552] WARNING: Script failure [/home/f/my_ntop/ntopng/scripts/callbacks/interface/5min.lua][/home/f/my_ntop/ntopng/scripts/lua/modules/ntop_utils.lua:199: bad argument #1 to 'floor' (number expected, got string)]
+
+sembra sia dovuto a un dump effettuato ogni 5 min
 
 
+RISULTATI DI GREP SUL SIMBOLO |
+
+lua/get_host_contacts.lua:115:base_name = when.."|"..ifname.."|"..host
+lua/get_host_contacts.lua:116:keyname = base_name.."|"..mode
+lua/modules/os_utils.lua:169:--! @return active|inactive|error
+lua/modules/lua_utils.lua:3515:-- Banner format: {type="success|warning|danger", text="..."}
+lua/modules/ebpf_utils.lua:106:      .attr("x", function(d) { return d.children || d._children ? -10 : 10; })
+lua/get_http_hosts.lua:25:   print (k .."|".. v["host"] .."|".. v["http_requests"] .."<br>")
+lua/system/rtt_stats.lua:364:    return [host2key(host, iptype, probetype), orig_host, host, iptype, probetype, max_rtt].join("|");
 
 
+lua/top_hosts.lua:87:	  }, (name + "|" + symname));
+lua/get_host_contacts.lua:115:base_name = when.."|"..ifname.."|"..host
+lua/get_host_contacts.lua:116:keyname = base_name.."|"..mode
+lua/modules/timeseries/drivers/influxdb.lua:899:   local parts = split(item, "|")
+lua/modules/ts_5min_dump_utils.lua:410:    local sep = string.find(value, "|")
+lua/modules/ts_5min_dump_utils.lua:422:    local sep = string.find(value, "|")
+lua/modules/alert_utils.lua:1172:               local configdump = table.concat(config_to_dump, "|")
+lua/modules/alert_utils.lua:1282:	    deserialized_config = split(serialized_config, "|")
+lua/modules/alert_utils.lua:1769:               var alert_key = $("td:nth(7)", this).html().split("|");
+lua/modules/alert_utils.lua:2579:      for _, group in pairs(split(quota_exceeded_pools_values[pool], "|")) do
+lua/modules/alert_utils.lua:2647:	       ntop.setHashCache(quota_exceeded_pools_key, pool, table.tconcat(pool_exceeded_quotas, "=", "|"))
+lua/modules/rtt_utils.lua:65:  local parts = string.split(val, "|")
+lua/get_http_hosts.lua:25:   print (k .."|".. v["host"] .."|".. v["http_requests"] .."<br>")
+lua/system/rtt_stats.lua:97:        local parts = string.split(host_line, "|")
+lua/system/rtt_stats.lua:100:        local value = table.concat(parts, "|")
+lua/system/rtt_stats.lua:364:    return [host2key(host, iptype, probetype), orig_host, host, iptype, probetype, max_rtt].join("|");
+lua/get_alerts_table_data.lua:167:      column_id = column_id.."|"..explore()
+lua/get_db_flows.lua:112:	    if(elems > 0) then print("|") end
+lua/get_db_flows.lua:122:	 if(elems > 0) then print("|") end
+lua/admin/host_pools.lua:59:    local parts = split(value, "|")
+lua/admin/host_pools.lua:861:          settings[address] = [original, alias, icon].join("|");
 
-
+    name string host:ndpi
+ table
+    bytes_rcvd string 516|0
+]]
+--++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 
 --[[ MAC INFO

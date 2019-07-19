@@ -322,13 +322,6 @@ local function update_rrd(schema, rrdfile, timestamp, data, dont_recover)
     traceError(TRACE_NORMAL, TRACE_CONSOLE, string.format("Going to update %s [%s]", schema.name, rrdfile))
   end
 
-    -- local tmp = schema.name:split(":") --wip
-    -- if not ((tmp[1] == "system") or (tmp[1] == "process"))  then --wip
-    --   traceError(TRACE_NORMAL, TRACE_CONSOLE, string.format("ntop.rrd_update(%s, %s) schema=%s", rrdfile, table.concat(params, ", "), schema.name)) --wip
-    --   --traceError(TRACE_NORMAL, TRACE_CONSOLE, debug.traceback() )--wip
-    -- end--wip
-    -- --traceError(TRACE_NORMAL, TRACE_CONSOLE, string.format("ntop.rrd_update(%s, %s) schema=%s", rrdfile, table.concat(params, ", "), schema.name)) --wip
-
   for _, metric in ipairs(schema._metrics) do
     params[#params + 1] = tolongint(data[metric])
   end
@@ -340,18 +333,12 @@ local function update_rrd(schema, rrdfile, timestamp, data, dont_recover)
 
   local err = ntop.rrd_update(rrdfile, table.unpack(params))
   if(err ~= nil) then
-
-    --WIP
-    --traceError(TRACE_NORMAL, TRACE_CONSOLE, "error during regular update - dont_recover = ".. ternary(dont_recover, "True", "False") )
-
     if(dont_recover ~= true) then
       -- Try to recover
       local last_update, num_ds = ntop.rrd_lastupdate(rrdfile)
       local retry = false
 
       if((num_ds ~= nil) and (num_ds < #schema._metrics)) then
-        --traceError(TRACE_NORMAL, TRACE_CONSOLE, " nell' if , la guardia (num_ds ~= nil) and (num_ds < #schema._metrics) È TRUE!" )--wip
-
         if add_missing_ds(schema, rrdfile, num_ds) then
           retry = true
         end
@@ -373,8 +360,6 @@ local function update_rrd(schema, rrdfile, timestamp, data, dont_recover)
       end
 
       if retry then
-        --WIP
-        --traceError(TRACE_NORMAL, TRACE_CONSOLE,"RETRY UPDATE. schema.name: "..schema.name.." rrdfile: "..rrdfile)--wip
         -- Problem possibly fixed, retry
         return update_rrd(schema, rrdfile, timestamp, data, true --[[ do not recovery again ]])
       end

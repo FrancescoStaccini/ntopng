@@ -328,7 +328,9 @@ end
 --TODO: NOTIFICHE se possibile. Notificare almeno gli allarmi importanti
 --      distingui/separa/etichetta gli allarmi engaged - released - di flusso...
 --      di sicuro c'è da far capire bene: Soggetto, stato allarme, gravità, tipo. [VEDI APPUNTI ALERT] 
+--  !!  funzioni per controllare gloi alert per host/mac
 
+--NOTE: le funzion iattuali si riferiscono alla totalità degli alert
 require "alert_utils"
 
 function network_state.get_alerts()--TODO: cambia nome in get_aletrs

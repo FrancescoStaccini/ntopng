@@ -117,6 +117,13 @@ function callback_utils.saveLocalHostsActivity(hostname, host--[[hostinfo]], hos
 
             -- up, down, background bytes
             createActivityRRDCounter(name, verbose)
+
+            --WIP (sembra inutile) mmhhh
+               tprint(val.up)
+               tprint(val.down)
+               tprint(val.background)
+
+
             ntop.rrd_update(name, "N:"..tolongint(val.up) .. ":" .. tolongint(val.down) .. ":" .. tolongint(val.background))
 
             if(verbose) then

@@ -42,6 +42,11 @@ end
 -- ########################################################
 
 --WIP
+
+--TODO: SINCRONIZZA A MANO CON IL FILE ORIGINALE DEL REPO DI NTOP
+--      ricontrolla i nomi delle utils e anche in generale che alcune cosine sono cambiate
+--      per pulizia: in ts_dump.run_5min_dump(...) la table.merge al volo non è elegantissima
+--note: sono divise in gruppi (max 3 per limiti dovuti al grafico delle ts)
 function ts_dump.l2_device_update_talkers_stats_rrds( when, devicename, device, ifstats, verbose, talkers)
   local tt = arp_matrix_utils.talkersTot(talkers)
 
@@ -247,6 +252,7 @@ function ts_dump.getConfig()
   config.country_rrd_creation = ntop.getPref("ntopng.prefs.country_rrd_creation")
   config.vlan_rrd_creation = ntop.getPref("ntopng.prefs.vlan_rrd_creation")
   config.tcp_retr_ooo_lost_rrd_creation = ntop.getPref("ntopng.prefs.tcp_retr_ooo_lost_rrd_creation")
+  config.ndpi_flows_timeseries_creation = ntop.getPref("ntopng.prefs.ndpi_flows_rrd_creation")
 
   --WIP
   config.arp_matrix_timseries_rrd_creation = ntop.getPref("ntopng.prefs.is_arp_matrix_generation_enabled")
@@ -384,13 +390,13 @@ function ts_dump.host_update_stats_rrds(when, hostname, host, ifstats, verbose)
     end
   end
 
-  --WIP dropbox shared file
-    local n = table.len( dropbox.getHostNamespaces(host.hostname) )
-    if n > 0 then 
-      ts_utils.append("host:dropbox_shares", {ifid=ifstats.id, host=hostname,
-            num_dropbox_shares = n}, when, verbose)
-      --io.write("{D-Shares dumped} host: ".. host.hostname.." ts key: "..hostname.." num: "..n.."\n")
-    end
+  --WIP num dropbox shared file
+  local n = table.len( dropbox.getHostNamespaces(host.hostname) )
+  if n > 0 then 
+    ts_utils.append("host:dropbox_shares", {ifid=ifstats.id, host=hostname,
+          num_dropbox_shares = n}, when, verbose)
+    --io.write("{D-Shares dumped} host: ".. host.hostname.." ts key: "..hostname.." num: "..n.."\n")
+  end
   ---------------------------------------------------------
 
   -- UDP breakdown
@@ -404,15 +410,23 @@ function ts_dump.host_update_stats_rrds(when, hostname, host, ifstats, verbose)
   end
 end
 
-function ts_dump.host_update_ndpi_rrds(when, hostname, host, ifstats, verbose)
+function ts_dump.host_update_ndpi_rrds(when, hostname, host, ifstats, verbose, config)
   -- nDPI Protocols
   for k, value in pairs(host["ndpi"] or {}) do
     local sep = string.find(value, "|")
+    local sep2 = string.find(value, "|", sep+1)
     local bytes_sent = string.sub(value, 1, sep-1)
-    local bytes_rcvd = string.sub(value, sep+1)
+    local bytes_rcvd = string.sub(value, sep+1, sep2-1)
 
     ts_utils.append("host:ndpi", {ifid=ifstats.id, host=hostname, protocol=k,
               bytes_sent=bytes_sent, bytes_rcvd=bytes_rcvd}, when, verbose)
+
+    if config.ndpi_flows_timeseries_creation == "1" then
+      local num_flows = string.sub(value, sep2+1)
+
+      ts_utils.append("host:ndpi_flows", {ifid=ifstats.id, host=hostname, protocol=k,
+              num_flows = num_flows}, when, verbose)
+    end
   end
 end
 
@@ -439,7 +453,7 @@ function ts_dump.host_update_rrd(when, hostname, host, ifstats, verbose, config)
     end
 
     if(config.host_ndpi_timeseries_creation == "per_protocol" or config.host_ndpi_timeseries_creation == "both") then
-      ts_dump.host_update_ndpi_rrds(when, hostname, host, ifstats, verbose)
+      ts_dump.host_update_ndpi_rrds(when, hostname, host, ifstats, verbose, config)
     end
 
     if(config.host_ndpi_timeseries_creation == "per_category" or config.host_ndpi_timeseries_creation == "both") then
@@ -486,6 +500,7 @@ function ts_dump.run_5min_dump(_ifname, ifstats, config, when, time_threshold, s
             ts_dump.host_update_rrd(instant, host_key, table.merge( host_point, {hostname = hostname}), ifstats, verbose, config) --wip: hostname added in "host_point" for the dropbpox share timeseries
           end
         end
+
         -- mark the host as dumped
         dumped_hosts[host_key] = true
       end
@@ -509,12 +524,12 @@ function ts_dump.run_5min_dump(_ifname, ifstats, config, when, time_threshold, s
   if is_rrd_creation_enabled then
     if config.l2_device_rrd_creation ~= "0" then 
 
-      --WIP outside the callback the heavy stuff
+      --WIP outside the callback the heavy computational stuff
       if config.arp_matrix_timseries_rrd_creation then
-        talkers_table = arp_matrix_utils.getLocalTalkersDeviceType()
+        arp_matrix_talkers_table = arp_matrix_utils.getLocalTalkersDeviceType()
         arp_matrix_utils.dumpArpMatrix(_ifname)
       end
-      --end wip
+      --wip
 
       local in_time = callback_utils.foreachDevice(_ifname, time_threshold, function (devicename, device)
         ts_dump.l2_device_update_stats_rrds(when, devicename, device, ifstats, verbose)
@@ -526,12 +541,12 @@ function ts_dump.run_5min_dump(_ifname, ifstats, config, when, time_threshold, s
         ---WIP inside the callback the particular stuff
         if config.arp_matrix_timseries_rrd_creation then
           local device_talkers = {}
-          if talkers_table and talkers_table[devicename] then
-            device_talkers = talkers_table[devicename].talkersDevices
+          if arp_matrix_talkers_table and arp_matrix_talkers_table[devicename] then
+            device_talkers = arp_matrix_talkers_table[devicename].talkersDevices
           end
           ts_dump.l2_device_update_talkers_stats_rrds( when, devicename, device, ifstats, verbose, device_talkers )
         end
-      --end wip-----------
+        --wip-----------
       end)
 
       if not in_time then

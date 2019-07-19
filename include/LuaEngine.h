@@ -37,7 +37,7 @@
  */
 
 class LuaEngine {
- private:
+ protected:
   lua_State *L; /**< The LuaEngine state.*/
   
   void lua_register_classes(lua_State *L, bool http_mode);
@@ -100,7 +100,7 @@ class LuaEngine {
   static void luaRegister(lua_State *L, const ntop_class_reg *reg);
   static void luaRegisterInternalRegs(lua_State *L);
 
-  inline lua_State* getState() { return(L); }
+  inline lua_State* getState() const { return(L); }
   
   void setInterface(const char * user, char * const ifname, u_int16_t ifname_len, bool * const is_allowed) const;
 };

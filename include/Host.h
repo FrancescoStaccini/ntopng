@@ -37,6 +37,9 @@ class Host : public GenericHashEntry, public AlertableEntity {
   HostStats *stats, *stats_shadow;
   time_t last_stats_reset;
 
+  /* Marked when visited by the periodic activities */
+  bool idle_mark;
+
   /* Host data: update Host::deleteHostData when adding new fields */
   struct {
     char * mdns, * mdns_txt;
@@ -126,7 +129,7 @@ class Host : public GenericHashEntry, public AlertableEntity {
   };
 
   virtual HostStats* allocateStats()                { return(new HostStats(this)); };
-  void updateStats(struct timeval *tv);
+  void updateStats(update_hosts_stats_user_data_t *update_hosts_stats_user_data);
   void incLowGoodputFlows(time_t t, bool asClient);
   void decLowGoodputFlows(time_t t, bool asClient);
   inline void incNumAnomalousFlows(bool asClient)   { return(stats->incNumAnomalousFlows(asClient)); };
@@ -206,7 +209,11 @@ class Host : public GenericHashEntry, public AlertableEntity {
   virtual char* get_string_key(char *buf, u_int buf_len) const { return(ip.print(buf, buf_len)); };
   char* get_hostkey(char *buf, u_int buf_len, bool force_vlan=false);
   char* get_tskey(char *buf, size_t bufsize);
-  bool idle();
+
+  inline void set_idle(time_t t) { idle_mark = true;  };
+  virtual bool idle()            { return(idle_mark); };
+  bool isReadyToBeMarkedAsIdle();
+
   virtual void incICMP(u_int8_t icmp_type, u_int8_t icmp_code, bool sent, Host *peer) {};
   virtual void lua(lua_State* vm, AddressTree * ptree, bool host_details,
 	   bool verbose, bool returnHost, bool asListElement);

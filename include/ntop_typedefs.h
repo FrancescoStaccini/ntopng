@@ -47,6 +47,13 @@ typedef enum {
   mask_remote_hosts = 2
 } HostMask;
 
+/* Struct used to pass parameters when walking hosts periodically to update their stats */
+class AlertCheckLuaEngine;
+typedef struct {
+  AlertCheckLuaEngine *acle;
+  struct timeval *tv;
+} update_hosts_stats_user_data_t;
+
 typedef enum {
   minute_script = 0,
   five_minute_script,
@@ -687,13 +694,7 @@ typedef struct grouped_alerts_counters {
   std::map<AlertLevel, u_int32_t> severities;
 } grouped_alerts_counters;
 
-typedef struct Alert {
-  time_t alert_tstamp_start;
-  time_t last_update;
-  AlertLevel alert_severity;
-  AlertType alert_type;
-  std::string alert_subtype;
-  std::string alert_json;
-} Alert;
+class AlertableEntity;
+typedef void (alertable_callback)(AlertableEntity *alertable, void *user_data);
 
 #endif /* _NTOP_TYPEDEFS_H_ */

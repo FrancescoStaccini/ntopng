@@ -13,8 +13,8 @@ local do_trace = false
 
 local alerts = {}
 
-local MAX_NUM_ENQUEUED_ALERTS_EVENTS = 1024
-local ALERTS_EVENTS_QUEUE = "ntopng.cache.alerts_events_queue"
+-- NOTE: sqlite can handle about 10-50 alerts/sec
+local MAX_NUM_ENQUEUED_ALERT_PER_INTERFACE = 256
 local ALERT_CHECKS_MODULES_BASEDIR = dirs.installdir .. "/scripts/callbacks/interface/alerts"
 
 -- Just helpers
@@ -26,6 +26,12 @@ local str_2_periodicity = {
 }
 
 local known_alerts = {}
+
+-- ##############################################
+
+local function getAlertEventQueue(ifid)
+  return string.format("ntopng.cache.ifid_%d.alerts_events_queue", ifid)
+end
 
 -- ##############################################
 
@@ -90,6 +96,7 @@ end
 
 -- ##############################################
 
+-- TODO remove
 --! @brief Triggers a new alert or refreshes an existing one (if already engaged)
 --! @param entity_value the string representing the entity of the alert (e.g. "192.168.1.1")
 --! @param alert_message the message (string) or json (table) to store
@@ -104,68 +111,27 @@ function alerts:trigger(entity_value, alert_message, when)
     msg = json.encode(alert_message)
   end
 
-  local rv = interface.triggerAlert(when, self.periodicity,
+  local rv = interface.storeAlert(when, when, self.periodicity,
     self.type_id, self.subtype or "", self.severity_id,
     self.entity_type_id, entity_value, msg)
 
-  if(rv ~= nil) then
-    if(rv.success and rv.new_alert) then
-      local action = ternary(self.periodicity, "engage", "store")
-      local message = {
-        ifid = interface.getId(),
-        entity_type = self.entity_type_id,
-        entity_value = entity_value,
-        type = self.entity_type_id,
-        severity = self.severity_id,
-        message = msg,
-        tstamp = when,
-        action = action,
-     }
+  if(rv) then
+    local action = "store"
+    local message = {
+      ifid = interface.getId(),
+      entity_type = self.entity_type_id,
+      entity_value = entity_value,
+      type = self.type_id,
+      severity = self.severity_id,
+      message = msg,
+      tstamp = when,
+      action = action,
+    }
 
-     alert_endpoints.dispatchNotification(message, json.encode(message))
-    end
+    alert_endpoints.dispatchNotification(message, json.encode(message))
   end
 
-  return(rv.success)
-end
-
--- ##############################################
-
---! @brief Manually releases an engaged alert
---! @param entity_value the string representing the entity of the alert (e.g. "192.168.1.1")
---! @param when (optional) the time when the release event occurs
---! @note Alerts are also automatically released based on their periodicity,
---! @return true on success, false otherwise
-function alerts:release(entity_value, when)
-  when = when or os.time()
-
-  local rv = interface.releaseAlert(when, self.periodicity,
-    self.type_id, self.subtype or "", self.severity_id, self.entity_type_id, entity_value)
-
-  if(rv ~= nil) then
-    if(rv.success and rv.rowid) then
-      local res = interface.queryAlertsRaw("SELECT alert_json", string.format("WHERE rowid=%u", rv.rowid))
-
-      if((res ~= nil) and (#res == 1)) then
-        local msg = res[1].alert_json
-
-        local message = {
-          ifid = interface.getId(),
-          entity_type = self.entity_type_id,
-          entity_value = entity_value,
-          type = self.entity_type_id,
-          severity = self.severity_id,
-          message = msg,
-          tstamp = when,
-          action = "release",
-         }
-
-         alert_endpoints.dispatchNotification(message, json.encode(message))
-      end
-    end
-  end
-
-  return(rv.success)
+  return(rv)
 end
 
 -- ##############################################
@@ -189,7 +155,7 @@ end
 
 -- ##############################################
 
--- TODO unify alerts and metadataications format
+-- TODO unify alerts and metadata/notications format
 function alerts.parseNotification(metadata)
   local alert_id = makeAlertId(alertType(metadata.type), metadata.alert_subtype, metadata.alert_periodicity, alertEntity(metadata.entity_type))
 
@@ -205,6 +171,24 @@ function alerts.parseNotification(metadata)
     periodicity = metadata.periodicity,
     subtype = metadata.subtype,
   }))
+end
+
+-- ##############################################
+
+-- TODO unify alerts and metadata/notications format
+function alerts.alertNotificationToRecord(notif)
+  return {
+    alert_entity = alertEntity(notif.entity_type),
+    alert_type = alertType(notif.type),
+    alert_severity = alertSeverity(notif.severity),
+    periodicity = notif.periodicity,
+    alert_subtype = notif.subtype,
+    alert_entity_val = notif.entity_value,
+    alert_tstamp = notif.tstamp,
+    alert_tstamp_end = notif.tstamp_end or notif.tstamp,
+    alert_granularity = notif.granularity,
+    alert_json = notif.message,
+  }
 end
 
 -- ##############################################
@@ -227,15 +211,25 @@ end
 -- ##############################################
 
 local function enqueueAlertEvent(alert_event)
-  local event_json = json.encode(alert_event)
   local trim = nil
+  local ifid = interface.getId()
 
-  if(ntop.llenCache(ALERTS_EVENTS_QUEUE) > MAX_NUM_ENQUEUED_ALERTS_EVENTS) then
-    trim = math.ceil(MAX_NUM_ENQUEUED_ALERTS_EVENTS/2)
-    traceError(TRACE_WARNING, TRACE_CONSOLE, string.format("Alerts event queue too long: dropping %u alerts", trim))
+  if(alert_event.ifid ~= ifid) then
+    traceError(TRACE_ERROR, TRACE_CONSOLE, string.format("Wrong interface selected: expected %s, got %s", alert_event.ifid, ifid))
+    return(false)
   end
 
-  ntop.rpushCache(ALERTS_EVENTS_QUEUE, event_json, trim)
+  local event_json = json.encode(alert_event)
+  local queue = getAlertEventQueue(ifid)
+
+  if(ntop.llenCache(queue) > MAX_NUM_ENQUEUED_ALERT_PER_INTERFACE) then
+    trim = math.ceil(MAX_NUM_ENQUEUED_ALERT_PER_INTERFACE/2)
+    traceError(TRACE_WARNING, TRACE_CONSOLE, string.format("Alerts event queue too long: dropping %u alerts", trim))
+
+    interface.incNumDroppedAlerts(trim)
+  end
+
+  ntop.rpushCache(queue, event_json, trim)
   return(true)
 end
 
@@ -246,36 +240,34 @@ end
 -- the other scripts and as a necessity to avoid a deadlock on the
 -- host hash in the host.lua script
 function alerts.processPendingAlertEvents(deadline)
-  while(true) do
-    local event_json = ntop.lpopCache(ALERTS_EVENTS_QUEUE)
+  local ifnames = interface.getIfNames()
 
-    if(not event_json) then
-      break
-    end
+  for ifid, _ in pairs(ifnames) do
+    interface.select(ifid)
+    local queue = getAlertEventQueue(ifid)
 
-    local event = json.decode(event_json)
-    local to_call
+    while(true) do
+      local event_json = ntop.lpopCache(queue)
 
-    interface.select(tostring(event.ifid))
+      if(not event_json) then
+        break
+      end
 
-    if(event.action == "release") then
-      to_call = interface.releaseAlert
-    else
-      to_call = interface.triggerAlert
-    end
+      local event = json.decode(event_json)
 
-    rv = to_call(
-      event.tstamp, event.granularity,
-      event.type, event.subtype or "", event.severity,
-      event.entity_type, event.entity_value,
-      event.message) -- event.message: nil for "release"
+      if(event.action == "release") then
+        interface.storeAlert(
+          event.tstamp, event.tstamp_end, event.granularity,
+          event.type, event.subtype or "", event.severity,
+          event.entity_type, event.entity_value,
+          event.message) -- event.message: nil for "release"
+      end
 
-    if(rv.success) then
       alert_endpoints.dispatchNotification(event, event_json)
-    end
 
-    if(os.time() > deadline) then
-      break
+      if(os.time() > deadline) then
+        break
+      end
     end
   end
 end
@@ -347,27 +339,28 @@ end
 --! @note The actual release is performed asynchronously
 --! @return true on success, false otherwise
 function alerts.new_release(entity_info, type_info)
-  when = when or os.time()
+  local now = os.time()
   local granularity_sec = type_info.alert_granularity and type_info.alert_granularity.granularity_seconds or 0
   local granularity_id = type_info.alert_granularity and type_info.alert_granularity.granularity_id or nil
+  local subtype = type_info.alert_subtype or ""
+  local alert_key_name = get_alert_triggered_key(type_info)
+  local released = nil
 
-  if(granularity_id ~= nil) then
-    local released = true
-    local alert_key_name = get_alert_triggered_key(type_info)
+  if((host.releaseTriggeredAlert) and (entity_info.alert_entity.entity_id == alertEntity("host"))) then
+    released = host.releaseTriggeredAlert(alert_key_name, granularity_id)
+  elseif((interface.releaseTriggeredAlert) and (entity_info.alert_entity.entity_id == alertEntity("interface"))) then
+    released = interface.releaseTriggeredAlert(alert_key_name, granularity_id)
+  elseif((network.releaseTriggeredAlert) and (entity_info.alert_entity.entity_id == alertEntity("network"))) then
+    released = network.releaseTriggeredAlert(alert_key_name, granularity_id)
+  else
+    alertErrorTraceback("Unsupported entity" .. entity_info.alert_entity.entity_id)
+    return(false)
+  end
 
-    if((host.releaseTriggeredAlert) and (entity_info.alert_entity.entity_id == alertEntity("host"))) then
-      triggered = host.releaseTriggeredAlert(alert_key_name, granularity_id)
-    elseif((interface.releaseTriggeredAlert) and (entity_info.alert_entity.entity_id == alertEntity("interface"))) then
-      triggered = interface.releaseTriggeredAlert(alert_key_name, granularity_id)
-    elseif((network.releaseTriggeredAlert) and (entity_info.alert_entity.entity_id == alertEntity("network"))) then
-      triggered = network.releaseTriggeredAlert(alert_key_name, granularity_id)
-    end
-
-    if(not released) then
-      if(do_trace) then print("[DON'T Release alert (already not triggered?) @ "..granularity_sec.."] "..
-        entity_info.alert_entity_val .."@"..type_info.alert_type.i18n_title.."\n") end
-      return(false)
-    end
+  if(released == nil) then
+    if(do_trace) then print("[DON'T Release alert (already not triggered?) @ "..granularity_sec.."] "..
+      entity_info.alert_entity_val .."@"..type_info.alert_type.i18n_title..":".. subtype .. "\n") end
+    return(false)
   end
 
   local alert_event = {
@@ -377,8 +370,10 @@ function alerts.new_release(entity_info, type_info)
     entity_value = entity_info.alert_entity_val,
     type = type_info.alert_type.alert_id,
     severity = type_info.alert_type.severity.severity_id,
-    subtype = type_info.alert_subtype or "",
-    tstamp = when,
+    subtype = subtype,
+    tstamp = released.alert_tstamp,
+    tstamp_end = released.alert_tstamp_end,
+    message = released.alert_json,
     action = "release",
   }
 
@@ -392,6 +387,7 @@ end
 function alerts.hostAlertEntity(hostip, hostvlan)
   return {
     alert_entity = alert_consts.alert_entities.host,
+    -- NOTE: keep in sync with C (Alertable::setEntityValue)
     alert_entity_val = hostinfo2hostkey({ip = hostip, vlan = hostvlan}, nil, true)
   }
 end
@@ -401,6 +397,7 @@ end
 function alerts.interfaceAlertEntity(ifid)
   return {
     alert_entity = alert_consts.alert_entities.interface,
+    -- NOTE: keep in sync with C (Alertable::setEntityValue)
     alert_entity_val = string.format("iface_%d", ifid)
   }
 end
@@ -410,6 +407,7 @@ end
 function alerts.networkAlertEntity(network_cidr)
   return {
     alert_entity = alert_consts.alert_entities.network,
+    -- NOTE: keep in sync with C (Alertable::setEntityValue)
     alert_entity_val = network_cidr
   }
 end

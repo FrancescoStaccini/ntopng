@@ -23,7 +23,8 @@
 
 /* *************************************** */
 
-Host::Host(NetworkInterface *_iface, char *ipAddress, u_int16_t _vlanId) : GenericHashEntry(_iface) {
+Host::Host(NetworkInterface *_iface, char *ipAddress, u_int16_t _vlanId) : GenericHashEntry(_iface),
+      AlertableEntity(alert_entity_host) {
   ip.set(ipAddress);
   initialize(NULL, _vlanId, true);
 }
@@ -31,7 +32,7 @@ Host::Host(NetworkInterface *_iface, char *ipAddress, u_int16_t _vlanId) : Gener
 /* *************************************** */
 
 Host::Host(NetworkInterface *_iface, Mac *_mac,
-	   u_int16_t _vlanId, IpAddress *_ip) : GenericHashEntry(_iface) {
+	   u_int16_t _vlanId, IpAddress *_ip) : GenericHashEntry(_iface), AlertableEntity(alert_entity_host) {
   ip.set(_ip);
 
 #ifdef BROADCAST_DEBUG
@@ -47,7 +48,8 @@ Host::Host(NetworkInterface *_iface, Mac *_mac,
 /* *************************************** */
 
 Host::~Host() {
-  if(num_uses > 0)
+  if(num_uses > 0 && (!iface->isView()
+		      || !ntop->getGlobals()->isShutdown() /* View hosts are not in sync with viewed flows so during shutdown it can be normal */))
     ntop->getTrace()->traceEvent(TRACE_WARNING, "Internal error: num_uses=%u", num_uses);
 
   // ntop->getTrace()->traceEvent(TRACE_NORMAL, "Deleting %s (%s)", k, localHost ? "local": "remote");
@@ -132,6 +134,10 @@ void Host::set_host_label(char *label_name, bool ignoreIfPresent) {
 /* *************************************** */
 
 void Host::initialize(Mac *_mac, u_int16_t _vlanId, bool init_all) {
+  char buf[64];
+
+  idle_mark = false;
+
   stats = NULL; /* it will be instantiated by specialized classes */
   stats_shadow = NULL;
   data_delete_requested = false, stats_reset_requested = false;
@@ -196,6 +202,7 @@ void Host::initialize(Mac *_mac, u_int16_t _vlanId, bool init_all) {
 
   reloadHideFromTop();
   reloadDhcpHost();
+  setEntityValue(get_hostkey(buf, sizeof(buf), true));
 
   is_in_broadcast_domain = iface->isLocalBroadcastDomainHost(this, true /* Inline call */);
 }
@@ -618,7 +625,7 @@ char * Host::get_os(char * const buf, ssize_t buf_len) {
 
 /* ***************************************** */
 
-bool Host::idle() {
+bool Host::isReadyToBeMarkedAsIdle() {
   if((num_uses > 0) || (!iface->is_purge_idle_interface()))
     return(false);
 
@@ -1133,7 +1140,27 @@ bool Host::statsResetRequested() {
 
 /* *************************************** */
 
-void Host::updateStats(struct timeval *tv) {
+void Host::updateStats(update_hosts_stats_user_data_t *update_hosts_stats_user_data) {
+  struct timeval *tv = update_hosts_stats_user_data->tv;
+
+  if(isReadyToBeMarkedAsIdle()) {
+    set_idle(tv->tv_sec);
+
+    if(getNumTriggeredAlerts()
+       && (update_hosts_stats_user_data->acle
+	   || (update_hosts_stats_user_data->acle = new (std::nothrow) AlertCheckLuaEngine(alert_entity_host, minute_script /* doesn't matter */, iface)))
+       ) {
+      AlertCheckLuaEngine *acle = update_hosts_stats_user_data->acle;
+      lua_State *L = acle->getState();
+      acle->setEntity(this);
+
+      lua_getglobal(L, "idleWithTriggeredAlerts"); /* Called function */
+
+      if(lua_pcall(L, 0 /* 0 arguments */, 0 /* 0 results */, 0)) /* Call the function now */
+	ntop->getTrace()->traceEvent(TRACE_WARNING, "Script failure [%s]", lua_tostring(L, -1));
+    }
+  }
+
   checkDataReset();
   checkStatsReset();
   checkBroadcastDomain();

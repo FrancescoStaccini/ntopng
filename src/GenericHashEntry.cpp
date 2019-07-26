@@ -24,8 +24,9 @@
 /* ***************************************** */
 
 GenericHashEntry::GenericHashEntry(NetworkInterface *_iface) {
-  hash_next = NULL, iface = _iface, first_seen = last_seen = 0, 
-    will_be_purged = false, num_uses = 0;
+  hash_next = NULL, iface = _iface, first_seen = last_seen = 0, num_uses = 0;
+
+  hash_entry_state = hash_entry_state_active;
   
   if(iface && iface->getTimeLastPktRcvd() > 0)
     first_seen = last_seen = iface->getTimeLastPktRcvd();
@@ -57,15 +58,23 @@ void GenericHashEntry::updateSeen() {
 
 /* ***************************************** */
 
+HashEntryState GenericHashEntry::get_state() const {
+  if(iface && !iface->isRunning()) /* When the interface is no longer running it is safe to assume the entry is idle */
+    return hash_entry_state_idle;
+
+  return hash_entry_state;
+};
+
+/* ***************************************** */
+
 bool GenericHashEntry::idle() {
-  return(true); // Virtual
-}
+  return get_state() != hash_entry_state_active;
+};
 
 /* ***************************************** */
 
 bool GenericHashEntry::isIdle(u_int max_idleness) {
-  return(will_be_purged 
-	 || (((u_int)(iface->getTimeLastPktRcvd()) > (last_seen+max_idleness)) ? true : false));
+  return((((u_int)(iface->getTimeLastPktRcvd()) > (last_seen + max_idleness)) ? true : false));
 }
 
 /* ***************************************** */
@@ -74,7 +83,9 @@ void GenericHashEntry::deserialize(json_object *o) {
   json_object *obj;
 
   if(json_object_object_get_ex(o, "seen.first", &obj)) first_seen = json_object_get_int64(obj);
-  if(json_object_object_get_ex(o, "seen.last", &obj))  last_seen  = json_object_get_int64(obj);
+
+  /* NOTE: do not deserialize the last_seen, as an old timestamp will
+   * make this (fresh) entry idle(). */
 }
 
 /* ***************************************** */

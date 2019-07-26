@@ -500,6 +500,7 @@ function getTabParameters(_get, what)
       opts.alert_severity = nil
    end
    if not isEmptyString(what) then opts.status = what end
+   opts.ifid = interface.getId()
    return opts
 end
 
@@ -518,6 +519,24 @@ function getUnpagedAlertOptions(options)
    end
 
    return res
+end
+
+-- #################################
+
+local function checkDisableAlerts()
+  if(_POST["action"] == "disable_alert") then
+    local entity = _POST["entity"]
+    local entity_val = _POST["entity_val"]
+    local alert_type = _POST["alert_type"]
+
+    alerts.disableEntityAlert(interface.getId(), entity, entity_val, alert_type)
+  elseif(_POST["action"] == "enable_alert") then
+    local entity = _POST["entity"]
+    local entity_val = _POST["entity_val"]
+    local alert_type = _POST["alert_type"]
+
+    alerts.enableEntityAlert(interface.getId(), entity, entity_val, alert_type)
+  end
 end
 
 -- #################################
@@ -549,6 +568,8 @@ function checkDeleteStoredAlerts()
          _GET["alert_type"] = nil
       end
    end
+
+   checkDisableAlerts()
 end
 
 -- #################################
@@ -978,8 +999,131 @@ local global_redis_thresholds_key = "thresholds"
 
 -- #################################
 
+local function printConfigTab(entity_type, entity_value, page_name, page_params, alt_name, options)
+   local trigger_alerts = true
+   local ifid = interface.getId()
+   local trigger_alerts_checked
+   local cur_bitmap
+   local host_bitmap_key
+
+   if(entity_type == "host") then
+      host_bitmap_key = string.format("ntopng.prefs.alerts.ifid_%d.disabled_status.host_%s", ifid, entity_value)
+      cur_bitmap = tonumber(ntop.getPref(host_bitmap_key)) or 0
+   end
+
+   if _SERVER["REQUEST_METHOD"] == "POST" then
+      if _POST["trigger_alerts"] ~= "1" then
+         trigger_alerts = false
+      else
+         trigger_alerts = true
+      end
+
+      ntop.setHashCache(get_alerts_suppressed_hash_name(ifid), entity_value, tostring(trigger_alerts))
+      interface.refreshHostsAlertsConfiguration(host_ip, host_vlan)
+
+      if(entity_type == "host") then
+         local bitmap = 0
+
+         if not isEmptyString(_POST["disabled_status"]) then
+           local status_selection = split(_POST["disabled_status"], ",") or { _POST["disabled_status"] }
+
+           for _, status in pairs(status_selection) do
+             bitmap = ntop.bitmapSet(bitmap, tonumber(status))
+           end
+         end
+
+         if(bitmap ~= cur_bitmap) then
+           ntop.setPref(host_bitmap_key, string.format("%u", bitmap))
+           cur_bitmap = bitmap
+           interface.reloadHostDisableFlowAlertTypes(entity_value)
+         end
+      end
+   else
+      trigger_alerts = toboolean(ntop.getHashCache(get_alerts_suppressed_hash_name(ifid), entity_value))
+   end
+
+   if trigger_alerts == false then
+      trigger_alerts_checked = ""
+   else
+      trigger_alerts = true
+      trigger_alerts_checked = "checked"
+   end
+
+  print[[
+   <br>
+   <form id="alerts-config" class="form-inline" method="post">
+   <input name="csrf" type="hidden" value="]] print(ntop.getRandomCSRFValue()) print[[" />
+   <table class="table table-bordered table-striped">]]
+  print[[<tr>
+         <th width="25%">]] print(i18n("device_protocols.alert")) print[[</th>
+         <td>
+               <input type="checkbox" name="trigger_alerts" value="1" ]] print(trigger_alerts_checked) print[[>
+                  <i class="fa fa-exclamation-triangle fa-lg"></i>
+                  ]] print(i18n("show_alerts.trigger_alert_descr")) print[[
+               </input>
+         </td>
+      </tr>]]
+
+   if(entity_type == "host") then
+      print[[<tr>
+         <td width="30%">
+           <b>]] print(i18n("host_details.status_ignore")) print[[</b> <i class="fa fa-info-circle" title="]] print(i18n("host_details.disabled_flow_status_help")) print[["></i>
+         </td>
+         <td>
+           <input id="status_trigger_alert" name="disabled_status" type="hidden" />
+           <select onchange="convertMultiSelect()" id="status_trigger_alert_select" multiple class="form-control" style="width:40em; height:10em; display:inline;">]]
+
+      for status_id, label in pairsByKeys(getFlowStatusTypes()) do
+        print[[<option value="]] print(string.format("%d", status_id))
+        if ntop.bitmapIsSet(cur_bitmap, tonumber(status_id)) then
+          print[[" selected="selected]]
+        end
+        print[[">]]
+        print(label)
+        print[[</option>]]
+      end
+
+      print[[</select><div style="margin-top:1em;"><i>]] print(i18n("host_details.multiple_selection")) print[[</i></div>
+         <button type="button" class="btn btn-default" style="margin-top:1em;" onclick="resetMultiSelect()">]] print(i18n("reset")) print[[</button>
+         </td>
+      </tr>]]
+   end
+   print[[</table>
+   <button class="btn btn-primary" style="float:right; margin-right:1em;" disabled="disabled" type="submit">]] print(i18n("save_configuration")) print[[</button>
+   </form>
+   <br><br>
+   <script>
+    function convertMultiSelect() {
+      var values = [];
+
+      $("#status_trigger_alert_select option:selected").each(function(idx, item) {
+        values.push($(item).val());
+      });
+
+      $("#status_trigger_alert").val(values.join(","));
+      $("#status_trigger_alert").trigger("change");
+    }
+
+    function resetMultiSelect() {
+       $("#status_trigger_alert_select option:selected").each(function(idx, item) {
+         item.selected = "";
+       });
+
+       convertMultiSelect();
+    }
+
+    /* Run after page load */
+    $(convertMultiSelect);
+
+    aysHandleForm("#alerts-config");
+   </script>]]
+end
+
+-- #################################
+
 function drawAlertSourceSettings(entity_type, alert_source, delete_button_msg, delete_confirm_msg, page_name, page_params, alt_name, show_entity, options)
    local num_engaged_alerts, num_past_alerts, num_flow_alerts = 0,0,0
+   local has_disabled_alerts = alerts.hasEntitiesWithAlertsDisabled(interface.getId())
    local tab = _GET["tab"]
    local have_nedge = ntop.isnEdge()
    options = options or {}
@@ -1019,7 +1163,8 @@ function drawAlertSourceSettings(entity_type, alert_source, delete_button_msg, d
       --~ num_past_alerts = getNumAlerts("historical", getTabParameters(_GET, "historical"))
       --~ num_flow_alerts = getNumAlerts("historical-flows", getTabParameters(_GET, "historical-flows"))
 
-      if num_past_alerts > 0 or num_engaged_alerts > 0 or num_flow_alerts > 0 then
+      --~ if num_past_alerts > 0 or num_engaged_alerts > 0 or num_flow_alerts > 0 then
+      if num_engaged_alerts > 0 then
          if(tab == nil) then
             -- if no tab is selected and there are alerts, we show them by default
             tab = "alert_list"
@@ -1033,9 +1178,9 @@ function drawAlertSourceSettings(entity_type, alert_source, delete_button_msg, d
    end
 
    -- Default tab
-   if(tab == nil) then tab = "min" end
+   if(tab == nil) then tab = "config" end
 
-   if(tab ~= "alert_list") then
+   if((tab ~= "alert_list") and (tab ~= "config")) then
       local granularity_label = alertEngineLabel(alertEngine(tab))
 
       print(
@@ -1063,6 +1208,8 @@ function drawAlertSourceSettings(entity_type, alert_source, delete_button_msg, d
       )
    end
 
+   printTab("config", '<i class="fa fa-cog" aria-hidden="true"></i> ' .. i18n("traffic_recording.settings"), tab)
+
    for k, granularity in pairsByField(alert_consts.alerts_granularities, "granularity_id", asc) do
       local l = i18n(granularity.i18n_title)
       local resolution = granularity.granularity_seconds
@@ -1082,7 +1229,9 @@ function drawAlertSourceSettings(entity_type, alert_source, delete_button_msg, d
    print('</ul>')
 
    if((show_entity) and (tab == "alert_list")) then
-      drawAlertTables(num_past_alerts, num_engaged_alerts, num_flow_alerts, _GET, true, nil, { engaged_only = true })
+      drawAlertTables(num_past_alerts, num_engaged_alerts, num_flow_alerts, has_disabled_alerts, _GET, true, nil, { engaged_only = true })
+   elseif(tab == "config") then
+      printConfigTab(entity_type, alert_source, page_name, page_params, alt_name, options)
    else
       -- Before doing anything we need to check if we need to save values
 
@@ -1223,12 +1372,24 @@ function drawAlertSourceSettings(entity_type, alert_source, delete_button_msg, d
 	 end
       end
 
+      local label
+
+      if entity_type == "host" then
+        if options.remote_host then
+          label = i18n("remote_hosts")
+        else
+          label = i18n("alerts_thresholds_config.active_local_hosts")
+        end
+      else
+        label = firstToUpper(entity_type) .. "s"
+      end
 
       print [[
        </ul>
        <form method="post">
+       <br>
        <table id="user" class="table table-bordered table-striped" style="clear: both"> <tbody>
-       <tr><th>]] print(i18n("alerts_thresholds_config.threshold_type")) print[[</th><th width=30%>]] print(i18n("alerts_thresholds_config.thresholds_single_source", {source=firstToUpper(entity_type),alt_name=ternary(alt_name ~= nil, alt_name, alert_source)})) print[[</th><th width=30%>]] print(i18n("alerts_thresholds_config.common_thresholds_local_sources", {source=firstToUpper(entity_type)}))
+       <tr><th>]] print(i18n("alerts_thresholds_config.threshold_type")) print[[</th><th width=30%>]] print(i18n("alerts_thresholds_config.thresholds_single_source", {source=firstToUpper(entity_type),alt_name=ternary(alt_name ~= nil, alt_name, alert_source)})) print[[</th><th width=30%>]] print(i18n("alerts_thresholds_config.common_thresholds_local_sources", {source=label}))
       print[[</th></tr>]]
       print('<input id="csrf" name="csrf" type="hidden" value="'..ntop.getRandomCSRFValue()..'" />\n')
 
@@ -1454,7 +1615,60 @@ end
 
 -- #################################
 
-function drawAlertTables(num_past_alerts, num_engaged_alerts, num_flow_alerts, get_params, hide_extended_title, alt_nav_tabs, options)
+local function printDisabledAlerts(ifid)
+  local entitites = alerts.listEntitiesWithAlertsDisabled(ifid)
+
+  print[[
+  <div id="#table-disabled-alerts"></div>
+
+  <script>
+  $("#table-disabled-alerts").datatable({
+    url: "]] print(ntop.getHttpPrefix()) print [[/lua/get_disabled_alerts.lua",
+    showPagination: true,
+    title: "]] print(i18n("show_alerts.disabled_alerts")) print[[",
+      columns: [
+	 {
+	    title: "]]print(i18n("show_alerts.alarmable"))print[[",
+	    field: "column_entity_formatted",
+            sortable: true,
+	    css: {
+	       textAlign: 'center',
+          whiteSpace: 'nowrap',
+          width: '35%',
+	    }
+	 },{
+	    title: "]]print(i18n("show_alerts.alert_type"))print[[",
+	    field: "column_type",
+            sortable: true,
+	    css: {
+	       textAlign: 'center',
+          whiteSpace: 'nowrap',
+	    }
+	 },{
+	    title: "]]print(i18n("show_alerts.num_ignored_alerts"))print[[",
+	    field: "column_count",
+            sortable: true,
+	    css: {
+	       textAlign: 'center',
+          whiteSpace: 'nowrap',
+	    }
+	 },{
+	    title: "]]print(i18n("show_alerts.alert_actions")) print[[",
+	    css: {
+	       textAlign: 'center',
+	    }
+	 }], tableCallback: function() {
+        datatableForEachRow("#table-disabled-alerts", function(row_id) {
+           datatableAddActionButtonCallback.bind(this)(4, "prepareToggleAlertsDialog('table-disabled-alerts',"+ row_id +"); $('#enable_alert_type').modal('show');", "]] print(i18n("show_alerts.enable_alerts")) print[[");
+        })
+       }
+  });
+  </script>]]
+end
+
+-- #################################
+
+function drawAlertTables(num_past_alerts, num_engaged_alerts, num_flow_alerts, has_disabled_alerts, get_params, hide_extended_title, alt_nav_tabs, options)
    local alert_items = {}
    local url_params = {}
    local options = options or {}
@@ -1467,6 +1681,37 @@ function drawAlertTables(num_past_alerts, num_engaged_alerts, num_flow_alerts, g
 			 title   = i18n("show_alerts.delete_alert"),
 			 message = i18n("show_alerts.confirm_delete_alert").."?",
 			 confirm = i18n("delete"),
+			 confirm_button = "btn-danger",
+		      }
+      })
+   )
+
+   print(
+      template.gen("modal_confirm_dialog.html", {
+		      dialog={
+			 id      = "enable_alert_type",
+			 action  = "toggleAlert(false)",
+			 title   = i18n("show_alerts.enable_alerts_title"),
+			 message = i18n("show_alerts.enable_alerts_message", {
+        type = "<span class='toggle-alert-id'></span>",
+        entity_value = "<span class='toggle-alert-entity-value'></span>"
+       }),
+			 confirm = i18n("show_alerts.enable_alerts"),
+		      }
+      })
+   )
+
+   print(
+      template.gen("modal_confirm_dialog.html", {
+		      dialog={
+			 id      = "disable_alert_type",
+			 action  = "toggleAlert(true)",
+			 title   = i18n("show_alerts.disable_alerts_title"),
+			 message = i18n("show_alerts.disable_alerts_message", {
+        type = "<span class='toggle-alert-id'></span>",
+        entity_value = "<span class='toggle-alert-entity-value'></span>"
+       }),
+			 confirm = i18n("show_alerts.disable_alerts"),
 		      }
       })
    )
@@ -1491,7 +1736,7 @@ function drawAlertTables(num_past_alerts, num_engaged_alerts, num_flow_alerts, g
         print("<br>")
       end
 	 print[[
-<ul class="nav nav-tabs" role="tablist" id="alert-tabs" class="]] print(ternary(options.engaged_only, 'hidden', '')) print[[">
+<ul class="nav nav-tabs" role="tablist" id="alert-tabs" style="]] print(ternary(options.engaged_only, 'display:none', '')) print[[">
 <!-- will be populated later with javascript -->
 </ul>
 ]]
@@ -1569,6 +1814,41 @@ function getCurrentStatus() {
 
    return val;
 }
+
+function deleteAlertById(alert_id) {
+  var params = {};
+  params.id_to_delete = alert_id;
+  params.status = getCurrentStatus();
+  params.csrf = "]] print(ntop.getRandomCSRFValue()) print[[";
+
+  var form = paramsToForm('<form method="post"></form>', params);
+  form.appendTo('body').submit();
+}
+
+var alert_to_toggle = null;
+
+function prepareToggleAlertsDialog(table_id, idx) {
+  var table_data = $("#" + table_id ).data("datatable").resultset.data;
+  var row = table_data[idx];
+  alert_to_toggle = row;
+
+  $(".toggle-alert-id").html(noHtml(row.column_type).trim());
+  $(".toggle-alert-entity-value").html(noHtml(row.column_entity_formatted).trim())
+}
+
+function toggleAlert(disable) {
+  var row = alert_to_toggle;
+  var params = {
+    "action": disable ? "disable_alert" : "enable_alert",
+    "entity": row.column_entity_id,
+    "entity_val": row.column_entity_val,
+    "alert_type": row.column_type_id,
+    "csrf": "]] print(ntop.getRandomCSRFValue()) print[[",
+  };
+
+  var form = paramsToForm('<form method="post"></form>', params);
+  form.appendTo('body').submit();
+}
 </script>
 ]]
 
@@ -1598,6 +1878,10 @@ function getCurrentStatus() {
 	 status = nil; status_reset = 1
       end
 
+      if has_disabled_alerts then
+        alert_items[#alert_items +1] = {["label"] = i18n("show_alerts.disabled_alerts"), ["div-id"] = "table-disabled-alerts",  ["status"] = "disabled-alerts"}
+      end
+
       for k, t in ipairs(alert_items) do
 	 local clicked = "0"
 	 if((not alt_nav_tabs) and ((k == 1 and status == nil) or (status ~= nil and status == t["status"]))) then
@@ -1609,18 +1893,17 @@ function getCurrentStatus() {
       </div>
 
       <script type="text/javascript">
-         function deleteAlertById(alert_id) {
-            var params = {};
-            params.id_to_delete = alert_id;
-            params.status = getCurrentStatus();
-            params.csrf = "]] print(ntop.getRandomCSRFValue()) print[[";
+      $("#]] print(nav_tab_id) print[[").append('<li class="]] print(ternary(options.engaged_only, 'hidden', '')) print[["><a href="#tab-]] print(t["div-id"]) print[[" clicked="]] print(clicked) print[[" role="tab" data-toggle="tab">]] print(t["label"]) print[[</a></li>')
+      </script>
+   ]]
 
-            var form = paramsToForm('<form method="post"></form>', params);
-            form.appendTo('body').submit();
-         }
+   if t["status"] == "disabled-alerts" then
+     printDisabledAlerts(ifId)
+     goto next_menu_item
+   end
 
-         $("#]] print(nav_tab_id) print[[").append('<li class="]] print(ternary(options.engaged_only, 'hidden', '')) print[["><a href="#tab-]] print(t["div-id"]) print[[" clicked="]] print(clicked) print[[" role="tab" data-toggle="tab">]] print(t["label"]) print[[</a></li>')
-
+   print[[
+      <script type="text/javascript">
          $('a[href="#tab-]] print(t["div-id"]) print[["]').on('shown.bs.tab', function (e) {
          // append the li to the tabs
 
@@ -1759,24 +2042,29 @@ function getCurrentStatus() {
 
     {
 	    title: "]]print(i18n("show_alerts.alert_actions")) print[[",
-       ]]
-	 if t["status"] == "engaged" then
-	    print("hidden: true,")
-	 end
-	 print[[
 	    css: {
 	       textAlign: 'center',
 	    }
 	 }
       ], tableCallback: function() {
-            datatableForEachRow("#]] print(t["div-id"]) print[[", function(row_id) {
+            var table_data = $("#]] print(t["div-id"]) print[[").data("datatable").resultset.data;
+
+            datatableForEachRow("#]] print(t["div-id"]) print[[", function(row_id) {              
                var alert_key = $("td:nth(7)", this).html().split("|");
                var alert_id = alert_key[0];
                var historical_url = alert_key[1];
+               var data = table_data[row_id];
 
-               if (typeof(historical_url) === "string")
+               if(typeof(historical_url) === "string") {
                   datatableAddLinkButtonCallback.bind(this)(9, historical_url, "]] print(i18n("show_alerts.explorer")) print[[");
-               datatableAddDeleteButtonCallback.bind(this)(9, "delete_alert_id ='" + alert_id + "'; $('#delete_alert_dialog').modal('show');", "]] print(i18n('delete')) print[[");
+                  disable_alerts_dialog = "#disable_flows_alerts";
+               } else if(!data.column_alert_disabled)
+                  datatableAddActionButtonCallback.bind(this)(9, "prepareToggleAlertsDialog(']] print(t["div-id"]) print[[',"+ row_id +"); $('#disable_alert_type').modal('show');", "]] print(i18n("show_alerts.disable_alerts")) print[[");
+               else
+                  datatableAddActionButtonCallback.bind(this)(9, "prepareToggleAlertsDialog(']] print(t["div-id"]) print[[',"+ row_id +"); $('#enable_alert_type').modal('show');", "]] print(i18n("show_alerts.enable_alerts")) print[[");
+
+               if(]] print(ternary(t["status"] ~= "engaged", "true", "false")) print[[)
+                 datatableAddDeleteButtonCallback.bind(this)(9, "delete_alert_id ='" + alert_id + "'; $('#delete_alert_dialog').modal('show');", "]] print(i18n('delete')) print[[");
 
                $("form", this).submit(function() {
                   // add "status" parameter to the form
@@ -1812,6 +2100,7 @@ function getCurrentStatus() {
    </script>
 	      ]]
 
+       ::next_menu_item::
       end
 
       local zoom_vals = {
@@ -1958,6 +2247,7 @@ end
 function drawAlerts(options)
    local num_engaged_alerts = getNumAlerts("engaged", getTabParameters(_GET, "engaged"))
    local num_past_alerts = getNumAlerts("historical", getTabParameters(_GET, "historical"))
+   local has_disabled_alerts = alerts_api.hasEntitiesWithAlertsDisabled(interface.getId())
    local num_flow_alerts = 0
 
    if _GET["entity"] == nil then
@@ -1965,6 +2255,7 @@ function drawAlerts(options)
    end
 
    checkDeleteStoredAlerts()
+   checkDisableAlert()
 
    return drawAlertTables(num_past_alerts, num_engaged_alerts, num_flow_alerts, _GET, true, nil, options)
 end
@@ -2045,13 +2336,13 @@ end
 
 function check_networks_alerts(granularity)
    if(granularity == "min") then
-      ntop.checkNetworksAlertsMin()
+      interface.checkNetworksAlertsMin()
    elseif(granularity == "5mins") then
-      ntop.checkNetworksAlerts5Min()
+      interface.checkNetworksAlerts5Min()
    elseif(granularity == "hour") then
-      ntop.checkNetworksAlertsHour()
+      interface.checkNetworksAlertsHour()
    elseif(granularity == "day") then
-      ntop.checkNetworksAlertsDay()
+      interface.checkNetworksAlertsDay()
    else
       traceError(TRACE_ERROR, TRACE_CONSOLE, "Unknown granularity " .. granularity)
    end
@@ -2059,15 +2350,15 @@ end
 
 -- #################################
 
-function check_interface_alerts(granularity)
+local function check_interface_alerts(granularity)
    if(granularity == "min") then
-      interface.checkAlertsMin()
+      interface.checkInterfaceAlertsMin()
    elseif(granularity == "5mins") then
-      interface.checkAlerts5Min()
+      interface.checkInterfaceAlerts5Min()
    elseif(granularity == "hour") then
-      interface.checkAlertsHour()
+      interface.checkInterfaceAlertsHour()
    elseif(granularity == "day") then
-      interface.checkAlertsDay()
+      interface.checkInterfaceAlertsDay()
    else
       traceError(TRACE_ERROR, TRACE_CONSOLE, "Unknown granularity " .. granularity)
    end
@@ -2075,15 +2366,15 @@ end
 
 -- #################################
 
-function check_hosts_alerts(granularity)
+local function check_hosts_alerts(granularity)
    if(granularity == "min") then
-      ntop.checkHostsAlertsMin()
+      interface.checkHostsAlertsMin()
    elseif(granularity == "5mins") then
-      ntop.checkHostsAlerts5Min()
+      interface.checkHostsAlerts5Min()
    elseif(granularity == "hour") then
-      ntop.checkHostsAlertsHour()
+      interface.checkHostsAlertsHour()
    elseif(granularity == "day") then
-      ntop.checkHostsAlertsDay()
+      interface.checkHostsAlertsDay()
    else
       traceError(TRACE_ERROR, TRACE_CONSOLE, "Unknown granularity " .. granularity)
    end
@@ -2181,7 +2472,7 @@ end
 -- Global function
 function check_broadcast_domain_too_large_alerts()
    local alert = alerts:newAlert({
-      entity = "interface",
+      entity = "mac",
       type = "broadcast_domain_too_large",
       severity = "warning",
    })
@@ -2197,7 +2488,7 @@ function check_broadcast_domain_too_large_alerts()
       elems = json.decode(message)
 
       if elems ~= nil then
-	 local entity_value = "iface_"..elems.ifid
+	 local entity_value = elems.src_mac
 
 	 --io.write(elems.ip.." ==> "..message.."[".. elems.ifname .."]\n")
 	 interface.select(elems.ifname)
@@ -2942,7 +3233,7 @@ local function notify_ntopng_status(started)
    end
 
    obj = {
-      entity_type = alertEntity("host"), entity_value="ntopng",
+      entity_type = alertEntity("process"), entity_value="ntopng",
       type = alertType("process_notification"),
       severity = severity,
       message = msg,

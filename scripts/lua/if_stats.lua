@@ -294,7 +294,7 @@ if has_traffic_recording_page then
    print("</a></li>")
 end
 
-if(isAdministrator() and areAlertsEnabled() and not ifstats.isView) then
+if isAdministrator() and areAlertsEnabled() then
    if(page == "alerts") then
       print("\n<li class=\"active\"><a href=\"#\">")
    elseif not is_pcap_dump then
@@ -1092,7 +1092,7 @@ elseif(page == "historical") then
       top_senders = "top:local_senders",
       top_receivers = "top:local_receivers",
       l4_protocols = "iface:l4protos",
-      show_historical = true,
+      show_historical = not ifstats.isViewed,
       timeseries = {
          {schema="iface:flows",                 label=i18n("graphs.active_flows")},
          {schema="iface:hosts",                 label=i18n("graphs.active_hosts")},
@@ -1401,32 +1401,6 @@ elseif(page == "config") then
 	print[[
 	   </td>
 	</tr>]]
-
-   -- Alerts
-   local trigger_alerts = true
-   local trigger_alerts_checked = "checked"
-
-   if _SERVER["REQUEST_METHOD"] == "POST" then
-      if _POST["trigger_alerts"] ~= "1" then
-         trigger_alerts = false
-         trigger_alerts_checked = ""
-      end
-
-      ntop.setHashCache(get_alerts_suppressed_hash_name(getInterfaceId(ifname)), ifname_clean, tostring(trigger_alerts))
-   else
-      trigger_alerts = ntop.getHashCache(get_alerts_suppressed_hash_name(getInterfaceId(ifname)), ifname_clean)
-      if trigger_alerts == "false" then
-         trigger_alerts = false
-         trigger_alerts_checked = ""
-      end
-   end
-
-   print [[<tr>
-         <th>]] print(i18n("if_stats_config.trigger_interface_alerts")) print[[</th>
-         <td>
-            <input name="trigger_alerts" type="checkbox" value="1" ]] print(trigger_alerts_checked) print[[>
-         </td>
-      </tr>]]
 
    -- per-interface RRD generation
    local interface_rrd_creation = true

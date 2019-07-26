@@ -79,6 +79,7 @@ if(debug_hosts) then traceError(TRACE_DEBUG,TRACE_CONSOLE, i18n("host_details.tr
 
 
 local host = interface.getHostInfo(host_info["host"], host_vlan)
+
 local tskey
 
 if _GET["tskey"] then
@@ -124,7 +125,7 @@ if (host ~= nil) then
    end
 end
 
-local only_historical = (host == nil) and (page == "historical")
+local only_historical = (host == nil) and ((page == "historical") or (page == "config"))
 
 if(host == nil) and (not only_historical) then
       -- We need to check if this is an aggregated host
@@ -193,6 +194,10 @@ else
 
    if((host["label"] == nil) or (host["label"] == "")) then
       host["label"] = getHostAltName(host["ip"])
+   end
+
+   if(host["name"] == nil) then
+     host["name"] = host["label"]
    end
 
       print('<div style=\"display:none;\" id=\"host_purged\" class=\"alert alert-danger\"><i class="fa fa-warning fa-lg"></i>&nbsp;'..i18n("details.host_purged")..'</div>')
@@ -371,12 +376,6 @@ if host.systemhost then
 end
 
 if(not(isLoopback(ifname))) then
-   if(page == "talkers") then
-      print("<li class=\"active\"><a href=\"#\">"..i18n("talkers").."</a></li>\n")
-   else
-      print("<li><a href=\""..url.."&page=talkers\">"..i18n("talkers").."</a></li>")
-   end
-
    if(host.has_dropbox_shares == true) then
       local dropbox = require("dropbox_utils")
       local namespaces = dropbox.getHostNamespaces(host.ip)
@@ -399,7 +398,7 @@ if(not(isLoopback(ifname))) then
    end
 end
 
-if (host["ip"] ~= nil) and areAlertsEnabled() and not ifstats.isView then
+if (host["ip"] ~= nil) and areAlertsEnabled() then
    if(page == "alerts") then
       print("\n<li class=\"active\"><a href=\"#\"><i class=\"fa fa-warning fa-lg\"></i></a></li>\n")
    elseif interface.isPcapDumpInterface() == false then
@@ -409,7 +408,7 @@ end
 
 end -- not only_historical
 
-if((page == "historical") or ts_utils.exists("host:traffic", {ifid=ifId, host=tskey})) or hasNindexSupport() then
+if((page == "historical") or ts_utils.exists("host:traffic", {ifid = ifId, host = tskey})) or hasNindexSupport() then
    if(page == "historical") then
      print("\n<li class=\"active\"><a href=\"#\"><i class='fa fa-area-chart fa-lg'></i></a></li>\n")
    else
@@ -438,14 +437,15 @@ if ntop.isEnterprise() and ifstats.inline and host_pool_id ~= host_pools_utils.D
   end
 end
 
-if ((isAdministrator()) and (host["ip"] ~= nil)) then
+end -- not only_historical
+
+if(isAdministrator()) then
    if(page == "config") then
       print("\n<li class=\"active\"><a href=\"#\"><i class=\"fa fa-cog fa-lg\"></i></a></li>\n")
    elseif interface.isPcapDumpInterface() == false then
       print("\n<li><a href=\""..url.."&page=config\"><i class=\"fa fa-cog fa-lg\"></i></a></li>")
    end
 end
-end -- not only_historical
 
 print [[
 <li><a href="javascript:history.go(-1)"><i class='fa fa-reply'></i></a></li>
@@ -525,7 +525,7 @@ if((page == "overview") or (page == nil)) then
       end
    end
 
-   if(ifstats.vlan and (host["vlan"] ~= nil)) then
+   if host["vlan"] and host["vlan"] > 0 then
       print("<tr><th>")
       print(i18n("details.vlan_id"))
       print("</th><td colspan=2><A HREF="..ntop.getHttpPrefix().."/lua/hosts_stats.lua?vlan="..host["vlan"]..">"..host["vlan"].."</A></td></tr>\n")
@@ -1720,11 +1720,6 @@ elseif(page == "dropbox") then
    end
 
    print("</ul>")
-elseif(page == "talkers") then
-print("<center>")
-print('<div class="row">')
-dofile(dirs.installdir .. "/scripts/lua/inc/sankey.lua")
-print("</div></center></br>")
 elseif(page == "geomap") then
 print("<center>")
 
@@ -1865,28 +1860,15 @@ elseif (page == "quotas" and ntop.isEnterprise() and host_pool_id ~= host_pools_
    host_pools_utils.printQuotas(host_pool_id, host, page_params)
 
 elseif (page == "config") then
-   local trigger_alerts = true
-
    if(not isAdministrator()) then
       return
    end
 
    local top_hiddens = ntop.getMembersCache(getHideFromTopSet(ifId) or {})
    local is_top_hidden = swapKeysValues(top_hiddens)[hostkey_compact] ~= nil
+   local host_key = hostinfo2hostkey(host_info, nil, true --[[show vlan]])
 
    if _SERVER["REQUEST_METHOD"] == "POST" then
-
-         if _POST["trigger_alerts"] ~= "1" then
-            trigger_alerts = false
-         else
-            trigger_alerts = true
-         end
-
-         ntop.setHashCache(get_alerts_suppressed_hash_name(getInterfaceId(ifname)), hostkey, tostring(trigger_alerts))
-
-         interface.select(ifname)
-         interface.refreshHostsAlertsConfiguration(host_ip, host_vlan)
-
       if(ifstats.inline and (host.localhost or host.systemhost)) then
          local drop_host_traffic = _POST["drop_host_traffic"]
          local host_key = hostinfo2hostkey(host_info)
@@ -1916,18 +1898,6 @@ elseif (page == "config") then
       end
    end
 
-   local trigger_alerts_checked
-
-      trigger_alerts = ntop.getHashCache(get_alerts_suppressed_hash_name(getInterfaceId(ifname)), hostkey)
-
-      if trigger_alerts == "false" then
-         trigger_alerts = false
-         trigger_alerts_checked = ""
-      else
-         trigger_alerts = true
-         trigger_alerts_checked = "checked"
-      end
-
    print[[
    <form id="host_config" class="form-inline" method="post">
    <input name="csrf" type="hidden" value="]] print(ntop.getRandomCSRFValue()) print[[" />
@@ -1954,14 +1924,6 @@ elseif (page == "config") then
          <td>
                <input type="checkbox" name="top_hidden" value="1" ]] print(top_hidden_checked) print[[>
                   ]] print(i18n("host_config.hide_host_from_top_descr", {host=host["name"]})) print[[
-               </input>
-         </td>
-      </tr><tr>
-         <th>]] print(i18n("host_config.trigger_host_alerts")) print[[</th>
-         <td>
-               <input type="checkbox" name="trigger_alerts" value="1" ]] print(trigger_alerts_checked) print[[>
-                  <i class="fa fa-exclamation-triangle fa-lg"></i>
-                  ]] print(i18n("host_config.trigger_alerts_for_host",{host=host["name"]})) print[[
                </input>
          </td>
       </tr>]]
@@ -2077,7 +2039,7 @@ elseif(page == "traffic_report") then
    end
 end
 
-if(page ~= "historical") and (host ~= nil) then
+if(not only_historical) and (host ~= nil) then
    print[[<script type="text/javascript" src="]] print(ntop.getHttpPrefix()) print [[/js/jquery.tablesorter.js"></script>]]
 
    print [[

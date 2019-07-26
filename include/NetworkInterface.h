@@ -79,6 +79,7 @@ class NetworkInterface : public AlertableEntity {
   u_int32_t num_dropped_alerts;
   bool has_stored_alerts;
 
+  bool is_view;   /* Whether this is a view interface */
   bool is_viewed; /* Whether this interface is 'viewed' by a ViewInterface */
 
   /* Disaggregations */
@@ -145,7 +146,7 @@ class NetworkInterface : public AlertableEntity {
   TimeseriesExporter *tsExporter;
   TimeseriesRing *ts_ring;
 
-  u_int nextFlowAggregation;
+  time_t lastFlowAggregation;
   TcpFlowStats tcpFlowStats;
   TcpPacketStats tcpPacketStats;
 
@@ -191,7 +192,7 @@ class NetworkInterface : public AlertableEntity {
   InterfaceStatsHash *interfaceStats;
   dhcp_range* dhcp_ranges, *dhcp_ranges_shadow;
 
-  PROFILING_DECLARE(24);
+  PROFILING_DECLARE(32);
 
   void init();
   void deleteDataStructures();
@@ -329,7 +330,7 @@ class NetworkInterface : public AlertableEntity {
   inline char* get_description() const         { return(ifDescription);                                };
   inline int  get_id() const                   { return(id);                                           };
   inline bool get_inline_interface()           { return inline_interface;  }
-  inline bool hasSeenVlanTaggedPackets() const { return(has_vlan_packets); }
+  virtual bool hasSeenVlanTaggedPackets() const{ return(has_vlan_packets); }
   inline void setSeenVlanTaggedPackets()       { has_vlan_packets = true;  }
   inline bool hasSeenEBPFEvents() const        { return(has_ebpf_events);  }
   inline void setSeenEBPFEvents()              { has_ebpf_events = true;   }
@@ -346,6 +347,8 @@ class NetworkInterface : public AlertableEntity {
   int dumpFlow(time_t when, Flow *f);
 #ifdef NTOPNG_PRO
   void dumpAggregatedFlow(time_t when, AggregatedFlow *f, bool is_top_aggregated_flow, bool is_top_cli, bool is_top_srv);
+  void dumpAggregatedFlows(const struct timeval *tv);
+  bool dumpAggregatedFlowsReady(const struct timeval *tv) const;
   void flushFlowDump();
 #endif
   void checkPointHostTalker(lua_State* vm, char *host_ip, u_int16_t vlan_id);
@@ -644,8 +647,8 @@ class NetworkInterface : public AlertableEntity {
   bool isHiddenFromTop(Host *host);
   virtual bool areTrafficDirectionsSupported() { return(false); };
 
-  virtual bool isView()   const { return false;     };
-  virtual bool isViewed() const { return is_viewed; };
+  bool isView()   const { return is_view;   };
+  bool isViewed() const { return is_viewed; };
   inline  void setViewed()      { is_viewed = true; };
 
   bool getMacInfo(lua_State* vm, char *mac);
@@ -668,7 +671,7 @@ class NetworkInterface : public AlertableEntity {
   virtual void addToNotifiedInformativeCaptivePortal(u_int32_t client_ip) { ; };
   virtual void addIPToLRUMatches(u_int32_t client_ip, u_int16_t user_pool_id,
 				 char *label, int32_t lifetime_sec) { ; };
-  void aggregatePartialFlow(Flow *flow);
+  void aggregatePartialFlow(const struct timeval *tv, Flow *flow);
 #endif
 
   inline char* mdnsResolveIPv4(u_int32_t ipv4addr /* network byte order */,
@@ -722,7 +725,6 @@ class NetworkInterface : public AlertableEntity {
   inline uint32_t getMaxSpeed() const        { return(ifSpeed);     }
   inline bool isLoopback() const             { return(is_loopback); }
 
-  virtual void sendTermination()             { ; }
   virtual bool read_from_pcap_dump()         { return(false); };
   virtual void updateDirectionStats()        { ; }
   void makeTsPoint(NetworkInterfaceTsPoint *pt);
@@ -756,6 +758,7 @@ class NetworkInterface : public AlertableEntity {
 
   virtual bool reproducePcapOriginalSpeed() const         { return(false); }
   u_int32_t getNumEngagedAlerts();
+  void releaseAllEngagedAlerts();
 };
 
 #endif /* _NETWORK_INTERFACE_H_ */

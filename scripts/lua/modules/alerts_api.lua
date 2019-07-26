@@ -11,7 +11,7 @@ local alert_consts = require("alert_consts")
 local os_utils = require("os_utils")
 local do_trace = false
 
-local alerts = {}
+local alerts_api = {}
 
 -- NOTE: sqlite can handle about 10-50 alerts/sec
 local MAX_NUM_ENQUEUED_ALERT_PER_INTERFACE = 256
@@ -39,7 +39,7 @@ local function makeAlertId(alert_type, subtype, periodicity, alert_entity)
   return(string.format("%s_%s_%s_%s", alert_type, subtype or "", periodicity or "", alert_entity))
 end
 
-function alerts:getId()
+function alerts_api:getId()
   return(makeAlertId(self.type_id, self.subtype, self.periodicity, self.entity_type_id))
 end
 
@@ -52,12 +52,71 @@ end
 
 -- ##############################################
 
+local function getEntityDisabledAlertsCountersKey(ifid, entity, entity_val)
+  return(string.format("ntopng.cache.alerts.ifid_%d.%d_%s", ifid, entity, entity_val))
+end
+
+local function incDisabledAlertsCount(ifid, granularity_id, entity, entity_val, alert_type)
+  local key = getEntityDisabledAlertsCountersKey(ifid, entity, entity_val)
+
+  -- NOTE: using separate keys based on granularity to avoid concurrency issues
+  counter_key = string.format("%d_%d", granularity_id, alert_type)
+
+  local val = tonumber(ntop.getHashCache(key, counter_key)) or 0
+  val = val + 1
+  ntop.setHashCache(key, counter_key, string.format("%d", val))
+  return(val)
+end
+
+-- ##############################################
+
+local function deleteEntityDisabledAlertsCountersKey(ifid, entity, entity_val, target_type)
+  local key = getEntityDisabledAlertsCountersKey(ifid, entity, entity_val)
+  local entity_counters = ntop.getHashAllCache(key) or {}
+
+  for what, counter in pairs(entity_counters) do
+    local parts = string.split(what, "_")
+
+    if((parts) and (#parts == 2)) then
+      local alert_type = tonumber(parts[2])
+
+      if(alert_type == target_type) then
+        ntop.delHashCache(key, what)
+      end
+    end
+  end
+end
+
+-- ##############################################
+
+function alerts_api.getEntityDisabledAlertsCounters(ifid, entity, entity_val)
+  local key = getEntityDisabledAlertsCountersKey(ifid, entity, entity_val)
+  local entity_counters = ntop.getHashAllCache(key) or {}
+  local by_alert_type = {}
+
+  for what, counter in pairs(entity_counters) do
+    local parts = string.split(what, "_")
+
+    if((parts) and (#parts == 2)) then
+      local granularity_id = tonumber(parts[1])
+      local alert_type = tonumber(parts[2])
+
+      by_alert_type[alert_type] = by_alert_type[alert_type] or 0
+      by_alert_type[alert_type] = by_alert_type[alert_type] + counter
+    end
+  end
+
+  return(by_alert_type)
+end
+
+-- ##############################################
+
 --! @brief Creates an alert object
 --! @param metadata the information about the alert type and severity
 --! @return an alert object on success, nil on error
-function alerts:newAlert(metadata)
+function alerts_api:newAlert(metadata)
   if(metadata == nil) then
-    alertErrorTraceback("alerts:newAlert() missing argument")
+    alertErrorTraceback("alerts_api:newAlert() missing argument")
     return(nil)
   end
 
@@ -96,24 +155,35 @@ end
 
 -- ##############################################
 
--- TODO remove
+-- TODO change in "store"
 --! @brief Triggers a new alert or refreshes an existing one (if already engaged)
 --! @param entity_value the string representing the entity of the alert (e.g. "192.168.1.1")
 --! @param alert_message the message (string) or json (table) to store
 --! @param when (optional) the time when the trigger event occurs
 --! @return true on success, false otherwise
-function alerts:trigger(entity_value, alert_message, when)
+function alerts_api:trigger(entity_value, alert_message, when)
   local force = false
   local msg = alert_message
+  local ifid = interface.getId()
   when = when or os.time()
 
   if(type(alert_message) == "table") then
     msg = json.encode(alert_message)
   end
 
+  if alerts_api.isEntityAlertDisabled(ifid, self.entity_type_id, entity_value, self.type_id) then
+    incDisabledAlertsCount(ifid, -1, self.entity_type_id, entity_value, self.type_id)
+    return(false)
+  end
+
   local rv = interface.storeAlert(when, when, self.periodicity,
     self.type_id, self.subtype or "", self.severity_id,
     self.entity_type_id, entity_value, msg)
+
+  if(self.entity == "host") then
+    -- NOTE: for engaged alerts this operation is performed during trigger in C
+    interface.incTotalHostAlerts(entity_value, self.type_id)
+  end
 
   if(rv) then
     local action = "store"
@@ -136,7 +206,7 @@ end
 
 -- ##############################################
 
-function alerts.parseAlert(metadata)
+function alerts_api.parseAlert(metadata)
   local alert_id = makeAlertId(metadata.alert_type, metadata.alert_subtype, metadata.alert_periodicity, metadata.alert_entity)
 
   if known_alerts[alert_id] then
@@ -144,7 +214,7 @@ function alerts.parseAlert(metadata)
   end
 
   -- new alert
-  return(alerts:newAlert({
+  return(alerts_api:newAlert({
     entity = alertEntityRaw(metadata.alert_entity),
     type = alertTypeRaw(metadata.alert_type),
     severity = alertSeverityRaw(metadata.alert_severity),
@@ -156,7 +226,7 @@ end
 -- ##############################################
 
 -- TODO unify alerts and metadata/notications format
-function alerts.parseNotification(metadata)
+function alerts_api.parseNotification(metadata)
   local alert_id = makeAlertId(alertType(metadata.type), metadata.alert_subtype, metadata.alert_periodicity, alertEntity(metadata.entity_type))
 
   if known_alerts[alert_id] then
@@ -164,7 +234,7 @@ function alerts.parseNotification(metadata)
   end
 
   -- new alert
-  return(alerts:newAlert({
+  return(alerts_api:newAlert({
     entity = metadata.entity_type,
     type = metadata.type,
     severity = metadata.severity,
@@ -176,7 +246,7 @@ end
 -- ##############################################
 
 -- TODO unify alerts and metadata/notications format
-function alerts.alertNotificationToRecord(notif)
+function alerts_api.alertNotificationToRecord(notif)
   return {
     alert_entity = alertEntity(notif.entity_type),
     alert_type = alertType(notif.type),
@@ -195,17 +265,6 @@ end
 
 local function get_alert_triggered_key(type_info)
   return(string.format("%d@%s", type_info.alert_type.alert_id, type_info.alert_subtype or ""))
-end
-
--- ##############################################
-
-function alerts.triggerIdToAlertType(trigger_id)
-  local parts = string.split(trigger_id, "@")
-
-  if((parts ~= nil) and (#parts == 2)) then
-    -- alert_type, alert_subtype
-    return tonumber(parts[1]), parts[2]
-  end
 end
 
 -- ##############################################
@@ -239,7 +298,7 @@ end
 -- This is necessary both to avoid paying the database io cost inside
 -- the other scripts and as a necessity to avoid a deadlock on the
 -- host hash in the host.lua script
-function alerts.processPendingAlertEvents(deadline)
+function alerts_api.processPendingAlertEvents(deadline)
   local ifnames = interface.getIfNames()
 
   for ifid, _ in pairs(ifnames) do
@@ -266,10 +325,12 @@ function alerts.processPendingAlertEvents(deadline)
       alert_endpoints.dispatchNotification(event, event_json)
 
       if(os.time() > deadline) then
-        break
+        return(false)
       end
     end
   end
+
+  return(true)
 end
 
 -- ##############################################
@@ -282,19 +343,21 @@ end
 --! @param when (optional) the time when the release event occurs
 --! @note The actual trigger is performed asynchronously
 --! @return true on success, false otherwise
-function alerts.new_trigger(entity_info, type_info, when)
+function alerts_api.new_trigger(entity_info, type_info, when)
   when = when or os.time()
+  local ifid = interface.getId()
   local granularity_sec = type_info.alert_granularity and type_info.alert_granularity.granularity_seconds or 0
   local granularity_id = type_info.alert_granularity and type_info.alert_granularity.granularity_id or nil
   local subtype = type_info.alert_subtype or ""
   local alert_json = json.encode(type_info.alert_type_params)
+  local is_disabled = alerts_api.isEntityAlertDisabled(ifid, entity_info.alert_entity.entity_id, entity_info.alert_entity_val, type_info.alert_type.alert_id)
 
   if(granularity_id ~= nil) then
     local triggered = true
     local alert_key_name = get_alert_triggered_key(type_info)
     local params = {alert_key_name, granularity_id,
       type_info.alert_type.severity.severity_id, type_info.alert_type.alert_id,
-      subtype, alert_json
+      subtype, alert_json, is_disabled
     }
 
     if((host.storeTriggeredAlert) and (entity_info.alert_entity.entity_id == alertEntity("host"))) then
@@ -306,16 +369,24 @@ function alerts.new_trigger(entity_info, type_info, when)
     end
 
     if(not triggered) then
-      if(do_trace) then print("[DON'T Trigger alert (already triggered?) @ "..granularity_sec.."] "..
-        entity_info.alert_entity_val .."@"..type_info.alert_type.i18n_title.."\n") end
+      if(do_trace) then print("[Don't Trigger alert (already triggered?) @ "..granularity_sec.."] "..
+        entity_info.alert_entity_val .."@"..type_info.alert_type.i18n_title..":".. subtype .. "\n") end
       return(false)
+    elseif(is_disabled) then
+      if(do_trace) then print("[COUNT Disabled alert @ "..granularity_sec.."] "..
+        entity_info.alert_entity_val .."@"..type_info.alert_type.i18n_title..":".. subtype .. "\n") end
+
+      incDisabledAlertsCount(ifid, granularity_id, entity_info.alert_entity.entity_id, entity_info.alert_entity_val, type_info.alert_type.alert_id)
+    else
+      if(do_trace) then print("[TRIGGER alert @ "..granularity_sec.."] "..
+        entity_info.alert_entity_val .."@"..type_info.alert_type.i18n_title..":".. subtype .. "\n") end
     end
   end
 
   local action = ternary((granularity_id ~= nil), "engaged", "stored")
 
   local alert_event = {
-    ifid = interface.getId(),
+    ifid = ifid,
     granularity = granularity_sec,
     entity_type = entity_info.alert_entity.entity_id,
     entity_value = entity_info.alert_entity_val,
@@ -338,8 +409,8 @@ end
 --! @param when (optional) the time when the release event occurs
 --! @note The actual release is performed asynchronously
 --! @return true on success, false otherwise
-function alerts.new_release(entity_info, type_info)
-  local now = os.time()
+function alerts_api.release(entity_info, type_info, when)
+  local when = when or os.time()
   local granularity_sec = type_info.alert_granularity and type_info.alert_granularity.granularity_seconds or 0
   local granularity_id = type_info.alert_granularity and type_info.alert_granularity.granularity_id or nil
   local subtype = type_info.alert_subtype or ""
@@ -347,20 +418,23 @@ function alerts.new_release(entity_info, type_info)
   local released = nil
 
   if((host.releaseTriggeredAlert) and (entity_info.alert_entity.entity_id == alertEntity("host"))) then
-    released = host.releaseTriggeredAlert(alert_key_name, granularity_id)
+    released = host.releaseTriggeredAlert(alert_key_name, granularity_id, when)
   elseif((interface.releaseTriggeredAlert) and (entity_info.alert_entity.entity_id == alertEntity("interface"))) then
-    released = interface.releaseTriggeredAlert(alert_key_name, granularity_id)
+    released = interface.releaseTriggeredAlert(alert_key_name, granularity_id, when)
   elseif((network.releaseTriggeredAlert) and (entity_info.alert_entity.entity_id == alertEntity("network"))) then
-    released = network.releaseTriggeredAlert(alert_key_name, granularity_id)
+    released = network.releaseTriggeredAlert(alert_key_name, granularity_id, when)
   else
     alertErrorTraceback("Unsupported entity" .. entity_info.alert_entity.entity_id)
     return(false)
   end
 
   if(released == nil) then
-    if(do_trace) then print("[DON'T Release alert (already not triggered?) @ "..granularity_sec.."] "..
+    if(do_trace) then print("[Dont't Release alert (not triggered?) @ "..granularity_sec.."] "..
       entity_info.alert_entity_val .."@"..type_info.alert_type.i18n_title..":".. subtype .. "\n") end
     return(false)
+  else
+    if(do_trace) then print("[RELEASE alert @ "..granularity_sec.."] "..
+        entity_info.alert_entity_val .."@"..type_info.alert_type.i18n_title..":".. subtype .. "\n") end
   end
 
   local alert_event = {
@@ -381,10 +455,23 @@ function alerts.new_release(entity_info, type_info)
 end
 
 -- ##############################################
+
+-- Convenient method to release multiple alerts on an entity
+function alerts_api.releaseEntityAlerts(entity_info, alerts)
+  for _, alert in pairs(alerts) do
+    alerts_api.release(entity_info, {
+      alert_type = alert_consts.alert_types[alertTypeRaw(alert.alert_type)],
+      alert_subtype = alert.alert_subtype,
+      alert_granularity = alert_consts.alerts_granularities[sec2granularity(alert.alert_granularity)],
+    })
+  end
+end
+
+-- ##############################################
 -- entity_info building functions
 -- ##############################################
 
-function alerts.hostAlertEntity(hostip, hostvlan)
+function alerts_api.hostAlertEntity(hostip, hostvlan)
   return {
     alert_entity = alert_consts.alert_entities.host,
     -- NOTE: keep in sync with C (Alertable::setEntityValue)
@@ -394,7 +481,7 @@ end
 
 -- ##############################################
 
-function alerts.interfaceAlertEntity(ifid)
+function alerts_api.interfaceAlertEntity(ifid)
   return {
     alert_entity = alert_consts.alert_entities.interface,
     -- NOTE: keep in sync with C (Alertable::setEntityValue)
@@ -404,7 +491,7 @@ end
 
 -- ##############################################
 
-function alerts.networkAlertEntity(network_cidr)
+function alerts_api.networkAlertEntity(network_cidr)
   return {
     alert_entity = alert_consts.alert_entities.network,
     -- NOTE: keep in sync with C (Alertable::setEntityValue)
@@ -416,7 +503,7 @@ end
 -- type_info building functions
 -- ##############################################
 
-function alerts.thresholdCrossType(granularity, metric, value, operator, threshold)
+function alerts_api.thresholdCrossType(granularity, metric, value, operator, threshold)
   local res = {
     alert_type = alert_consts.alert_types.threshold_cross,
     alert_subtype = string.format("%s_%s", granularity, metric),
@@ -431,7 +518,7 @@ end
 
 -- ##############################################
 
-function alerts.anomalyType(anomal_name, alert_type, value, threshold)
+function alerts_api.anomalyType(anomal_name, alert_type, value, threshold)
   local res = {
     alert_type = alert_type,
     alert_subtype = anomal_name,
@@ -447,7 +534,7 @@ end
 
 -- ##############################################
 
-function alerts.load_check_modules(subdir, str_granularity)
+function alerts_api.load_check_modules(subdir, str_granularity)
   local checks_dir = os_utils.fixPath(ALERT_CHECKS_MODULES_BASEDIR .. "/" .. subdir)
   local available_modules = {}
 
@@ -485,15 +572,13 @@ end
 
 -- ##############################################
 
-function alerts.threshold_check_function(params)
+function alerts_api.threshold_check_function(params)
   local alarmed = false
   local value = params.check_module.get_threshold_value(params.granularity, params.entity_info)
   local threshold_config = params.alert_config
 
   local threshold_edge = tonumber(threshold_config.edge)
-  local threshold_type = alerts.thresholdCrossType(params.granularity, params.check_module.key, value, threshold_config.operator, threshold_edge)
-
-  if(do_trace) then print("[Alert @ "..params.granularity.."] ".. params.alert_entity.alert_entity_val .." ["..params.check_module.key.."]\n") end
+  local threshold_type = alerts_api.thresholdCrossType(params.granularity, params.check_module.key, value, threshold_config.operator, threshold_edge)
 
   if(threshold_config.operator == "lt") then
     if(value < threshold_edge) then alarmed = true end
@@ -502,33 +587,25 @@ function alerts.threshold_check_function(params)
   end
 
   if(alarmed) then
-    if(do_trace) then print("Trigger alert [value: "..tostring(value).."]\n") end
-
-    return(alerts.new_trigger(params.alert_entity, threshold_type))
+    return(alerts_api.new_trigger(params.alert_entity, threshold_type))
   else
-    if(do_trace) then print("Release alert [value: "..tostring(value).."]\n") end
-
-    return(alerts.new_release(params.alert_entity, threshold_type))
+    return(alerts_api.release(params.alert_entity, threshold_type))
   end
 end
 
 -- ##############################################
 
-function alerts.check_anomaly(anomal_name, alert_type, alert_entity, entity_anomalies, anomal_config)
+function alerts_api.check_anomaly(anomal_name, alert_type, alert_entity, entity_anomalies, anomal_config)
   local anomaly = entity_anomalies[anomal_name] or {value = 0}
   local value = anomaly.value
-  local anomaly_type = alerts.anomalyType(anomal_name, alert_type, value, anomal_config.threshold)
+  local anomaly_type = alerts_api.anomalyType(anomal_name, alert_type, value, anomal_config.threshold)
 
   if(do_trace) then print("[Anomaly check] ".. alert_entity.alert_entity_val .." ["..anomal_name.."]\n") end
 
   if(anomaly ~= nil) then
-    if(do_trace) then print("Trigger alert anomaly [value: "..tostring(value).."]\n") end
-
-    return(alerts.new_trigger(alert_entity, anomaly_type))
+    return(alerts_api.new_trigger(alert_entity, anomaly_type))
   else
-    if(do_trace) then print("Release alert anomaly [value: "..tostring(value).."]\n") end
-
-    return(alerts.new_release(alert_entity, threshold_type))
+    return(alerts_api.release(alert_entity, threshold_type))
   end
 end
 
@@ -550,21 +627,21 @@ end
 
 -- ##############################################
 
-function alerts.host_delta_val(metric_name, granularity, curr_val)
+function alerts_api.host_delta_val(metric_name, granularity, curr_val)
   return(delta_val(host --[[ the host Lua reg ]], metric_name, granularity, curr_val))
 end
 
-function alerts.interface_delta_val(metric_name, granularity, curr_val)
+function alerts_api.interface_delta_val(metric_name, granularity, curr_val)
   return(delta_val(interface --[[ the interface Lua reg ]], metric_name, granularity, curr_val))
 end
 
-function alerts.network_delta_val(metric_name, granularity, curr_val)
+function alerts_api.network_delta_val(metric_name, granularity, curr_val)
   return(delta_val(network --[[ the network Lua reg ]], metric_name, granularity, curr_val))
 end
 
 -- ##############################################
 
-function alerts.application_bytes(info, application_name)
+function alerts_api.application_bytes(info, application_name)
    local curr_val = 0
 
    if info["ndpi"] and info["ndpi"][application_name] then
@@ -576,7 +653,7 @@ end
 
 -- ##############################################
 
-function alerts.category_bytes(info, category_name)
+function alerts_api.category_bytes(info, category_name)
    local curr_val = 0
 
    if info["ndpi_categories"] and info["ndpi_categories"][category_name] then
@@ -588,7 +665,7 @@ end
 
 -- ##############################################
 
-function alerts.threshold_cross_input_builder(gui_conf, input_id, value)
+function alerts_api.threshold_cross_input_builder(gui_conf, input_id, value)
   value = value or {}
   local gt_selected = ternary(value[1] == "gt", ' selected="selected"', '')
   local lt_selected = ternary(value[1] == "lt", ' selected="selected"', '')
@@ -607,4 +684,93 @@ end
 
 -- ##############################################
 
-return(alerts)
+local function getEntityDisabledAlertsBitmapKey(ifid, entity, entity_val)
+  return string.format("ntopng.prefs.alerts.ifid_%d.disabled_alerts.__%s__%s", ifid, entity, entity_val)
+end
+
+-- ##############################################
+
+function alerts_api.getEntityAlertsDisabled(ifid, entity, entity_val)
+  local bitmap = tonumber(ntop.getPref(getEntityDisabledAlertsBitmapKey(ifid, entity, entity_val))) or 0
+  -- traceError(TRACE_NORMAL, TRACE_CONSOLE, string.format("ifid: %d, entity: %s, val: %s -> bitmap=%x", ifid, alertEntityRaw(entity), entity_val, bitmap))
+  return(bitmap)
+end
+
+-- ##############################################
+
+function alerts_api.setEntityAlertsDisabled(ifid, entity, entity_val, bitmap)
+  local key = getEntityDisabledAlertsBitmapKey(ifid, entity, entity_val)
+
+  if(bitmap == 0) then
+    ntop.delCache(key)
+  else
+    ntop.setPref(key, string.format("%u", bitmap))
+  end
+end
+
+-- ##############################################
+
+local function toggleEntityAlert(ifid, entity, entity_val, alert_type, disable)
+  alert_type = tonumber(alert_type)
+  bitmap = alerts_api.getEntityAlertsDisabled(ifid, entity, entity_val)
+
+  if(disable) then
+    bitmap = ntop.bitmapSet(bitmap, alert_type)
+  else
+    bitmap = ntop.bitmapClear(bitmap, alert_type)
+    deleteEntityDisabledAlertsCountersKey(ifid, entity, entity_val, alert_type)
+  end
+
+  alerts_api.setEntityAlertsDisabled(ifid, entity, entity_val, bitmap)
+  return(bitmap)
+end
+
+-- ##############################################
+
+function alerts_api.disableEntityAlert(ifid, entity, entity_val, alert_type)
+  return(toggleEntityAlert(ifid, entity, entity_val, alert_type, true))
+end
+
+-- ##############################################
+
+function alerts_api.enableEntityAlert(ifid, entity, entity_val, alert_type)
+  return(toggleEntityAlert(ifid, entity, entity_val, alert_type, false))
+end
+
+-- ##############################################
+
+function alerts_api.isEntityAlertDisabled(ifid, entity, entity_val, alert_type)
+  local bitmap = alerts_api.getEntityAlertsDisabled(ifid, entity, entity_val)
+  return(ntop.bitmapIsSet(bitmap, tonumber(alert_type)))
+end
+
+-- ##############################################
+
+function alerts_api.hasEntitiesWithAlertsDisabled(ifid)
+  return(table.len(ntop.getKeysCache(getEntityDisabledAlertsBitmapKey(ifid, "*", "*"))) > 0)
+end
+
+-- ##############################################
+
+function alerts_api.listEntitiesWithAlertsDisabled(ifid)
+  local keys = ntop.getKeysCache(getEntityDisabledAlertsBitmapKey(ifid, "*", "*")) or {}
+  local res = {}
+
+  for key in pairs(keys) do
+    local parts = string.split(key, "__")
+
+    if((parts) and (#parts == 3)) then
+      local entity = tonumber(parts[2])
+      local entity_val = parts[3]
+
+      res[entity] = res[entity] or {}
+      res[entity][entity_val] = true
+    end
+  end
+
+  return(res)
+end
+
+-- ##############################################
+
+return(alerts_api)

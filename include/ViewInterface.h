@@ -28,6 +28,7 @@ class ViewInterface : public NetworkInterface {
  private:
   u_int8_t num_viewed_interfaces;
   NetworkInterface *viewed_interfaces[MAX_NUM_VIEW_INTERFACES];
+  void viewedFlowsWalker();
 
  public:
   ViewInterface(const char *_endpoint);
@@ -35,14 +36,9 @@ class ViewInterface : public NetworkInterface {
   virtual InterfaceType getIfType() const { return interface_type_VIEW;           };
   inline const char* get_type()           { return CONST_INTERFACE_TYPE_VIEW;     };
   virtual bool is_ndpi_enabled()    const { return false;                         };
-
-  virtual bool isView()             const { return true;                          };
-  virtual bool isViewed()           const { return false;                         };
-
   virtual bool isPacketInterface()  const { return false;                         };
   void flowPollLoop();
   void startPacketPolling();
-  void shutdown();
   bool set_packet_filter(char *filter)    { return false ;                        };
 
   virtual u_int64_t getNumPackets();
@@ -53,6 +49,8 @@ class ViewInterface : public NetworkInterface {
   virtual u_int64_t getCheckPointNumPackets();
   virtual u_int64_t getCheckPointNumBytes();
   virtual u_int32_t getCheckPointNumPacketDrops();
+
+  virtual bool hasSeenVlanTaggedPackets() const;
 
   virtual u_int32_t getFlowsHashSize();
   virtual Flow* findFlowByKey(u_int32_t key, AddressTree *allowed_hosts);

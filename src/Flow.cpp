@@ -41,14 +41,13 @@ Flow::Flow(NetworkInterface *_iface,
   memset(&stats, 0, sizeof(stats));
   last_partial = NULL;
   vlanId = _vlanId, protocol = _protocol, cli_port = _cli_port, srv_port = _srv_port;
-    cli2srv_last_packets = 0, cli2srv_last_bytes = 0, srv2cli_last_packets = 0, srv2cli_last_bytes = 0,
+  cli2srv_last_packets = 0, cli2srv_last_bytes = 0,
+    srv2cli_last_packets = 0, srv2cli_last_bytes = 0,
     cli_host = srv_host = NULL, good_low_flow_detected = false,
     srv2cli_last_goodput_bytes = cli2srv_last_goodput_bytes = 0, good_ssl_hs = true,
     flow_alerted = flow_dropped_counts_increased = false, vrfId = 0;
-
-  idle_mark = purge_acknowledged_mark = false;
-
-  detection_completed = false;
+  
+  purge_acknowledged_mark = detection_completed = update_flow_port_stats = false;
   ndpiDetectedProtocol = ndpiUnknownProtocol;
   doNotExpireBefore = iface->getTimeLastPktRcvd() + DONT_NOT_EXPIRE_BEFORE_SEC;
 
@@ -77,13 +76,9 @@ Flow::Flow(NetworkInterface *_iface,
   cli2srv_last_packets = 0, prev_cli2srv_last_packets = 0, srv2cli_last_packets = 0, prev_srv2cli_last_packets = 0;
   top_bytes_thpt = 0, top_goodput_bytes_thpt = 0, applLatencyMsec = 0;
 
-  last_db_dump.cli2srv_packets = 0, last_db_dump.srv2cli_packets = 0,
-    last_db_dump.cli2srv_bytes = 0, last_db_dump.srv2cli_bytes = 0,
-    last_db_dump.cli2srv_goodput_bytes = 0, last_db_dump.srv2cli_goodput_bytes = 0,
-    last_db_dump.last_dump = 0;
-
   suricata_alert = NULL;
 
+  memset(&last_db_dump, 0, sizeof(last_db_dump));
   memset(&protos, 0, sizeof(protos));
   memset(&flow_device, 0, sizeof(flow_device));
 
@@ -224,9 +219,10 @@ Flow::~Flow() {
   else if(srv_ip_addr) /* Dynamically allocated only when srv_host was NULL */
     delete srv_ip_addr;
 
-  if(last_partial)     free(last_partial);
-  if(json_info)        free(json_info);
-  if(host_server_name) free(host_server_name);
+  if(last_partial)         free(last_partial);
+  if(last_db_dump.partial) free(last_db_dump.partial);
+  if(json_info)            free(json_info);
+  if(host_server_name)     free(host_server_name);
 
   if(cli_ebpf) delete cli_ebpf;
   if(srv_ebpf) delete srv_ebpf;
@@ -277,12 +273,13 @@ bool Flow::triggerAlerts() const {
 /* *************************************** */
 
 void Flow::dumpFlowAlert() {
-  time_t when = time(0);
+  time_t when;
+  FlowStatus status;
 
   if(!triggerAlerts())
     return;
 
-  FlowStatus status = getFlowStatus();
+  status = getFlowStatus();
 
   if(!isFlowAlerted()) {
     bool do_dump = true;
@@ -383,14 +380,24 @@ void Flow::dumpFlowAlert() {
       do_dump = ntop->getPrefs()->are_dropped_flows_alerts_enabled();
 #endif
 
-    /* Check per-host thresholds */
-    if((cli_host && cli_host->incFlowAlertHits(when))
-         ||(srv_host && srv_host->incFlowAlertHits(when)))
-      do_dump = false;
+    if(!do_dump)
+      return; /* Nothing to do */
 
-    if(do_dump) {
-      iface->getAlertsManager()->storeFlowAlert(this);
+    when = time(0);
+
+    if(cli_host && srv_host) {
+      if(cli_host->isDisabledFlowAlertType(status) || srv_host->isDisabledFlowAlertType(status)) {
+	/* TODO: eventually increment a counter of untriggered alerts */
+	return;
+      }
+
+      /* Check per-host thresholds */
+      if(cli_host->incFlowAlertHits(when) || srv_host->incFlowAlertHits(when))
+	do_dump = false;
     }
+
+    if(do_dump)
+      iface->getAlertsManager()->storeFlowAlert(this);
   }
 }
 
@@ -660,45 +667,11 @@ void Flow::setDetectedProtocol(ndpi_protocol proto_id, bool forceDetection) {
   }
 
   if(detection_completed) {
-    bool dump_flow = true;
-
 #ifdef HAVE_NEDGE
     updateFlowShapers(true);
 #endif
 
-    if(protocol == IPPROTO_TCP) {
-      /*
-	 update the ports only if the flow has been observed from the beginning
-	 and it has been established
-      */
-
-      if((src2dst_tcp_flags & (TH_SYN|TH_PUSH)) != (TH_SYN|TH_PUSH))
-	dump_flow = false;
-      else if((dst2src_tcp_flags & (TH_SYN|TH_PUSH)) != (TH_SYN|TH_PUSH))
-	dump_flow = false;
-    }
-
-    if(dump_flow
-       && (srv_port != 0)
-       && ((protocol == IPPROTO_TCP) || (protocol == IPPROTO_UDP))) {
-      u_int16_t p = ndpiDetectedProtocol.master_protocol;
-      u_int16_t port = ntohs(srv_port);
-      
-      if(p == NDPI_PROTOCOL_UNKNOWN)
-	p = ndpiDetectedProtocol.app_protocol;
-
-      if(cli_host)
-	cli_host->setFlowPort(false /* client */, protocol, port, p);
-      
-      if(srv_host)
-	srv_host->setFlowPort(true /* server */, protocol, port, p);    
-      
-#if 0
-      char buf[128];
-      
-      ntop->getTrace()->traceEvent(TRACE_NORMAL, "%s", print(buf, sizeof(buf)));
-#endif
-    }
+    update_flow_port_stats = true;
   }
 
 #ifdef NTOPNG_PRO
@@ -938,33 +911,14 @@ return(buf);
 
 /* *************************************** */
 
-bool Flow::dumpFlow(bool dump_alert) {
+bool Flow::dumpFlow(const struct timeval *tv, NetworkInterface *dumper) {
   bool rc = false;
-
-  if(dump_alert) {
-    /* NOTE: this can be very time consuming */
-    dumpFlowAlert();
-  }
-
-  /* Check for bytes, and not for packets, as with nprobeagent
-     there are not packet counters, just bytes. */
-  if(((stats.cli2srv_bytes - last_db_dump.cli2srv_bytes) == 0)
-     && ((stats.srv2cli_bytes - last_db_dump.srv2cli_bytes) == 0))
-      return(rc);
 
   if(ntop->getPrefs()->do_dump_flows()
 #ifndef HAVE_NEDGE
      || ntop->get_export_interface()
 #endif
      ) {
-#ifdef NTOPNG_PRO
-#ifndef HAVE_NEDGE
-    if(!detection_completed || stats.cli2srv_packets + stats.srv2cli_packets <= NDPI_MIN_NUM_PACKETS)
-      /* force profile detection even if the L7 Protocol has not been detected */
-     updateProfile();
-#endif
-#endif
-
     if(!ntop->getPrefs()->is_tiny_flows_export_enabled() && isTiny()) {
 #ifdef TINY_FLOWS_DEBUG
       ntop->getTrace()->traceEvent(TRACE_NORMAL,
@@ -983,23 +937,29 @@ bool Flow::dumpFlow(bool dump_alert) {
     }
 
     if(!idle()) {
-        time_t now = time(NULL);
-
-      if(iface->getIfType() == interface_type_PCAP_DUMP
-         || (now - get_first_seen()) < CONST_DB_DUMP_FREQUENCY
-	 || (now - last_db_dump.last_dump) < CONST_DB_DUMP_FREQUENCY) {
+      if(dumper->getIfType() == interface_type_PCAP_DUMP
+         || tv->tv_sec - get_first_seen() < CONST_DB_DUMP_FREQUENCY
+	 || tv->tv_sec - get_partial_last_seen() < CONST_DB_DUMP_FREQUENCY) {
 	return(rc);
       }
     } else {
       /* flows idle, i.e., ready to be purged, are always dumped */
     }
 
+    if(!update_partial_traffic_stats_db_dump())
+      return rc; /* Partial stats update has failed */
+
+    /* Check for bytes, and not for packets, as with nprobeagent
+       there are not packet counters, just bytes. */
+    if(!get_partial_bytes())
+      return rc; /* Nothing to dump */
+
 #ifdef NTOPNG_PRO
     if(ntop->getPro()->has_valid_license() && ntop->getPrefs()->is_enterprise_edition())
-      getInterface()->aggregatePartialFlow(this);
+      dumper->aggregatePartialFlow(tv, this);
 #endif
 
-    getInterface()->dumpFlow(last_seen, this);
+    dumper->dumpFlow(last_seen, this);
 
 #ifndef HAVE_NEDGE
     if(ntop->get_export_interface()) {
@@ -1071,9 +1031,73 @@ void Flow::update_hosts_stats(struct timeval *tv, bool dump_alert) {
   Vlan *vl;
   NetworkStats *cli_network_stats;
 
-  if(isReadyToBeMarkedAsIdle()) {
-    /* Marked as ready to be purged, will be purged by NetworkInterface::purgeIdleFlows */
-    set_idle(tv->tv_sec);
+  if(update_flow_port_stats) {
+    bool dump_flow = false;
+
+    if(protocol == IPPROTO_TCP) {
+      /*
+	 update the ports only if the flow has been observed from the beginning
+	 and it has been established
+      */
+      dump_flow = ((src2dst_tcp_flags|dst2src_tcp_flags) & (TH_SYN|TH_PUSH)) == (TH_SYN|TH_PUSH);
+    } else if(protocol == IPPROTO_UDP) {
+      if(
+	 (srv_host && srv_host->get_ip()->isBroadMulticastAddress())
+	 || (stats.srv2cli_packets > 0 /* We see a response, hence we assume this is not a probing attempt */)
+	 )
+	dump_flow = true;
+    }
+
+#if 0
+    char buf[128];
+    
+    ntop->getTrace()->traceEvent(TRACE_NORMAL, "[%s][%u/%u] %s",
+				 dump_flow ? "DUMP" : "",
+				 stats.cli2srv_packets, stats.srv2cli_packets,
+				 print(buf, sizeof(buf)));
+#endif
+
+      if(dump_flow && (srv_port != 0)) {
+      u_int16_t p = ndpiDetectedProtocol.master_protocol;
+      u_int16_t port = ntohs(srv_port);
+
+      if(p == NDPI_PROTOCOL_UNKNOWN)
+	p = ndpiDetectedProtocol.app_protocol;
+
+      if(cli_host && cli_host->isLocalHost())
+	cli_host->setFlowPort(false /* client */, srv_host, protocol, port, p,
+			      getFlowInfo() ? getFlowInfo() : "",
+			      iface->getTimeLastPktRcvd());
+
+      if(srv_host && srv_host->isLocalHost())
+	srv_host->setFlowPort(true /* server */, cli_host, protocol, port, p,
+			      getFlowInfo() ? getFlowInfo() : "",
+			      iface->getTimeLastPktRcvd());
+
+#if 0
+      char buf[128];
+
+      ntop->getTrace()->traceEvent(TRACE_NORMAL, "%s", print(buf, sizeof(buf)));
+#endif
+    }
+
+    update_flow_port_stats = false;
+  }
+  
+  if(get_state() == hash_entry_state_idle) {
+    if(iface->isViewed()) {
+      /* Must acknowledge so the overlying 'view' interface can actually set 
+         the flow state as ready to be purged once it has processed the flow for the last
+         time */
+      if(is_acknowledged_to_purge())
+	return; /* Already acknowledged, nothing else to do */
+      set_acknowledge_to_purge();
+    } else {
+      /* Marked as ready to be purged, will be purged by NetworkInterface::purgeIdleFlows */
+      set_state(hash_entry_state_ready_to_be_purged);
+    }
+
+    postFlowSetIdle(tv->tv_sec);
   }
 
   if(check_tor && (ndpiDetectedProtocol.app_protocol == NDPI_PROTOCOL_SSL)) {
@@ -1435,15 +1459,15 @@ void Flow::update_hosts_stats(struct timeval *tv, bool dump_alert) {
   if(updated)
     memcpy(&last_update_time, tv, sizeof(struct timeval));
 
-  if(dumpFlow(dump_alert)) {
-    last_db_dump.cli2srv_packets = stats.cli2srv_packets,
-      last_db_dump.srv2cli_packets = stats.srv2cli_packets,
-      last_db_dump.cli2srv_bytes = stats.cli2srv_bytes,
-      last_db_dump.cli2srv_goodput_bytes = stats.cli2srv_goodput_bytes,
-      last_db_dump.srv2cli_bytes = stats.srv2cli_bytes,
-      last_db_dump.srv2cli_goodput_bytes = stats.srv2cli_goodput_bytes,
-      last_db_dump.last_dump = last_seen;
+  if(dump_alert) {
+    /* NOTE: this can be very time consuming */
+    dumpFlowAlert();
   }
+
+  /* Viewed interfaces don't dump flows, their flows are dumped by the overlying ViewInterface.
+     ViewInterface dump their flows in another thread, not this one. */
+  if(!iface->isView() && !iface->isViewed()) 
+    dumpFlow(tv, iface);
 }
 
 /* *************************************** */
@@ -1524,10 +1548,11 @@ void Flow::update_pools_stats(const struct timeval *tv,
 
 /* *************************************** */
 
-bool Flow::equal(IpAddress *_cli_ip, IpAddress *_srv_ip, u_int16_t _cli_port,
-		 u_int16_t _srv_port, u_int16_t _vlanId, u_int8_t _protocol,
+bool Flow::equal(const IpAddress *_cli_ip, const IpAddress *_srv_ip,
+		 u_int16_t _cli_port, u_int16_t _srv_port,
+		 u_int16_t _vlanId, u_int8_t _protocol,
 		 const ICMPinfo * const _icmp_info,
-		 bool *src2srv_direction) {
+		 bool *src2srv_direction) const {
   const IpAddress *cli_ip = get_cli_ip_addr(), *srv_ip = get_srv_ip_addr();
 
 #if 0
@@ -1695,6 +1720,9 @@ void Flow::lua(lua_State* vm, AddressTree * ptree,
   lua_push_uint64_table_entry(vm, "goodput_bytes", stats.cli2srv_goodput_bytes + stats.srv2cli_goodput_bytes);
 
   if(details_level >= details_high) {
+    lua_push_bool_table_entry(vm, "cli.allowed_host", src_match);
+    lua_push_bool_table_entry(vm, "srv.allowed_host", dst_match);
+
     if(src && !mask_cli_host) {
       lua_push_str_table_entry(vm, "cli.host", src->get_visual_name(buf, sizeof(buf)));
       lua_push_uint64_table_entry(vm, "cli.source_id", 0 /* was never set by src->getSourceId()*/ );
@@ -1702,7 +1730,6 @@ void Flow::lua(lua_State* vm, AddressTree * ptree,
 
       lua_push_bool_table_entry(vm, "cli.systemhost", src->isSystemHost());
       lua_push_bool_table_entry(vm, "cli.blacklisted", src->isBlacklisted());
-      lua_push_bool_table_entry(vm, "cli.allowed_host", src_match);
       lua_push_int32_table_entry(vm, "cli.network_id", src->get_local_network_id());
       lua_push_uint64_table_entry(vm, "cli.pool_id", src->get_host_pool());
     } else {
@@ -1715,7 +1742,6 @@ void Flow::lua(lua_State* vm, AddressTree * ptree,
       lua_push_str_table_entry(vm, "srv.mac", Utils::formatMac(dst->get_mac(), buf, sizeof(buf)));
       lua_push_bool_table_entry(vm, "srv.systemhost", dst->isSystemHost());
       lua_push_bool_table_entry(vm, "srv.blacklisted", dst->isBlacklisted());
-      lua_push_bool_table_entry(vm, "srv.allowed_host", dst_match);
       lua_push_int32_table_entry(vm, "srv.network_id", dst->get_local_network_id());
       lua_push_uint64_table_entry(vm, "srv.pool_id", dst->get_host_pool());
     } else {
@@ -2003,7 +2029,7 @@ void Flow::set_to_purge(time_t t) {
      the flow has been acknowledged (in the case of views).
      Othewise this call is just ignored. */
   if(is_acknowledged_to_purge())
-    GenericHashEntry::set_to_purge(t);
+    ;
 };
 
 /* *************************************** */
@@ -2022,7 +2048,7 @@ bool Flow::is_acknowledged_to_purge() const {
 
 void Flow::set_acknowledge_to_purge() {
   /* If there is a view interface on top of this interface
-     then such view can acknowledge a flow when it is ready 
+     then such view can acknowledge a flow when it is ready
      to purge. */
   if(iface->isViewed())
     purge_acknowledged_mark = true;
@@ -2030,12 +2056,8 @@ void Flow::set_acknowledge_to_purge() {
 
 /* *************************************** */
 
-bool Flow::isReadyToBeMarkedAsIdle() {
-  if (ntop->getPrefs()->flushFlowsOnShutdown()
-      && (ntop->getGlobals()->isShutdownRequested() || ntop->getGlobals()->isShutdown()))
-    return(true);
-
-  if(idle()) return(true);
+bool Flow::idle() {
+  if(GenericHashEntry::idle()) return(true);
 
 #ifdef HAVE_NEDGE
   if(iface->getIfType() == interface_type_NETFILTER)
@@ -2083,9 +2105,6 @@ void Flow::sumStats(nDPIStats *ndpi_stats, FlowStats *status_stats) {
 char* Flow::serialize(bool es_json) {
   json_object *my_object;
   char *rsp;
-
-  if((cli_host == NULL) || (srv_host == NULL))
-    return(NULL);
 
   if(es_json) {
     ntop->getPrefs()->set_json_symbolic_labels_format(true);
@@ -2184,10 +2203,7 @@ json_object* Flow::flow2json() {
   json_object *my_object;
   char buf[64], jsonbuf[64], *c;
   time_t t;
-
-  if(((stats.cli2srv_packets - last_db_dump.cli2srv_packets) == 0)
-     && ((stats.srv2cli_packets - last_db_dump.srv2cli_packets) == 0))
-    return(NULL);
+  const IpAddress *cli_ip = get_cli_ip_addr(), *srv_ip = get_srv_ip_addr();
 
   if((my_object = json_object_new_object()) == NULL) return(NULL);
 
@@ -2221,29 +2237,31 @@ json_object* Flow::flow2json() {
     /* json_object_object_add(my_object, "@version", json_object_new_int(1)); */
 
     // MAC addresses are set only when dumping to ES to optimize space consumption
-    json_object_object_add(my_object, Utils::jsonLabel(IN_SRC_MAC, "IN_SRC_MAC", jsonbuf, sizeof(jsonbuf)),
-			   json_object_new_string(Utils::formatMac(cli_host ? cli_host->get_mac() : NULL, buf, sizeof(buf))));
-    json_object_object_add(my_object, Utils::jsonLabel(OUT_DST_MAC, "OUT_DST_MAC", jsonbuf, sizeof(jsonbuf)),
-			   json_object_new_string(Utils::formatMac(srv_host ? srv_host->get_mac() : NULL, buf, sizeof(buf))));
+    if(cli_host)
+      json_object_object_add(my_object, Utils::jsonLabel(IN_SRC_MAC, "IN_SRC_MAC", jsonbuf, sizeof(jsonbuf)),
+			     json_object_new_string(Utils::formatMac(cli_host ? cli_host->get_mac() : NULL, buf, sizeof(buf))));
+    if(srv_host)
+      json_object_object_add(my_object, Utils::jsonLabel(OUT_DST_MAC, "OUT_DST_MAC", jsonbuf, sizeof(jsonbuf)),
+			     json_object_new_string(Utils::formatMac(srv_host ? srv_host->get_mac() : NULL, buf, sizeof(buf))));
   }
 
-  if(cli_host) {
-    if(get_cli_ip_addr()->isIPv4()) {
+  if(cli_ip) {
+    if(cli_ip->isIPv4()) {
       json_object_object_add(my_object, Utils::jsonLabel(IPV4_SRC_ADDR, "IPV4_SRC_ADDR", jsonbuf, sizeof(jsonbuf)),
-			     json_object_new_string(cli_host->get_string_key(buf, sizeof(buf))));
-    } else if(get_cli_ip_addr()->isIPv6()) {
+			     json_object_new_string(cli_ip->print(buf, sizeof(buf))));
+    } else if(cli_ip->isIPv6()) {
       json_object_object_add(my_object, Utils::jsonLabel(IPV6_SRC_ADDR, "IPV6_SRC_ADDR", jsonbuf, sizeof(jsonbuf)),
-			     json_object_new_string(cli_host->get_string_key(buf, sizeof(buf))));
+			     json_object_new_string(cli_ip->print(buf, sizeof(buf))));
     }
   }
 
-  if(srv_host) {
-    if(get_srv_ip_addr()->isIPv4()) {
+  if(srv_ip) {
+    if(srv_ip->isIPv4()) {
       json_object_object_add(my_object, Utils::jsonLabel(IPV4_DST_ADDR, "IPV4_DST_ADDR", jsonbuf, sizeof(jsonbuf)),
-			     json_object_new_string(srv_host->get_string_key(buf, sizeof(buf))));
-    } else if(get_srv_ip_addr()->isIPv6()) {
+			     json_object_new_string(srv_ip->print(buf, sizeof(buf))));
+    } else if(srv_ip->isIPv6()) {
       json_object_object_add(my_object, Utils::jsonLabel(IPV6_DST_ADDR, "IPV6_DST_ADDR", jsonbuf, sizeof(jsonbuf)),
-			     json_object_new_string(srv_host->get_string_key(buf, sizeof(buf))));
+			     json_object_new_string(srv_ip->print(buf, sizeof(buf))));
     }
   }
 
@@ -2384,7 +2402,7 @@ json_object* Flow::flow2json() {
 #ifdef HAVE_NEDGE
 
 bool Flow::isNetfilterIdleFlow() {
-  if(idle()) return(true);
+  if(GenericHashEntry::idle()) return(true);
 
   /*
      Note that on netfilter interfaces we never observe the
@@ -2420,13 +2438,15 @@ bool Flow::isNetfilterIdleFlow() {
 /* *************************************** */
 
 void Flow::housekeep(time_t t) {
-#ifdef HAVE_NEDGE
-  if(iface->getIfType() == interface_type_NETFILTER) {
-    if(isNetfilterIdleFlow()) {
-      set_idle(iface->getTimeLastPktRcvd());
-    }
-  }
-#endif
+  /* Following snippet no longer necessary as confirmed by Emanuele as flows are
+     idled in then Flow::update_hosts_stats */
+// #ifdef HAVE_NEDGE
+//   if(iface->getIfType() == interface_type_NETFILTER) {
+//     if(isNetfilterIdleFlow()) {
+//       // set_idle(iface->getTimeLastPktRcvd()); TODO: check
+//     }
+//   }
+// #endif
 
   if((!isDetectionCompleted()) && ((t - get_last_seen()) > 5 /* sec */)
      && iface->get_ndpi_struct()
@@ -2439,14 +2459,14 @@ void Flow::housekeep(time_t t) {
 
 /* *************************************** */
 
-bool Flow::get_partial_traffic_stats(FlowTrafficStats *fts, bool *first_partial) {
+bool Flow::get_partial_traffic_stats(FlowTrafficStats **dst, FlowTrafficStats *fts, bool *first_partial) const {
   FlowTrafficStats tmp;
 
-  if(!fts || !first_partial)
+  if(!fts || !dst)
     return false;
 
-  if(!last_partial) {
-    if(!(last_partial = (FlowTrafficStats*)calloc(1, sizeof(FlowTrafficStats))))
+  if(!*dst) {
+    if(!(*dst = (FlowTrafficStats*)calloc(1, sizeof(FlowTrafficStats))))
       return false;
     *first_partial = true;
   } else
@@ -2454,14 +2474,41 @@ bool Flow::get_partial_traffic_stats(FlowTrafficStats *fts, bool *first_partial)
 
   memcpy(&tmp, &stats, sizeof(stats));
 
-  fts->cli2srv_packets = tmp.cli2srv_packets - last_partial->cli2srv_packets;
-  fts->srv2cli_packets = tmp.srv2cli_packets - last_partial->srv2cli_packets;
-  fts->cli2srv_bytes   = tmp.cli2srv_bytes - last_partial->cli2srv_bytes;
-  fts->srv2cli_bytes   = tmp.srv2cli_bytes - last_partial->srv2cli_bytes;
-  fts->cli2srv_goodput_bytes = tmp.cli2srv_goodput_bytes - last_partial->cli2srv_goodput_bytes;
-  fts->srv2cli_goodput_bytes = tmp.srv2cli_goodput_bytes - last_partial->srv2cli_goodput_bytes;
+  fts->cli2srv_packets = tmp.cli2srv_packets - (*dst)->cli2srv_packets;
+  fts->srv2cli_packets = tmp.srv2cli_packets - (*dst)->srv2cli_packets;
+  fts->cli2srv_bytes   = tmp.cli2srv_bytes - (*dst)->cli2srv_bytes;
+  fts->srv2cli_bytes   = tmp.srv2cli_bytes - (*dst)->srv2cli_bytes;
+  fts->cli2srv_goodput_bytes = tmp.cli2srv_goodput_bytes - (*dst)->cli2srv_goodput_bytes;
+  fts->srv2cli_goodput_bytes = tmp.srv2cli_goodput_bytes - (*dst)->srv2cli_goodput_bytes;
 
-  memcpy(last_partial, &tmp, sizeof(tmp));
+  memcpy(*dst, &tmp, sizeof(tmp));
+
+  return true;
+}
+
+/* *************************************** */
+
+bool Flow::get_partial_traffic_stats_view(FlowTrafficStats *fts, bool *first_partial) {
+  return get_partial_traffic_stats(&last_partial, fts, first_partial);
+}
+  
+/* *************************************** */
+
+bool Flow::update_partial_traffic_stats_db_dump() {  
+  FlowTrafficStats delta;
+  bool first_partial;
+
+  if(!get_partial_traffic_stats(&last_db_dump.partial, &delta, &first_partial))
+    return false;
+
+  memcpy(&last_db_dump.delta, &delta, sizeof(delta));
+
+  if(first_partial)
+    last_db_dump.first_seen = get_first_seen();
+  else
+    last_db_dump.first_seen = last_db_dump.last_seen;
+
+  last_db_dump.last_seen = get_last_seen();
 
   return true;
 }
@@ -3642,8 +3689,8 @@ FlowStatus Flow::getFlowStatus() {
 
   /* NOTE: evaluation order is important here! */
 
-  if(iface->isPacketInterface() && iface->is_purge_idle_interface() &&
-      !is_ready_to_be_purged() && isIdle(5 * ntop->getPrefs()->get_flow_max_idle())) {
+  if(iface->isPacketInterface() && iface->is_purge_idle_interface()
+     && !idle() && isIdle(10 * ntop->getPrefs()->get_flow_max_idle())) {
     /* Should've already been marked as idle and purged */
     return status_not_purged;
   }

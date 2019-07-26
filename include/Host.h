@@ -36,10 +36,8 @@ class Host : public GenericHashEntry, public AlertableEntity {
   u_int16_t vlan_id, host_pool_id;
   HostStats *stats, *stats_shadow;
   time_t last_stats_reset;
-
-  /* Marked when visited by the periodic activities */
-  bool idle_mark;
-
+  u_int32_t disabled_flow_status;
+  
   /* Host data: update Host::deleteHostData when adding new fields */
   struct {
     char * mdns, * mdns_txt;
@@ -106,11 +104,6 @@ class Host : public GenericHashEntry, public AlertableEntity {
   inline void setSystemHost()                { /* TODO: remove */              };
 
   inline nDPIStats* get_ndpi_stats()       { return(stats->getnDPIStats()); };
-
-  virtual void set_to_purge(time_t t) { /* Saves 1 extra-step of purge idle */
-    iface->decNumHosts(isLocalHost());
-    GenericHashEntry::set_to_purge(t);
-  };
 
   inline bool isChildSafe() {
 #ifdef NTOPNG_PRO
@@ -210,9 +203,7 @@ class Host : public GenericHashEntry, public AlertableEntity {
   char* get_hostkey(char *buf, u_int buf_len, bool force_vlan=false);
   char* get_tskey(char *buf, size_t bufsize);
 
-  inline void set_idle(time_t t) { idle_mark = true;  };
-  virtual bool idle()            { return(idle_mark); };
-  bool isReadyToBeMarkedAsIdle();
+  virtual bool idle();
 
   virtual void incICMP(u_int8_t icmp_type, u_int8_t icmp_code, bool sent, Host *peer) {};
   virtual void lua(lua_State* vm, AddressTree * ptree, bool host_details,
@@ -253,7 +244,6 @@ class Host : public GenericHashEntry, public AlertableEntity {
   virtual void luaTCP(lua_State *vm) const { };
   virtual u_int16_t getNumActiveContactsAsClient() const  { return 0; };
   virtual u_int16_t getNumActiveContactsAsServer() const  { return 0; };
-  virtual void postHashAdd();
 
   virtual NetworkStats* getNetworkStats(int16_t networkId) { return(NULL);   };
   inline Country* getCountryStats()                        { return country; };
@@ -264,7 +254,7 @@ class Host : public GenericHashEntry, public AlertableEntity {
   bool incFlowAlertHits(time_t when);
   virtual bool setRemoteToRemoteAlerts() { return(false); };
   virtual void incrVisitedWebSite(char *hostname) {};
-  inline void incTotalAlerts()            { stats->incTotalAlerts(); }
+  inline void incTotalAlerts(AlertType alert_type) { stats->incTotalAlerts(alert_type); }
   inline u_int32_t getTotalAlerts()       { return(stats->getTotalAlerts()); }
   virtual u_int32_t getActiveHTTPHosts()  { return(0); };
   inline u_int32_t getNumOutgoingFlows()  { return(num_active_flows_as_client.get()); }
@@ -311,7 +301,22 @@ class Host : public GenericHashEntry, public AlertableEntity {
   void dissectDropbox(const char *payload, u_int16_t payload_len);
   void dumpDropbox(lua_State *vm);
   inline Fingerprint* getSSLFingerprint() { return(&fingerprints.ssl); }
-  virtual void setFlowPort(bool as_server, u_int8_t proto, u_int16_t port, u_int16_t l7_proto) { ; }
+  virtual void setFlowPort(bool as_server, Host *peer, u_int8_t protocol,
+			   u_int16_t port, u_int16_t l7_proto,
+			   const char *info, time_t when) { ; }
   virtual void luaPortsDump(lua_State* vm) { lua_pushnil(vm); }    
+  void refreshDisableFlowAlertTypes();
+  
+  inline bool isDisabledFlowAlertType(u_int32_t v) {
+    return(Utils::bitmapIsSet(disabled_flow_status, v));
+  }
+
+  inline void toggleDisabledFlowAlertType(u_int32_t v, bool disable_alert) {
+    if(disable_alert)
+      disabled_flow_status = Utils::bitmapSet(disabled_flow_status, v);
+    else
+      disabled_flow_status = Utils::bitmapClear(disabled_flow_status, v);
+  }
 };
+
 #endif /* _HOST_H_ */

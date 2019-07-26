@@ -24,7 +24,7 @@
 /* *************************************** */
 
 Host::Host(NetworkInterface *_iface, char *ipAddress, u_int16_t _vlanId) : GenericHashEntry(_iface),
-      AlertableEntity(alert_entity_host) {
+									   AlertableEntity(alert_entity_host) {
   ip.set(ipAddress);
   initialize(NULL, _vlanId, true);
 }
@@ -49,7 +49,7 @@ Host::Host(NetworkInterface *_iface, Mac *_mac,
 
 Host::~Host() {
   if(num_uses > 0 && (!iface->isView()
-		      || !ntop->getGlobals()->isShutdown() /* View hosts are not in sync with viewed flows so during shutdown it can be normal */))
+		      || !ntop->getGlobals()->isShutdownRequested() /* View hosts are not in sync with viewed flows so during shutdown it can be normal */))
     ntop->getTrace()->traceEvent(TRACE_WARNING, "Internal error: num_uses=%u", num_uses);
 
   // ntop->getTrace()->traceEvent(TRACE_NORMAL, "Deleting %s (%s)", k, localHost ? "local": "remote");
@@ -136,8 +136,6 @@ void Host::set_host_label(char *label_name, bool ignoreIfPresent) {
 void Host::initialize(Mac *_mac, u_int16_t _vlanId, bool init_all) {
   char buf[64];
 
-  idle_mark = false;
-
   stats = NULL; /* it will be instantiated by specialized classes */
   stats_shadow = NULL;
   data_delete_requested = false, stats_reset_requested = false;
@@ -186,14 +184,18 @@ void Host::initialize(Mac *_mac, u_int16_t _vlanId, bool init_all) {
   refreshHostAlertPrefs();
   PROFILING_SUB_SECTION_EXIT(iface, 19);
 
+  disabled_flow_status = 0;
+  refreshDisableFlowAlertTypes();
+  
   if(init_all) {
+    char country_name[64];
+    
     if((as = iface->getAS(&ip, true /* Create if missing */, true /* Inline call */)) != NULL) {
       as->incUses();
       asn = as->get_asn();
       asname = as->get_asname();
     }
 
-    char country_name[64];
     get_country(country_name, sizeof(country_name));
 
     if((country = iface->getCountry(country_name, true /* Create if missing */, true /* Inline call */ )) != NULL)
@@ -625,7 +627,9 @@ char * Host::get_os(char * const buf, ssize_t buf_len) {
 
 /* ***************************************** */
 
-bool Host::isReadyToBeMarkedAsIdle() {
+bool Host::idle() {
+  if(GenericHashEntry::idle()) return(true);
+
   if((num_uses > 0) || (!iface->is_purge_idle_interface()))
     return(false);
 
@@ -656,8 +660,7 @@ void Host::incStats(u_int32_t when, u_int8_t l4_proto, u_int ndpi_proto,
 		    custom_app_t custom_app,
 		    u_int64_t sent_packets, u_int64_t sent_bytes, u_int64_t sent_goodput_bytes,
 		    u_int64_t rcvd_packets, u_int64_t rcvd_bytes, u_int64_t rcvd_goodput_bytes,
-	bool peer_is_unicast) {
-
+		    bool peer_is_unicast) {
   if(sent_bytes || rcvd_bytes) {
     stats->incStats(when, l4_proto, ndpi_proto, custom_app,
 		    sent_packets, sent_bytes, sent_goodput_bytes, rcvd_packets,
@@ -690,7 +693,6 @@ void Host::serialize(json_object *my_object, DetailsLevel details_level) {
     if(asname)      json_object_object_add(my_object, "asname",    json_object_new_string(asname ? asname : (char*)""));
     get_os(buf, sizeof(buf));
     if(strlen(buf)) json_object_object_add(my_object, "os",        json_object_new_string(buf));
-
 
     json_object_object_add(my_object, "localHost", json_object_new_boolean(isLocalHost()));
     json_object_object_add(my_object, "systemHost", json_object_new_boolean(isSystemHost()));
@@ -910,10 +912,6 @@ void Host::luaUsedQuotas(lua_State* vm) {
     lua_newtable(vm);
 }
 #endif
-
-/* *************************************** */
-
-void Host::postHashAdd() {}
 
 /* *************************************** */
 
@@ -1143,8 +1141,8 @@ bool Host::statsResetRequested() {
 void Host::updateStats(update_hosts_stats_user_data_t *update_hosts_stats_user_data) {
   struct timeval *tv = update_hosts_stats_user_data->tv;
 
-  if(isReadyToBeMarkedAsIdle()) {
-    set_idle(tv->tv_sec);
+  if(get_state() == hash_entry_state_idle) {
+    set_state(hash_entry_state_ready_to_be_purged);
 
     if(getNumTriggeredAlerts()
        && (update_hosts_stats_user_data->acle
@@ -1152,12 +1150,11 @@ void Host::updateStats(update_hosts_stats_user_data_t *update_hosts_stats_user_d
        ) {
       AlertCheckLuaEngine *acle = update_hosts_stats_user_data->acle;
       lua_State *L = acle->getState();
-      acle->setEntity(this);
+      acle->setHost(this);
 
-      lua_getglobal(L, "idleWithTriggeredAlerts"); /* Called function */
+      lua_getglobal(L, ALERT_ENTITY_CALLBACK_RELEASE_ALERTS); /* Called function */
 
-      if(lua_pcall(L, 0 /* 0 arguments */, 0 /* 0 results */, 0)) /* Call the function now */
-	ntop->getTrace()->traceEvent(TRACE_WARNING, "Script failure [%s]", lua_tostring(L, -1));
+      acle->pcall(0 /* 0 arguments */, 0 /* 0 results */);
     }
   }
 
@@ -1339,5 +1336,14 @@ void Host::dumpDropbox(lua_State *vm) {
 
 /* **************************************************** */
 
+void Host::refreshDisableFlowAlertTypes() {
+  char keybuf[128], buf[128], rsp[32];
 
+  snprintf(buf, sizeof(buf), CONST_HOST_REFRESH_DISABLED_FLOW_ALERT_TYPES,
+    iface->get_id(), get_hostkey(keybuf, sizeof(keybuf), true));
 
+  if(!ntop->getRedis()->get(buf, rsp, sizeof(rsp)) && (rsp[0] != '\0'))
+    disabled_flow_status = atol(rsp);
+  else
+    disabled_flow_status = 0;
+}

@@ -6,6 +6,7 @@ local dirs = ntop.getDirs()
 package.path = dirs.installdir .. "/scripts/lua/modules/?.lua;" .. package.path
 if((dirs.scriptdir ~= nil) and (dirs.scriptdir ~= "")) then package.path = dirs.scriptdir .. "/lua/modules/?.lua;" .. package.path end
 require "lua_utils"
+local alerts_api = require("alerts_api")
 local recording_utils = require "recording_utils"
 local remote_assistance = require "remote_assistance"
 local telemetry_utils = require "telemetry_utils"
@@ -120,7 +121,7 @@ if(ntop.isPro()) then
   print('<li><a href="'..ntop.getHttpPrefix()..'/lua/pro/report.lua"><i class="fa fa-area-chart"></i> ') print(i18n("report.traffic_report")) print('</a></li>')
 end
 
-if ntop.isPro() and prefs.is_dump_flows_to_mysql_enabled and not ifs.isView then
+if ntop.isPro() and prefs.is_dump_flows_to_mysql_enabled and not ifs.isViewed then
   print('<li class="divider"></li>')
   print('<li><a href="'..ntop.getHttpPrefix()..'/lua/pro/db_explorer.lua?ifid='..ifId..'"><i class="fa fa-history"></i> ') print(i18n("db_explorer.historical_data_explorer")) print('</a></li>')
 end
@@ -143,7 +144,7 @@ if not ifs.isView and ntop.getPrefs().are_alerts_enabled == true then
    -- color = 'style="color: #B94A48;"' -- bootstrap danger red
    -- end
 
-   if not ifs["has_alerts"] then
+   if not ifs["has_alerts"] and not alerts_api.hasEntitiesWithAlertsDisabled(ifId) then
       style = ' style="display: none;"'
    end
 
@@ -271,12 +272,6 @@ end
 if(ntop.getPrefs().is_arp_matrix_generation_enabled) then
    print('<li><a href="'..ntop.getHttpPrefix()..'/lua/arp_matrix_graph.lua"><i class="fa fa-th-large"></i> ') print(i18n("arp_top_talkers")) print('</a></li>')
 end
-
-print [[
-      <li><a href="]]
-print(ntop.getHttpPrefix())
-print [[/lua/hosts_matrix.lua"><i class="fa fa-th-large"></i> ]] print(i18n("local_flow_matrix.local_flow_matrix")) print[[</a></li>
-   ]]
 
 print [[
       <li><a href="]]

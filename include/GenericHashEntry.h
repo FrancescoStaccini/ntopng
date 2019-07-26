@@ -28,22 +28,68 @@
  *  @brief Base hash entry class.
  *  @details Defined the base hash entry class for ntopng.
  *
+ *  This class handle entries placed in hash tables built
+ *  with class GenericHash.
+ *
+ *  GenericHashEntry has a lifecycle which is written into
+ *  the enum HashEntryState and is implemented as a finite states
+ *  machine. States are:
+ *
+ *  - hash_entry_state_active. This state is the default one which
+ *  is set as soon as the GenericHashEntry is instantiated.
+ *
+ *  - hash_entry_state_idle. This state is set by method purgeIdle
+ *  in class GenericHash and is used to explicitly mark the entry 
+ *  as idle. NOTE that purgeIdle is always called inline, that is,
+ *  in the thread which receives the incoming packets (or incoming
+ *  flows). Once the entry has been marked as hash_entry_state_idle,
+ *  the inline thread will not be able to fetch the entry again. Howevever,
+ *  before deleting the entry, an extra transition is needed to make sure
+ *  also a non-inline periodic thread has seen the entry.
+ *
+ *  - hash_entry_state_ready_to_be_purged. This state is set by
+ *  non-inline periodic threads, generally from method updateStats,
+ *  only after the inline thread has set state hash_entry_state_idle. This
+ *  guarantees that also a non-inline thread has seen the entry before
+ *  cleaning it up and freeing its memory. Once this state has been set,
+ *  the inline-thread will perform the actual delete to free the memory.
+ *
+ *  The following diagram recaps the states transitions
+ *
+ *             ..new..
+ *                |
+ *                |
+ *                v
+ *      hash_entry_state_active
+ *                |
+ *                | [inline]
+ *                v
+ *      hash_entry_state_idle
+ *                |
+ *                | [non-inline]
+ *                v
+ *      hash_entry_state_ready_to_be_purged
+ *                |
+ *                |
+ *                v
+ *          ...deleted...
+ *
  *  @ingroup MonitoringData
  *
  */
 class GenericHashEntry {
  private:
   GenericHashEntry *hash_next; /**< Pointer of next hash entry.*/
+  HashEntryState hash_entry_state;
 
  protected:
   u_int32_t num_uses;  /* Don't use 16 bits as we might run out of space on large networks with MACs, VLANs etc. */
-  bool will_be_purged; /**< Mark this host as candidate for purging. */
   time_t first_seen;   /**< Time of first seen. */
   time_t last_seen;    /**< Time of last seen. */
   NetworkInterface *iface; /**< Pointer of network interface. */
 
   virtual bool isIdle(u_int max_idleness);
- public:
+ public:  
   /**
     * @brief A Constructor
     * @details Creating a new GenericHashEntry.
@@ -86,15 +132,15 @@ class GenericHashEntry {
    * 
    * @param n Hash entry to set as next hash entry.
    */
-  inline void set_next(GenericHashEntry *n) { hash_next = n;     };
+  inline void set_next(GenericHashEntry *n) { hash_next = n;           };
+  inline void set_state(HashEntryState s)   { hash_entry_state = s;    };
+  HashEntryState get_state() const;
   void updateSeen();
   void updateSeen(time_t _last_seen);
   bool equal(GenericHashEntry *b)         { return((this == b) ? true : false); };  
   inline NetworkInterface* getInterface() { return(iface);                      };
   virtual bool idle();
-  virtual void set_to_purge(time_t t)  { will_be_purged = true;  };
   virtual void housekeep(time_t t)     { return;                 };
-  inline bool is_ready_to_be_purged()  { return(will_be_purged); };
   inline u_int get_duration()          { return((u_int)(1+last_seen-first_seen)); };
   virtual u_int32_t key()              { return(0);         };  
   virtual char* get_string_key(char *buf, u_int buf_len) const { buf[0] = '\0'; return(buf); };

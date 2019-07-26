@@ -1,6 +1,6 @@
 /*
  *
- * (C) 2019 - ntop.org
+ * (C) 2013-19 - ntop.org
  *
  *
  * This program is free software; you can redistribute it and/or modify
@@ -19,18 +19,23 @@
  *
  */
 
-#ifndef _ALERT_H_
-#define _ALERT_H_
+#ifndef _PORT_CONTACT_STATS_H_
+#define _PORT_CONTACT_STATS_H_
 
-class Alert {
+#include "ntop_includes.h"
+
+class PortContactStats {
+  u_int16_t l7_proto;
+  std::string last_peer, info;
+  time_t last_seen; 
+
  public:
-  time_t alert_tstamp_start;
-  time_t last_update;
-  AlertLevel alert_severity;
-  AlertType alert_type;
-  std::string alert_subtype;
-  std::string alert_json;
-  bool is_disabled;
+  PortContactStats() { l7_proto = 0, last_seen = 0; }
+  PortContactStats(u_int16_t _l7_proto, Host *peer, const char *_info, time_t when);
+
+  void update(Host *peer, const char *_info, time_t when);
+  void lua(lua_State* vm, NetworkInterface *iface);
 };
+
 
 #endif

@@ -44,7 +44,7 @@ LUA_LIB=$(LUA_HOME)/src/liblua.a
 
 ######
 LIBRRDTOOL_HOME=${PWD}/third-party/rrdtool-1.4.8
-HAS_LIBRRDTOOL=$(shell pkg-config --atleast-version=1.4.8 librrd; echo $$?)
+HAS_LIBRRDTOOL=$(shell pkg-config --atleast-version=1.4.8 librrd && echo 0)
 ifeq ($(HAS_LIBRRDTOOL), 0)
 	LIBRRDTOOL_INC = $(shell pkg-config --cflags librrd)
 	LIBRRDTOOL_LIB = $(shell pkg-config --libs librrd) # -lrrd_th
@@ -70,20 +70,13 @@ HTTPCLIENT_INC=${PWD}/third-party/http-client-c/src/
 
 ######
 
-HAS_JSON=$(shell pkg-config --exists json-c; echo $$?)
-ifeq ($(HAS_JSON), 0)
-	JSON_INC = $(shell pkg-config --cflags json-c)
-	JSON_LIB = $(shell pkg-config --libs json-c)
-else
-	JSON_HOME=${PWD}/third-party/json-c
-	JSON_INC=-I$(JSON_HOME)
-	JSON_LIB=$(JSON_HOME)/.libs/libjson-c.a
-endif
+JSON_INC=@JSON_INC@
+JSON_LIB=@JSON_LIB@
 
 ######
 
 ifeq (@NEDGE@, 0)
- HAS_SODIUM=$(shell pkg-config --exists libsodium; echo $$?)
+ HAS_SODIUM=$(shell pkg-config --exists libsodium && echo 0)
  ifeq ($(HAS_SODIUM), 0)
 	SODIUM_INC = $(shell pkg-config --cflags libsodium)
 	SODIUM_LIB = $(shell pkg-config --libs libsodium)
@@ -92,7 +85,7 @@ ifeq (@NEDGE@, 0)
 	SODIUM_LIB=
  endif
 
- HAS_ZEROMQ=$(shell pkg-config --exists libzmq; echo $$?)
+ HAS_ZEROMQ=$(shell pkg-config --exists libzmq && echo 0)
  ifeq ($(HAS_ZEROMQ), 0)
 	ZEROMQ_INC = $(shell pkg-config --cflags libzmq)
 	ZMQ_STATIC=/usr/local/lib/libzmq.a
@@ -107,7 +100,7 @@ ifeq (@NEDGE@, 0)
 	ZEROMQ_LIB=$(ZEROMQ_HOME)/.libs/libzmq.a
  endif
 
- HAS_ZSTD=$(shell pkg-config --exists libzstd; echo $$?)
+ HAS_ZSTD=$(shell pkg-config --exists libzstd && echo 0)
  ifeq ($(HAS_ZSTD), 0)
 	ZSTD_LIB = $(shell pkg-config --libs libzstd)
  endif
@@ -135,10 +128,6 @@ endif
 
 ifneq ($(HAS_LIBRRDTOOL), 0)
 LIB_TARGETS += $(LIBRRDTOOL_LIB)
-endif
-
-ifneq ($(HAS_JSON), 0)
-LIB_TARGETS += $(JSON_LIB)
 endif
 
 .PHONY: default all clean docs test
@@ -170,9 +159,6 @@ $(ZEROMQ_LIB):
 # --disable-rrd_graph
 $(LIBRRDTOOL_LIB):
 	cd $(LIBRRDTOOL_HOME); ./configure --disable-libdbi --disable-libwrap --disable-rrdcgi --disable-libtool-lock --disable-nls --disable-rpath --disable-perl --disable-ruby --disable-lua --disable-tcl --disable-python --disable-dependency-tracking --disable-rrd_graph ; cd src; @GMAKE@ librrd_th.la
-
-$(JSON_LIB):
-	cd $(JSON_HOME); ./autogen.sh; ./configure; @GMAKE@
 
 hooks/.enabled:
 	git config core.hooksPath hooks || true

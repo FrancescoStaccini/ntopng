@@ -121,8 +121,6 @@ PcapInterface::PcapInterface(const char *name) : NetworkInterface(name) {
 /* **************************************************** */
 
 PcapInterface::~PcapInterface() {
-  shutdown();
-
   if(pcap_handle) {
     pcap_close(pcap_handle);
     pcap_handle = NULL;
@@ -183,6 +181,7 @@ static void* packetPollLoop(void* ptr) {
   PcapInterface *iface = (PcapInterface*)ptr;
   pcap_t *pd;
   FILE *pcap_list = iface->get_pcap_list();
+  struct timeval startTS, firstPktTS;
   int fd = -1;
 
   /* Wait until the initialization completes */
@@ -238,6 +237,8 @@ static void* packetPollLoop(void* ptr) {
     fd = pcap_get_selectable_fd(pd);
 #endif
 
+    firstPktTS.tv_sec = 0;
+
     while((pd != NULL) 
 	  && iface->isRunning() 
 	  && (!ntop->getGlobals()->isShutdown())) {
@@ -260,36 +261,32 @@ static void* packetPollLoop(void* ptr) {
 	  continue;
 	}
       }
-      
+
       if((rc = pcap_next_ex(pd, &hdr, &pkt)) > 0) {
 	if(iface->reproducePcapOriginalSpeed()) {
 	  struct timeval now;
-	  static struct timeval lastPktProcessed = { 0, 0 }, lastPcapTime;
 	    
 	  gettimeofday(&now, NULL);
 
-	  if(lastPktProcessed.tv_sec > 0) {
-	    u_int32_t n, m = Utils::msTimevalDiff(&hdr->ts, &lastPcapTime);
+	  if(firstPktTS.tv_sec == 0) {
+            startTS = now;
+            firstPktTS = hdr->ts;
+          } else {
+            u_int32_t packetTimeDelta = Utils::msTimevalDiff(&hdr->ts, &firstPktTS);
+            u_int32_t fromStartTimeDelta = Utils::msTimevalDiff(&now, &startTS);
 
-	    if(m < 100000) { /* Catch wrong timestamps */
-	      n = (u_int32_t)Utils::msTimevalDiff(&now, &lastPktProcessed);
-
-	      if(n < m) {
-		ntop->getTrace()->traceEvent(TRACE_INFO,
-					     "Sleeping %.3f sec [delta %.3f sec]",
-					     ((float)(m-n))/1000, ((float)m)/1000);
+            if (packetTimeDelta > fromStartTimeDelta) {
+              u_int32_t sleepMs = packetTimeDelta - fromStartTimeDelta;
+                
+	      ntop->getTrace()->traceEvent(TRACE_NORMAL, "Sleeping %.3f sec", ((float)(sleepMs))/1000);
 		
-		usleep((m - n)*1000);
-	      }
-	    }
+	      usleep(sleepMs*1000);
 
-	    /* Recompute after sleep */
-	    gettimeofday(&now, NULL);
+	      /* Recompute after sleep */
+	      gettimeofday(&now, NULL);
+	    }
 	  }
 
-	  lastPcapTime = hdr->ts;
-	  lastPktProcessed = now;
-	  
 	  hdr->ts = now;
 	}
 	  
@@ -331,6 +328,7 @@ static void* packetPollLoop(void* ptr) {
 	iface->purgeIdle(time(NULL));
       }
     } /* while */
+
   } while(pcap_list != NULL);
 
   if(iface->read_from_pcap_dump() && !iface->reproducePcapOriginalSpeed()) {
@@ -386,20 +384,6 @@ void PcapInterface::startPacketPolling() {
   pthread_create(&pollLoop, NULL, packetPollLoop, (void*)this);  
   pollLoopCreated = true;
   NetworkInterface::startPacketPolling();
-}
-
-/* **************************************************** */
-
-void PcapInterface::shutdown() {
-  if(running) {
-    void *res;
-
-    NetworkInterface::shutdown();
-#ifndef WIN32
-    pthread_kill(pollLoop, SIGTERM);
-#endif
-    pthread_join(pollLoop, &res);
-  }
 }
 
 /* **************************************************** */

@@ -24,6 +24,8 @@
 /* **************************************************** */
 
 ViewInterface::ViewInterface(const char *_endpoint) : NetworkInterface(_endpoint) {
+  is_view = true; /* This is a view interface */
+
   memset(viewed_interfaces, 0, sizeof(viewed_interfaces));
   num_viewed_interfaces = 0;
   char *ifaces = strdup(&_endpoint[5]); /* Skip view: */
@@ -81,7 +83,7 @@ bool ViewInterface::walker(u_int32_t *begin_slot,
 			   void *user_data,
 			   bool walk_idle) {
   bool ret = false;
-  u_int32_t flows_begin_slot; /* Always from the beginning, all flows */
+  u_int32_t flows_begin_slot = 0; /* Always from the beginning, all flows */
 
   switch(wtype) {
   case walker_flows:
@@ -177,6 +179,17 @@ u_int32_t ViewInterface::getCheckPointNumPacketDrops() {
 
 /* **************************************************** */
 
+bool ViewInterface::hasSeenVlanTaggedPackets() const {
+  for(u_int8_t s = 0; s < num_viewed_interfaces; s++) {
+    if(viewed_interfaces[s]->hasSeenVlanTaggedPackets())
+      return true;
+  }
+
+  return false;
+}
+
+/* **************************************************** */
+
 u_int32_t ViewInterface::getFlowsHashSize() {
   u_int32_t tot = 0;
 
@@ -218,22 +231,35 @@ Flow* ViewInterface::findFlowByTuple(u_int16_t vlan_id,
 
 /* **************************************************** */
 
+typedef struct {
+  struct timeval tv;
+  ViewInterface *iface;
+} viewed_flows_walker_user_data_t;
+
+/* **************************************************** */
+
 static bool viewed_flows_walker(GenericHashEntry *flow, void *user_data, bool *matched) {
-  ViewInterface *iface = (ViewInterface*)user_data;
+  viewed_flows_walker_user_data_t *viewed_flows_walker_user_data = (viewed_flows_walker_user_data_t*)user_data;
+  ViewInterface *iface = viewed_flows_walker_user_data->iface;
+  const struct timeval *tv = &viewed_flows_walker_user_data->tv;
   Flow *f = (Flow*)flow;
-  time_t now = time(NULL);
-  bool flow_idle = f->idle();
+  bool acked_to_purge;
 
-  iface->purgeIdle(now);
+  acked_to_purge = f->is_acknowledged_to_purge();
 
-  if(f->is_acknowledged_to_purge())
-    return false; /* Already visited for the last time after it has gone idle, keep walking */
+  if(acked_to_purge) {
+    /* We can set the 'ready to be purged' state on behalf of the underlying viewed interface.
+       It is safe as this view is in sync with the viewed interfaces by bean of acked_to_purge */
+    f->set_state(hash_entry_state_ready_to_be_purged);
+  }
+
+  f->dumpFlow(tv, iface);
 
   FlowTrafficStats partials;
   bool first_partial; /* Whether this is the first time the view is visiting this flow */
   const IpAddress *cli_ip = f->get_cli_ip_addr(), *srv_ip = f->get_srv_ip_addr();
 
-  if(f->get_partial_traffic_stats(&partials, &first_partial)) {
+  if(f->get_partial_traffic_stats_view(&partials, &first_partial)) {
     if(!cli_ip || !srv_ip)
       ntop->getTrace()->traceEvent(TRACE_ERROR, "Unable to get flow hosts. Out of memory? Expect issues.");
 
@@ -244,62 +270,72 @@ static bool viewed_flows_walker(GenericHashEntry *flow, void *user_data, bool *m
 			   NULL /* no src mac yet */, (IpAddress*)cli_ip, &cli_host,
 			   NULL /* no dst mac yet */, (IpAddress*)srv_ip, &srv_host);
 
-    if(cli_host) {
-      cli_host->incStats(now, f->get_protocol(), f->getStatsProtocol(), f->getCustomApp(),
-			 partials.cli2srv_packets, partials.cli2srv_bytes, partials.cli2srv_goodput_bytes,
-			 partials.srv2cli_packets, partials.srv2cli_bytes, partials.srv2cli_goodput_bytes,
-			 cli_ip->isNonEmptyUnicastAddress());
+      if(cli_host) {
+	cli_host->incStats(tv->tv_sec, f->get_protocol(), f->getStatsProtocol(), f->getCustomApp(),
+			   partials.cli2srv_packets, partials.cli2srv_bytes, partials.cli2srv_goodput_bytes,
+			   partials.srv2cli_packets, partials.srv2cli_bytes, partials.srv2cli_goodput_bytes,
+			   cli_ip->isNonEmptyUnicastAddress());
 
-      if(first_partial)
-	cli_host->incNumFlows(f->get_last_seen(), true, srv_host), cli_host->incUses();
+	if(first_partial)
+	  cli_host->incNumFlows(f->get_last_seen(), true, srv_host), cli_host->incUses();
 
-      if(flow_idle)
-	cli_host->decNumFlows(f->get_last_seen(), true, srv_host), cli_host->decUses();
-    }
+	if(acked_to_purge)
+	  cli_host->decNumFlows(f->get_last_seen(), true, srv_host), cli_host->decUses();
+      }
 
-    if(srv_host) {
-      srv_host->incStats(now, f->get_protocol(), f->getStatsProtocol(), f->getCustomApp(),
-			 partials.srv2cli_packets, partials.srv2cli_bytes, partials.srv2cli_goodput_bytes,
-			 partials.cli2srv_packets, partials.cli2srv_bytes, partials.cli2srv_goodput_bytes,
-			 srv_ip->isNonEmptyUnicastAddress());
+      if(srv_host) {
+	srv_host->incStats(tv->tv_sec, f->get_protocol(), f->getStatsProtocol(), f->getCustomApp(),
+			   partials.srv2cli_packets, partials.srv2cli_bytes, partials.srv2cli_goodput_bytes,
+			   partials.cli2srv_packets, partials.cli2srv_bytes, partials.cli2srv_goodput_bytes,
+			   srv_ip->isNonEmptyUnicastAddress());
 
-      if(first_partial)
-	srv_host->incUses(), srv_host->incNumFlows(f->get_last_seen(), false, cli_host);
+	if(first_partial)
+	  srv_host->incUses(), srv_host->incNumFlows(f->get_last_seen(), false, cli_host);
 
-      if(flow_idle)
-	srv_host->decUses(), srv_host->decNumFlows(f->get_last_seen(), false, cli_host);
-    }
+	if(acked_to_purge)
+	  srv_host->decUses(), srv_host->decNumFlows(f->get_last_seen(), false, cli_host);
+      }
 
-    iface->incStats(true /* ingressPacket */,
-		    now, cli_ip && cli_ip->isIPv4() ? ETHERTYPE_IP : ETHERTYPE_IPV6,
-		    f->getStatsProtocol(), f->get_protocol(),
-		    partials.srv2cli_bytes + partials.cli2srv_bytes,
-		    partials.srv2cli_packets + partials.cli2srv_packets,
-		    24 /* 8 Preamble + 4 CRC + 12 IFG */ + 14 /* Ethernet header */);
+      iface->incStats(true /* ingressPacket */,
+		      tv->tv_sec, cli_ip && cli_ip->isIPv4() ? ETHERTYPE_IP : ETHERTYPE_IPV6,
+		      f->getStatsProtocol(), f->get_protocol(),
+		      partials.srv2cli_bytes + partials.cli2srv_bytes,
+		      partials.srv2cli_packets + partials.cli2srv_packets,
+		      24 /* 8 Preamble + 4 CRC + 12 IFG */ + 14 /* Ethernet header */);
     }
   }
-
-  /* The flow has already been marked as idle by the underlying viewed interface,
-     so now that we have seen it for the last time, and we know the underlying interface
-     won't change it again, we can acknowledge the flow so it can be purged. */
-  if(flow_idle)
-    f->set_acknowledge_to_purge();
 
   return false; /* Move on to the next flow, keep walking */
 }
 
 /* **************************************************** */
 
-void ViewInterface::flowPollLoop() {
+void ViewInterface::viewedFlowsWalker() {
   u_int32_t begin_slot;
-  while(isRunning() && !ntop->getGlobals()->isShutdown()) {
+  viewed_flows_walker_user_data_t viewed_flows_walker_user_data;
+
+  viewed_flows_walker_user_data.tv.tv_sec = time(NULL),
+    viewed_flows_walker_user_data.tv.tv_usec = 0,
+    viewed_flows_walker_user_data.iface = this;      
+
+  begin_slot = 0; /* Always visit all flows starting from the first slot */
+  walker(&begin_slot, true /* walk all the flows */, walker_flows, viewed_flows_walker, &viewed_flows_walker_user_data, true /* visit also idle flows (required to acknowledge the purge) */);
+
+#ifdef NTOPNG_PRO
+  dumpAggregatedFlows(&viewed_flows_walker_user_data.tv);
+#endif
+}
+
+/* **************************************************** */
+
+void ViewInterface::flowPollLoop() {
+  while(!ntop->getGlobals()->isShutdownRequested()) {
     while(idle()) sleep(1);
 
-    begin_slot = 0; /* Always visit all flows starting from the first slot */
-    walker(&begin_slot, true /* walk all the flows */, walker_flows, viewed_flows_walker, this, true /* visit also idle flows (required to acknowledge the purge) */);
+    viewedFlowsWalker();
 
     purgeIdle(time(NULL));
-    usleep(1000);
+    usleep(500000);
   }
 }
 
@@ -322,15 +358,4 @@ void ViewInterface::startPacketPolling() {
   pthread_create(&pollLoop, NULL, ::flowPollLoop, this);
   pollLoopCreated = true;
   NetworkInterface::startPacketPolling();
-}
-
-/* **************************************************** */
-
-void ViewInterface::shutdown() {
-  void *res;
-
-  if(isRunning()) {
-    NetworkInterface::shutdown();
-    pthread_join(pollLoop, &res);
-  }
 }

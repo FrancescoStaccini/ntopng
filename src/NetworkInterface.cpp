@@ -99,7 +99,6 @@ NetworkInterface::NetworkInterface(const char *name,
     }
   }
 
-  db = NULL;
   ifname = strdup(name);
   if(custom_interface_type) {
     ifDescription = strdup(name);
@@ -177,14 +176,14 @@ NetworkInterface::NetworkInterface(const char *name,
     arp_requests = arp_replies = 0;
 
     running = false,
-      inline_interface = false, db = NULL;
+      inline_interface = false;
 
     checkIdle();
     ifSpeed = Utils::getMaxIfSpeed(name);
     ifMTU = Utils::getIfMTU(name), mtuWarningShown = false;
     reloadDhcpRanges();
   } else /* id < 0 */ {
-    db = NULL, ifSpeed = 0;
+    ifSpeed = 0;
   }
 
   networkStats = NULL;
@@ -242,6 +241,9 @@ NetworkInterface::NetworkInterface(const char *name,
 
   is_loopback = (strncmp(ifname, "lo", 2) == 0) ? true : false;
 
+  snprintf(buf, sizeof(buf), "iface_%d", id);
+  setEntityValue(buf);
+
   reloadHideFromTop(false);
   updateTrafficMirrored();
   updateFlowDumpDisabled();
@@ -251,8 +253,6 @@ NetworkInterface::NetworkInterface(const char *name,
 /* **************************************************** */
 
 void NetworkInterface::init() {
-  char buf[32];
-
   ifname = NULL,
     bridge_lan_interface_id = bridge_wan_interface_id = 0, ndpi_struct = NULL,
     inline_interface = false,
@@ -298,7 +298,7 @@ void NetworkInterface::init() {
   memset(&num_alerts_engaged, 0, sizeof(num_alerts_engaged));
   has_stored_alerts = false;
 
-  is_viewed = false;
+  is_view = is_viewed = false;
 
   db = NULL;
 #ifdef NTOPNG_PRO
@@ -335,9 +335,6 @@ void NetworkInterface::init() {
     ebpfFlows = new (std::nothrow) ParsedFlow*[EBPF_QUEUE_LEN]();
   next_ebpf_insert_idx = next_ebpf_remove_idx = 0;
 
-  snprintf(buf, sizeof(buf), "iface_%d", id);
-  setEntityValue(buf);
-
   PROFILING_INIT();
 }
 
@@ -352,7 +349,7 @@ void NetworkInterface::initL7Policer() {
 
 /* **************************************** */
 
-void NetworkInterface::aggregatePartialFlow(Flow *flow) {
+void NetworkInterface::aggregatePartialFlow(const struct timeval *tv, Flow *flow) {
   if(flow && aggregated_flows_hash) {
     AggregatedFlow *aggregatedFlow = aggregated_flows_hash->find(flow);
 
@@ -400,16 +397,17 @@ void NetworkInterface::aggregatePartialFlow(Flow *flow) {
       }
     }
 
+#ifdef NTOPNG_PRO
     if(aggregatedFlow) {
       aggregatedFlow->sumFlowStats(flow,
-				   /* nextFlowAggregation will be decremented by one after the current periodic
+				   /* lastFlowAggregation will be decremented by one after the current periodic
 				      flows walk (this method is called in the periodic flows walk)
 
-				      Therefore, we can check nextFlowAggregation minus one to determine whether
+				      Therefore, we can check lastFlowAggregation minus one to determine whether
 				      a cleanup of the aggregated flows hash table is going to be performed
 				      after this walk on the (normal, non-aggregated) flows table.
 				   */
-				   ((getIfType() == interface_type_DUMMY) || (nextFlowAggregation - 1 == 0)));
+				   ((getIfType() == interface_type_DUMMY) || dumpAggregatedFlowsReady(tv)));
 
 #ifdef AGGREGATED_FLOW_DEBUG
       char buf[256];
@@ -422,6 +420,7 @@ void NetworkInterface::aggregatePartialFlow(Flow *flow) {
 				   aggregated_flows_hash->getCurrentSize());
 #endif
     }
+#endif
   }
 }
 
@@ -594,7 +593,7 @@ void NetworkInterface::deleteDataStructures() {
 NetworkInterface::~NetworkInterface() {
 #ifdef PROFILING
   u_int64_t n = ethStats.getNumIngressPackets();
-  if (n > 0) {
+  if (isPacketInterface() && n > 0) {
     for (u_int i = 0; i < PROFILING_NUM_SECTIONS; i++) {
       if (PROFILING_SECTION_LABEL(i) != NULL)
         ntop->getTrace()->traceEvent(TRACE_NORMAL, "[PROFILING] Section #%d '%s': AVG %llu ticks",
@@ -720,6 +719,39 @@ void NetworkInterface::dumpAggregatedFlow(time_t when, AggregatedFlow *f, bool i
 
 /* **************************************************** */
 
+void NetworkInterface::dumpAggregatedFlows(const struct timeval *tv) {
+  if(aggregated_flows_hash) {
+    if(lastFlowAggregation == 0)
+      lastFlowAggregation = tv->tv_sec;
+    else if(getIfType() == interface_type_DUMMY || dumpAggregatedFlowsReady(tv)) {
+      /* Start over */
+      aggregated_flows_hash->cleanup();
+      lastFlowAggregation = tv->tv_sec;
+
+#ifdef AGGREGATED_FLOW_DEBUG
+      ntop->getTrace()->traceEvent(TRACE_NORMAL,
+				   "Aggregated flows exported. "
+				   "Aggregated flows hash cleared. [num_items: %i]",
+				   aggregated_flows_hash->getCurrentSize());
+#endif
+    } else
+#ifdef AGGREGATED_FLOW_DEBUG
+      ntop->getTrace()->traceEvent(TRACE_NORMAL,
+				   "[last aggregation: %u][flow aggregation duration: %i][num_items: %u]",
+				   lastFlowAggregation, FLOW_AGGREGATION_DURATION, aggregated_flows_hash->getCurrentSize());
+#endif
+    ;
+  }
+}
+
+/* **************************************************** */
+
+bool NetworkInterface::dumpAggregatedFlowsReady(const struct timeval *tv) const {
+  return lastFlowAggregation > 0 && lastFlowAggregation + FLOW_AGGREGATION_DURATION < tv->tv_sec;
+}
+
+/* **************************************************** */
+
 void NetworkInterface::flushFlowDump() {
   if(db) db->flush();
 }
@@ -783,7 +815,7 @@ u_int32_t NetworkInterface::getVLANsHashSize() {
 /* **************************************************** */
 
 u_int32_t NetworkInterface::getFlowsHashSize() {
-  return(flows_hash->getNumEntries());
+  return(flows_hash ? flows_hash->getNumEntries() : 0);
 }
 
 /* **************************************************** */
@@ -817,7 +849,7 @@ bool NetworkInterface::walker(u_int32_t *begin_slot,
     break;
 
   case walker_flows:
-    ret = flows_hash->walk(begin_slot, walk_all, walker, user_data, walk_idle);
+    ret = flows_hash ? flows_hash->walk(begin_slot, walk_all, walker, user_data, walk_idle) : false;
     break;
 
   case walker_macs:
@@ -856,6 +888,9 @@ Flow* NetworkInterface::getFlow(Mac *srcMac, Mac *dstMac,
   Flow *ret;
   Mac *primary_mac;
   Host *srcHost = NULL, *dstHost = NULL;
+
+  if(!flows_hash)
+    return(NULL);
 
   if(vlan_id != 0)
     setSeenVlanTaggedPackets();
@@ -1020,10 +1055,11 @@ NetworkInterface* NetworkInterface::getSubInterface(u_int32_t criteria, bool par
 	  h->iface = new NetworkInterface(buf, vIface_type);
 
 	if(h->iface) {
-	  if (ntop->registerInterface(h->iface))
+	  if(ntop->registerInterface(h->iface))
             ntop->initInterface(h->iface);
 	  h->iface->allocateStructures();
 	  h->iface->setDynamicInterface();
+	  h->iface->startPacketPolling(); /* Won't actually start a thread, just mark this interface as running */
 	  HASH_ADD_INT(flowHashing, criteria, h);
 	  numVirtualInterfaces++;
 	  ntop->getRedis()->set(CONST_STR_RELOAD_LISTS, (const char * const)"1");
@@ -1049,12 +1085,10 @@ NetworkInterface* NetworkInterface::getSubInterface(u_int32_t criteria, bool par
 void NetworkInterface::processFlow(ParsedFlow *zflow, bool zmq_flow) {
   bool src2dst_direction, new_flow;
   Flow *flow;
-  ndpi_protocol p;
+  ndpi_protocol p = Flow::ndpiUnknownProtocol;
   time_t now = time(NULL);
   Mac *srcMac = NULL, *dstMac = NULL;
   IpAddress srcIP, dstIP;
-
-  memset(&p, 0, sizeof(p));
 
   if(zmq_flow) {
     /* In ZMQ flows we need to fix the clock drift */
@@ -1137,12 +1171,18 @@ void NetworkInterface::processFlow(ParsedFlow *zflow, bool zmq_flow) {
     return;
   }
 
+  PROFILING_SECTION_ENTER("processFlow getMac", 20);
+
   if(!ntop->getPrefs()->do_ignore_macs()) {
     srcMac = getMac((u_int8_t*)zflow->src_mac, true /* Create if missing */, true /* Inline call */);
     dstMac = getMac((u_int8_t*)zflow->dst_mac, true /* Create if missing */, true /* Inline call */);
   }
 
+  PROFILING_SECTION_EXIT(20);
+
   srcIP.set(&zflow->src_ip), dstIP.set(&zflow->dst_ip);
+
+  PROFILING_SECTION_ENTER("processFlow getFlow", 21);
 
   /* Updating Flow */
   flow = getFlow(srcMac, dstMac,
@@ -1156,6 +1196,8 @@ void NetworkInterface::processFlow(ParsedFlow *zflow, bool zmq_flow) {
 		 zflow->first_switched,
 		 zflow->last_switched,
 		 0, &new_flow, true);
+
+  PROFILING_SECTION_EXIT(21);
 
   if(flow == NULL)
     return;
@@ -1253,6 +1295,8 @@ void NetworkInterface::processFlow(ParsedFlow *zflow, bool zmq_flow) {
       (src2dst_direction) ? 1 : 0);
 #endif
 
+  PROFILING_SECTION_ENTER("processFlow Inc", 22);
+
   /* Update Mac stats
      Note: do not use src2dst_direction to inc the stats as
      in_bytes/in_pkts and out_bytes/out_pkts are already relative to the current
@@ -1293,6 +1337,8 @@ void NetworkInterface::processFlow(ParsedFlow *zflow, bool zmq_flow) {
 			 zflow->tcp.lost_out_pkts, 0 /* TODO: add keepalive */);
   }
 
+  PROFILING_SECTION_EXIT(22);
+
 #ifdef NTOPNG_PRO
   if(zflow->deviceIP) {
     // if(ntop->getPrefs()->is_flow_device_port_rrd_creation_enabled() && ntop->getPro()->has_valid_license()) {
@@ -1320,6 +1366,9 @@ void NetworkInterface::processFlow(ParsedFlow *zflow, bool zmq_flow) {
 		     zflow->pkt_sampling_rate*zflow->in_fragments,
 		     zflow->pkt_sampling_rate*zflow->out_fragments,
 		     zflow->last_switched);
+
+  PROFILING_SECTION_ENTER("processFlow Misc", 23);
+
   p.app_protocol = zflow->l7_proto.app_protocol, p.master_protocol = zflow->l7_proto.master_protocol;
   p.category = NDPI_PROTOCOL_CATEGORY_UNSPECIFIED;
   flow->setDetectedProtocol(p, true);
@@ -1346,8 +1395,16 @@ void NetworkInterface::processFlow(ParsedFlow *zflow, bool zmq_flow) {
   }
 #endif
 
+  PROFILING_SECTION_EXIT(23);
+
+  PROFILING_SECTION_ENTER("processFlow fillZmqFlowCategory", 24);
+
   // NOTE: fill the category only after the server name is set
   flow->fillZmqFlowCategory();
+
+  PROFILING_SECTION_EXIT(24);
+
+  PROFILING_SECTION_ENTER("processFlow incStats", 25);
 
   /* Do not put incStats before guessing the flow protocol */
   incStats(true /* ingressPacket */,
@@ -1357,6 +1414,7 @@ void NetworkInterface::processFlow(ParsedFlow *zflow, bool zmq_flow) {
 	   zflow->pkt_sampling_rate*(zflow->in_pkts + zflow->out_pkts),
 	   24 /* 8 Preamble + 4 CRC + 12 IFG */ + 14 /* Ethernet header */);
 
+  PROFILING_SECTION_EXIT(25);
 
   /* purge is actually performed at most one time every FLOW_PURGE_FREQUENCY */
   // purgeIdle(zflow->last_switched);
@@ -2701,7 +2759,12 @@ void NetworkInterface::startPacketPolling() {
 /* **************************************************** */
 
 void NetworkInterface::shutdown() {
-  running = false;
+  void *res;
+
+  if(isRunning()) {
+    running = false;
+    pthread_join(pollLoop, &res);
+  }
 }
 
 /* **************************************************** */
@@ -2715,7 +2778,7 @@ void NetworkInterface::cleanup() {
   has_seen_containers = false, has_seen_pods = false;
 
   getStats()->cleanup();
-  flows_hash->cleanup();
+  if(flows_hash)      flows_hash->cleanup();
   if(hosts_hash)      hosts_hash->cleanup();
   if(ases_hash)       ases_hash->cleanup();
   if(countries_hash)  countries_hash->cleanup();
@@ -2769,10 +2832,8 @@ void NetworkInterface::findFlowHosts(u_int16_t vlanId,
 	return;
       }
 
-      (*src)->postHashAdd();
       has_too_many_hosts = false;
     }
-
   }
 
   /* ***************************** */
@@ -2809,7 +2870,6 @@ void NetworkInterface::findFlowHosts(u_int16_t vlanId,
 	return;
       }
 
-      (*dst)->postHashAdd();
       has_too_many_hosts = false;
     }
   }
@@ -2867,9 +2927,6 @@ static bool flow_update_hosts_stats(GenericHashEntry *node,
   struct timeval *tv = (struct timeval*)user_data;
   bool dump_alert = ((time(NULL) - tv->tv_sec) < ntop->getPrefs()->get_housekeeping_frequency()) ? true : false;
 
-  if(ntop->getGlobals()->isShutdownRequested() && !ntop->getPrefs()->flushFlowsOnShutdown())
-    return(true); /* true = stop walking */
-
   flow->update_hosts_stats(tv, dump_alert);
   *matched = true;
 
@@ -2907,6 +2964,9 @@ static bool update_macs_stats(GenericHashEntry *node, void *user_data, bool *mat
 static bool update_generic_element_stats(GenericHashEntry *node, void *user_data, bool *matched) {
   GenericTrafficElement *elem;
 
+  if(node->get_state() == hash_entry_state_idle)
+    node->set_state(hash_entry_state_ready_to_be_purged);
+
   if((elem = dynamic_cast<GenericTrafficElement*>(node))) {
     struct timeval *tv = (struct timeval*)user_data;
     elem->updateStats(tv);
@@ -2942,16 +3002,15 @@ void NetworkInterface::periodicStatsUpdate() {
   gettimeofday(&tdebug, NULL);
 #endif
 
-  flows_hash->walk(&begin_slot, walk_all, flow_update_hosts_stats, (void*)&tv);
+  if(!isView() && flows_hash) /* View Interfaces don't have flows, they just walk flows of their 'viewed' peers */
+    walker(&begin_slot, walk_all, walker_flows, flow_update_hosts_stats, (void*)&tv, true);
+
   topItemsCommit(&tv);
 
 #ifdef PERIODIC_STATS_UPDATE_DEBUG_TIMING
   ntop->getTrace()->traceEvent(TRACE_NORMAL, "flows_hash->walk took %d seconds", time(NULL) - tdebug.tv_sec);
   gettimeofday(&tdebug, NULL);
 #endif
-
-  if(ntop->getGlobals()->isShutdownRequested())
-    return;
 
   // if drop alerts enabled and have some significant packets
   if((packet_drops_alert_perc > 0) && (getNumPacketsSinceReset() > 100)) {
@@ -2962,32 +3021,8 @@ void NetworkInterface::periodicStatsUpdate() {
     too_many_drops = false;
 
 #ifdef NTOPNG_PRO
-  if(aggregated_flows_hash) {
-    if((getIfType() == interface_type_DUMMY) || (--nextFlowAggregation == 0)) {
-      /* Start over */
-      aggregated_flows_hash->cleanup();
-      nextFlowAggregation = FLOW_AGGREGATION_DURATION;
-
-#ifdef AGGREGATED_FLOW_DEBUG
-      ntop->getTrace()->traceEvent(TRACE_NORMAL,
-				   "Aggregated flows exported. "
-				   "Aggregated flows hash cleared. [num_items: %i]",
-				   aggregated_flows_hash->getCurrentSize());
-#endif
-    } else
-#ifdef AGGREGATED_FLOW_DEBUG
-      ntop->getTrace()->traceEvent(TRACE_NORMAL,
-				   "Aggregation in %i housekeeping cycles [housekeeping frequency: %i] [inter-aggregation housekeeping cycles: %i][num_items: %u]",
-				   nextFlowAggregation, ntop->getPrefs()->get_housekeeping_frequency(), FLOW_AGGREGATION_DURATION,
-				   aggregated_flows_hash->getCurrentSize());
-#endif
-    ;
-  }
-#endif
-
-#ifdef PERIODIC_STATS_UPDATE_DEBUG_TIMING
-  ntop->getTrace()->traceEvent(TRACE_NORMAL, "flows aggregation took %d seconds", time(NULL) - tdebug.tv_sec);
-  gettimeofday(&tdebug, NULL);
+  if(!isView() && !isViewed())
+    dumpAggregatedFlows(&tv);
 #endif
 
   checkReloadHostsBroadcastDomain();
@@ -2999,7 +3034,7 @@ void NetworkInterface::periodicStatsUpdate() {
       update_hosts_stats_user_data.tv = &tv;
 
     begin_slot = 0;
-    hosts_hash->walk(&begin_slot, walk_all, update_hosts_stats, &update_hosts_stats_user_data);
+    walker(&begin_slot, walk_all, walker_hosts, update_hosts_stats, &update_hosts_stats_user_data, true);
 
     if(update_hosts_stats_user_data.acle)
       delete update_hosts_stats_user_data.acle;
@@ -3012,22 +3047,22 @@ void NetworkInterface::periodicStatsUpdate() {
 
   if(ases_hash) {
     begin_slot = 0;
-    ases_hash->walk(&begin_slot, walk_all, update_generic_element_stats, (void*)&tv);
+    walker(&begin_slot, walk_all, walker_ases, update_generic_element_stats, (void*)&tv, true);
   }
 
   if(countries_hash) {
     begin_slot = 0;
-    countries_hash->walk(&begin_slot, walk_all, update_generic_element_stats, (void*)&tv);
+    walker(&begin_slot, walk_all, walker_countries, update_generic_element_stats, (void*)&tv, true);
   }
 
   if(vlans_hash && hasSeenVlanTaggedPackets()) {
     begin_slot = 0;
-    vlans_hash->walk(&begin_slot, walk_all, update_generic_element_stats, (void*)&tv);
+    walker(&begin_slot, walk_all, walker_vlans, update_generic_element_stats, (void*)&tv, true);
   }
 
   if(macs_hash) {
     begin_slot = 0;
-    macs_hash->walk(&begin_slot, walk_all, update_macs_stats, (void*)&tv);
+    walker(&begin_slot, walk_all, walker_macs, update_macs_stats, (void*)&tv, true);
   }
 
 #ifdef PERIODIC_STATS_UPDATE_DEBUG_TIMING
@@ -3173,12 +3208,12 @@ void NetworkInterface::refreshHostPools() {
 
   if(hosts_hash) {
     begin_slot = 0;
-    hosts_hash->walk(&begin_slot, walk_all, update_host_host_pool_l7policy, &update_host);
+    walker(&begin_slot, walk_all, walker_hosts, update_host_host_pool_l7policy, &update_host);
   }
 
   if(macs_hash) {
     begin_slot = 0;
-    macs_hash->walk(&begin_slot, walk_all, update_l2_device_host_pool, NULL);
+    walker(&begin_slot, walk_all, walker_macs, update_l2_device_host_pool, NULL);
   }
 
 #ifdef HAVE_NEDGE
@@ -3214,10 +3249,8 @@ void NetworkInterface::updateHostsL7Policy(u_int16_t host_pool_id) {
 
   /* Pool id didn't change here so there's no need to walk on the macs
    as policies are set on the hosts */
-  if(hosts_hash) {
-    hosts_hash->walk(&begin_slot, walk_all,
-		     update_host_host_pool_l7policy, &update_host);
-  }
+  if(hosts_hash)
+    walker(&begin_slot, walk_all, walker_hosts, update_host_host_pool_l7policy, &update_host);
 }
 
 /* **************************************************** */
@@ -3228,7 +3261,8 @@ void NetworkInterface::updateFlowsL7Policy() {
 
   if(isView()) return;
 
-  flows_hash->walk(&begin_slot, walk_all, update_flow_l7_policy, NULL);
+  if(flows_hash)
+    walker(&begin_slot, walk_all, walker_flows, update_flow_l7_policy, NULL);
 }
 
 /* **************************************************** */
@@ -3511,7 +3545,8 @@ void NetworkInterface::updateFlowProfiles() {
     newP->loadProfiles(); /* and reload */
     flow_profiles = newP; /* Overwrite the current profiles */
 
-    flows_hash->walk(&begin_slot, walk_all, update_flow_profile, NULL);
+    if(flows_hash)
+      walker(&begin_slot, walk_all, walker_flows, update_flow_profile, NULL);
   }
 }
 #endif
@@ -3658,10 +3693,29 @@ static bool flow_matches(Flow *f, struct flowHostRetriever *retriever) {
 #endif
 
   if(f && (!f->idle())) {
-    if(retriever->host
-       && (retriever->host != f->get_cli_host())
-       && (retriever->host != f->get_srv_host()))
-      return(false);
+    if(retriever->host) {
+      if(!f->getInterface()->isViewed()) {
+	/*
+	  For non-viewed interfaces it is safe to just check on pointers equality.
+	  Indeed, the retriever->host has been obtained with getHost(), which has returned
+	  the same pointer also used by the flow to identify its client / server hosts.
+	 */
+	if(retriever->host != f->get_cli_host()
+	   && retriever->host != f->get_srv_host())
+	  return(false);
+      } else {
+	/*
+	  In case of view interfaces, hosts are in the view interface whereas flows are in
+	  the underlying viewed interfaces so in this case it is not possible to just check on
+	  pointers equality. This need to use the retriever->host which comes from the view interface
+	  to retrieve an IpAddress, and check it against the flow ip address, along with the vlan.
+	  Indeed, flow ip addresses exist also when a flow doesn't have Host* as in the case of viewed interfaces.
+	 */
+	if(!(retriever->host->get_ip()->equal(f->get_cli_ip_addr()) && retriever->host->get_vlan_id() == f->get_vlan_id())
+	   &&!(retriever->host->get_ip()->equal(f->get_srv_ip_addr()) && retriever->host->get_vlan_id() == f->get_vlan_id()))
+	  return(false);
+      }
+    }
 
     if(retriever->pag
        && retriever->pag->l7protoFilter(&ndpi_proto)
@@ -5118,10 +5172,12 @@ u_int NetworkInterface::purgeIdleFlows() {
   else {
     /* Time to purge flows */
 
+#if 0
     ntop->getTrace()->traceEvent(TRACE_INFO,
 				 "Purging idle flows [ifname: %s] [ifid: %i] [current size: %i]",
 				 ifname, id, flows_hash->getCurrentSize());
-    n = flows_hash->purgeIdle();
+#endif
+    n = (flows_hash ? flows_hash->purgeIdle() : 0);
 
     next_idle_flow_purge = last_packet_time + FLOW_PURGE_FREQUENCY;
     return(n);
@@ -5508,14 +5564,13 @@ void NetworkInterface::runShutdownTasks() {
      This task runs asynchronously with respect to the datapath
   */
 
-  if (ntop->getPrefs()->flushFlowsOnShutdown()) {
-    /* Setting all flows as "ready to purge" (see isReadyToPurge) and dump them to the DB */
-    periodicStatsUpdate();
+  /* Run the periodic stats update one last time so certain tasks can be properly finalized,
+     e.g., all hosts and all flows can be marked as idle */
+  periodicStatsUpdate();
 
 #ifdef NTOPNG_PRO
-    flushFlowDump();
+  flushFlowDump();
 #endif
-  }
 }
 
 /* **************************************************** */
@@ -5700,6 +5755,9 @@ Flow* NetworkInterface::findFlowByKey(u_int32_t key,
 				      AddressTree *allowed_hosts) {
   Flow *f = NULL;
 
+  if(!flows_hash)
+    return NULL;
+
   f = (Flow*)(flows_hash->findByKey(key));
 
   if(f && (!f->match(allowed_hosts))) f = NULL;
@@ -5716,6 +5774,9 @@ Flow* NetworkInterface::findFlowByTuple(u_int16_t vlan_id,
 					AddressTree *allowed_hosts) const {
   bool src2dst;
   Flow *f = NULL;
+
+  if(!flows_hash)
+    return NULL;
 
   f = (Flow*)flows_hash->find(src_ip, dst_ip, src_port, dst_port, vlan_id, l4_proto, NULL, &src2dst);
 
@@ -6944,7 +7005,7 @@ bool NetworkInterface::initFlowDump(u_int8_t num_dump_interfaces) {
   if(isFlowDumpDisabled())
     return(false);
 
-  if(!isView()) {
+  if(!isViewed()) { /* Flow dump is handled by the view interface in case of 'viewed' interfaces */
 #if defined(NTOPNG_PRO) && defined(HAVE_NINDEX)
     if(ntop->getPrefs()->do_dump_flows_on_nindex()) {
       if(num_dump_interfaces + 1 >= NINDEX_MAX_NUM_INTERFACES) {
@@ -6972,7 +7033,7 @@ bool NetworkInterface::initFlowDump(u_int8_t num_dump_interfaces) {
 	  db = new BatchedMySQLDB(this);
 #endif
 
-#if defined(NTOPNG_PRO) && defined(HAVE_NINDEX)
+#if defined(NTOPNG_PRO)
 	enable_aggregation:
 #endif
 	  aggregated_flows_hash = new AggregatedFlowHash(this,
@@ -6980,7 +7041,7 @@ bool NetworkInterface::initFlowDump(u_int8_t num_dump_interfaces) {
 							 ntop->getPrefs()->get_max_num_flows());
 
 	  ntop->getPrefs()->enable_flow_aggregation();
-	  nextFlowAggregation = FLOW_AGGREGATION_DURATION;
+	  lastFlowAggregation = 0;
 	} else
 	  aggregated_flows_hash = NULL;
 #endif
@@ -7604,17 +7665,11 @@ static bool host_alert_check(GenericHashEntry *h, void *user_data, bool *matched
   lua_State *L = acle->getState();
   Host *host = (Host*)h;
 
-  /* Alerts are checked only on local hosts */
-  const char *function_to_call = "checkHostAlerts";
+  acle->setHost(host);
 
-  acle->setEntity(host);
-
-  /* https://www.lua.org/pil/25.2.html */
-  lua_getglobal(L,  function_to_call); /* Called function */
+  lua_getglobal(L,  ALERT_ENTITY_CALLBACK_CHECK_ALERTS); /* Called function */
   lua_pushstring(L, acle->getGranularity());  /* push 1st argument */
-
-  if(lua_pcall(L, 1 /* 1 argument */, 0 /* 0 results */, 0)) /* Call the function now */
-    ntop->getTrace()->traceEvent(TRACE_WARNING, "Script failure [%s]", lua_tostring(L, -1));
+  acle->pcall(1 /* num args */, 0);
 
   host->housekeepAlerts(acle->getPeriodicity() /* periodicity */);
 
@@ -7640,18 +7695,15 @@ void NetworkInterface::checkNetworksAlerts(ScriptPeriodicity p) {
   u_int8_t num_local_networks = ntop->getNumLocalNetworks();
 
   for(u_int8_t network_id = 0; network_id < num_local_networks; network_id++) {
-    const char *function_to_call = "checkNetworkAlerts";
-
-    acle.setEntity(getNetworkStats(network_id));
+    acle.setNetwork(getNetworkStats(network_id));
 
     lua_State *L = acle.getState();
 
     /* https://www.lua.org/pil/25.2.html */
-    lua_getglobal(L,  function_to_call); /* Called function */
+    lua_getglobal(L,  ALERT_ENTITY_CALLBACK_CHECK_ALERTS); /* Called function */
     lua_pushstring(L, acle.getGranularity());  /* push 1st argument */
 
-    if(lua_pcall(L, 1 /* 1 argument */, 0 /* 0 results */, 0)) /* Call the function now */
-      ntop->getTrace()->traceEvent(TRACE_WARNING, "Script failure [%s]", lua_tostring(L, -1));
+    acle.pcall(1 /* 1 argument */, 0 /* 0 results */);
   }
 }
 
@@ -7661,12 +7713,10 @@ void NetworkInterface::checkInterfaceAlerts(ScriptPeriodicity p) {
   AlertCheckLuaEngine acle(alert_entity_interface, p, this);
   lua_State *L = acle.getState();
 
-  /* https://www.lua.org/pil/25.2.html */
-  lua_getglobal(L,  "checkInterfaceAlerts"); /* Called function */
+  lua_getglobal(L, ALERT_ENTITY_CALLBACK_CHECK_ALERTS); /* Called function */
   lua_pushstring(L, acle.getGranularity());  /* push 1st argument */
 
-  if(lua_pcall(L, 1 /* 1 argument */, 0 /* 0 results */, 0)) /* Call the function now */
-    ntop->getTrace()->traceEvent(TRACE_WARNING, "Script failure [%s]", lua_tostring(L, -1));
+  acle.pcall(1 /* 1 argument */, 0 /* 0 results */);
 }
 
 /* *************************************** */
@@ -7706,7 +7756,7 @@ static bool host_invoke_alertable_callback(GenericHashEntry *entity, void *user_
 void NetworkInterface::walkAlertables(int entity_type, const char *entity_value,
           alertable_callback *callback, void *user_data) {
   /* Hosts */
-  if((entity_type == -1) || (entity_type == alert_entity_host)) {
+  if((entity_type == alert_entity_none) || (entity_type == alert_entity_host)) {
     if(entity_value == NULL) {
       struct alertable_walker_data data;
       bool walk_all = true;
@@ -7731,7 +7781,7 @@ void NetworkInterface::walkAlertables(int entity_type, const char *entity_value,
   }
 
   /* Interface */
-  if((entity_type == -1) || (entity_type == alert_entity_interface)) {
+  if((entity_type == alert_entity_none) || (entity_type == alert_entity_interface)) {
     if(entity_value != NULL)
       ntop->getTrace()->traceEvent(TRACE_WARNING, "Interface filter not implemented");
 
@@ -7739,7 +7789,7 @@ void NetworkInterface::walkAlertables(int entity_type, const char *entity_value,
   }
 
   /* Networks */
-  if((entity_type == -1) || (entity_type == alert_entity_network)) {
+  if((entity_type == alert_entity_none) || (entity_type == alert_entity_network)) {
     u_int8_t num_local_networks = ntop->getNumLocalNetworks();
 
     if(entity_value != NULL)
@@ -7806,6 +7856,54 @@ void NetworkInterface::getEngagedAlertsCount(lua_State *vm, int entity_type,
 
 /* *************************************** */
 
+static bool host_release_engaged_alerts(GenericHashEntry *entity, void *user_data, bool *matched) {
+  Host *host = (Host *) entity;
+  AlertCheckLuaEngine *host_script = (AlertCheckLuaEngine *)user_data;
+
+  if(host->getNumTriggeredAlerts()) {
+    lua_getglobal(host_script->getState(), ALERT_ENTITY_CALLBACK_RELEASE_ALERTS);
+    host_script->setHost(host);
+    host_script->pcall(0, 0);
+  }
+
+  *matched = true;
+
+  return(false); /* false = keep on walking */
+}
+
+/* *************************************** */
+
+void NetworkInterface::releaseAllEngagedAlerts() {
+  AlertCheckLuaEngine network_script(alert_entity_network, minute_script /* doesn't matter */, this);
+  AlertCheckLuaEngine host_script(alert_entity_host, minute_script /* doesn't matter */, this);
+  u_int8_t num_local_networks = ntop->getNumLocalNetworks();
+  u_int32_t begin_slot = 0;
+  bool walk_all = true;
+
+  /* Hosts */
+  walker(&begin_slot, walk_all, walker_hosts, host_release_engaged_alerts, &host_script);
+
+  /* Interface */
+  if(getNumTriggeredAlerts()) {
+    AlertCheckLuaEngine interface_script(alert_entity_interface, minute_script /* doesn't matter */, this);
+    lua_getglobal(interface_script.getState(), ALERT_ENTITY_CALLBACK_RELEASE_ALERTS);
+    interface_script.pcall(0, 0);
+  }
+
+  /* Networks */
+  for(u_int8_t network_id = 0; network_id < num_local_networks; network_id++) {
+    NetworkStats *stats = getNetworkStats(network_id);
+
+    if(stats->getNumTriggeredAlerts()) {
+      lua_getglobal(network_script.getState(), ALERT_ENTITY_CALLBACK_RELEASE_ALERTS);
+      network_script.setNetwork(stats);
+      network_script.pcall(0, 0);
+    }
+  }
+}
+
+/* *************************************** */
+
 struct get_engaged_alerts_userdata {
   lua_State *vm;
   AlertType alert_type;
@@ -7813,7 +7911,7 @@ struct get_engaged_alerts_userdata {
   u_int idx;
 };
 
-void get_engaged_alerts_callback(AlertableEntity *alertable, void *user_data) {
+static void get_engaged_alerts_callback(AlertableEntity *alertable, void *user_data) {
   struct get_engaged_alerts_userdata *data = (struct get_engaged_alerts_userdata *)user_data;
 
   alertable->getAlerts(data->vm, data->alert_type, data->alert_severity, &data->idx);

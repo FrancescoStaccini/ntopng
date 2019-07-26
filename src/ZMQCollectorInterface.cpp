@@ -126,6 +126,17 @@ ZMQCollectorInterface::ZMQCollectorInterface(const char *_endpoint) : ZMQParserI
 /* **************************************************** */
 
 ZMQCollectorInterface::~ZMQCollectorInterface() {
+#ifdef PROFILING
+  u_int64_t n = recvStats.num_flows;
+  if (n > 0) {
+    for (u_int i = 0; i < PROFILING_NUM_SECTIONS; i++) {
+      if (PROFILING_SECTION_LABEL(i) != NULL)
+        ntop->getTrace()->traceEvent(TRACE_NORMAL, "[PROFILING] Section #%d '%s': AVG %llu ticks",
+          i, PROFILING_SECTION_LABEL(i), PROFILING_SECTION_AVG(i, n));
+    }
+  }
+#endif
+
   for(int i=0; i<num_subscribers; i++) {
     if(subscriber[i].endpoint) free(subscriber[i].endpoint);
     zmq_close(subscriber[i].socket);
@@ -188,7 +199,11 @@ void ZMQCollectorInterface::collect_flows() {
 	  /* Legacy version */
 	  msg_id = 0, source_id = 0;
           publisher_version = h0.version;
-	} else if((size != sizeof(struct zmq_msg_hdr)) || ((h->version != ZMQ_MSG_VERSION) && (h->version != ZMQ_COMPATIBILITY_MSG_VERSION))) {
+	} else if(size != sizeof(struct zmq_msg_hdr) || (
+            h->version != ZMQ_MSG_VERSION && 
+            h->version != ZMQ_MSG_VERSION_TLV &&
+            h->version != ZMQ_COMPATIBILITY_MSG_VERSION
+          )) {
 	  ntop->getTrace()->traceEvent(TRACE_WARNING,
 				       "Unsupported publisher version: your nProbe sender is outdated? [%u][%u][%u][%u][%u]",
 				       size, sizeof(struct zmq_msg_hdr), h->version, ZMQ_MSG_VERSION, ZMQ_COMPATIBILITY_MSG_VERSION);
@@ -339,17 +354,6 @@ void ZMQCollectorInterface::startPacketPolling() {
   pthread_create(&pollLoop, NULL, packetPollLoop, (void*)this);
   pollLoopCreated = true;
   NetworkInterface::startPacketPolling();
-}
-
-/* **************************************************** */
-
-void ZMQCollectorInterface::shutdown() {
-  void *res;
-
-  if(running) {
-    NetworkInterface::shutdown();
-    pthread_join(pollLoop, &res);
-  }
 }
 
 /* **************************************************** */

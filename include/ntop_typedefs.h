@@ -126,6 +126,10 @@ typedef enum {
   alert_broadcast_domain_too_large = 34,
   alert_ids = 35,
   misconfigured_dhcp_range = 36,
+  /* 
+     IMPORTANT IMPORTANT IMPORTANT
+     If # status >= 64 then extend Utils.h and Lua bitmap functions to handle it
+  */
 } AlertType; /*
 	       NOTE:
 	       keep it in sync with alert_type_keys
@@ -144,6 +148,7 @@ typedef enum {
   This is field "entity_type" of JSON put on "ntopng.alerts.notifications_queue"
  */
 typedef enum {
+  alert_entity_none = -1,
   alert_entity_interface = 0,
   alert_entity_host,
   alert_entity_network,
@@ -346,6 +351,10 @@ typedef enum {
   status_data_exfiltration /* 24 */,
   status_ssl_old_protocol_version /* 25 */,
   num_flow_status,
+  /* 
+     IMPORTANT IMPORTANT IMPORTANT
+     If # status >= 32 then change to 64 bit disabled_flow_status in Host.h 
+  */
 } FlowStatus;
 
 typedef enum {
@@ -447,6 +456,12 @@ typedef enum {
   flowhashing_vlan,
   flowhashing_vrfid /* VRF Id */
 } FlowHashingEnum;
+
+typedef enum {
+  hash_entry_state_active,
+  hash_entry_state_idle,
+  hash_entry_state_ready_to_be_purged
+} HashEntryState;
 
 typedef enum {
   device_proto_allowed = 0,

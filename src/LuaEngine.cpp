@@ -3982,6 +3982,27 @@ static int ntop_reload_dhcp_ranges(lua_State* vm) {
 
 /* ****************************************** */
 
+static int ntop_reload_host_disabled_flow_alert_types(lua_State* vm) {
+  NetworkInterface *ntop_interface = getCurrentInterface(vm);
+  char buf[64], *host_ip;
+  Host *host;
+  u_int16_t vlan_id;
+
+  ntop->getTrace()->traceEvent(TRACE_DEBUG, "%s() called", __FUNCTION__);
+  if(!ntop_interface) return(CONST_LUA_ERROR);
+
+  if(ntop_lua_check(vm, __FUNCTION__, 1, LUA_TSTRING) != CONST_LUA_OK) return(CONST_LUA_PARAM_ERROR);
+  get_host_vlan_info((char*)lua_tostring(vm, 1), &host_ip, &vlan_id, buf, sizeof(buf));
+
+  if((host = ntop_interface->getHost(host_ip, vlan_id, false /* Not an inline call */)))
+    host->refreshDisableFlowAlertTypes();
+
+  lua_pushboolean(vm, (host != NULL));
+  return(CONST_LUA_OK);
+}
+
+/* ****************************************** */
+
 #ifdef HAVE_NEDGE
 
 static int ntop_set_lan_ip_address(lua_State* vm) {
@@ -6162,6 +6183,51 @@ static int ntop_run_live_extraction(lua_State *vm) {
 
 /* ****************************************** */
 
+static int ntop_bitmap_is_set(lua_State *vm) {
+  u_int64_t bitmap;
+  u_int64_t val;
+
+  if(ntop_lua_check(vm, __FUNCTION__, 1, LUA_TNUMBER) != CONST_LUA_OK) return(CONST_LUA_ERROR);
+  bitmap = lua_tointeger(vm, 1);
+  if(ntop_lua_check(vm, __FUNCTION__, 2, LUA_TNUMBER) != CONST_LUA_OK) return(CONST_LUA_ERROR);
+  val = lua_tointeger(vm, 2);
+
+  lua_pushboolean(vm, Utils::bitmapIsSet(bitmap, val));
+  return(CONST_LUA_OK);
+}
+
+/* ****************************************** */
+
+static int ntop_bitmap_set(lua_State *vm) {
+  u_int64_t bitmap;
+  u_int64_t val;
+
+  if(ntop_lua_check(vm, __FUNCTION__, 1, LUA_TNUMBER) != CONST_LUA_OK) return(CONST_LUA_ERROR);
+  bitmap = lua_tointeger(vm, 1);
+  if(ntop_lua_check(vm, __FUNCTION__, 2, LUA_TNUMBER) != CONST_LUA_OK) return(CONST_LUA_ERROR);
+  val = lua_tointeger(vm, 2);
+
+  lua_pushinteger(vm, Utils::bitmapSet(bitmap, val));
+  return(CONST_LUA_OK);
+}
+
+/* ****************************************** */
+
+static int ntop_bitmap_clear(lua_State *vm) {
+  u_int64_t bitmap;
+  u_int64_t val;
+
+  if(ntop_lua_check(vm, __FUNCTION__, 1, LUA_TNUMBER) != CONST_LUA_OK) return(CONST_LUA_ERROR);
+  bitmap = lua_tointeger(vm, 1);
+  if(ntop_lua_check(vm, __FUNCTION__, 2, LUA_TNUMBER) != CONST_LUA_OK) return(CONST_LUA_ERROR);
+  val = lua_tointeger(vm, 2);
+
+  lua_pushinteger(vm, Utils::bitmapClear(bitmap, val));
+  return(CONST_LUA_OK);
+}
+
+/* ****************************************** */
+
 static int ntop_interface_exec_sql_query(lua_State *vm) {
   NetworkInterface *ntop_interface = getCurrentInterface(vm);
   bool limit_rows = true;  // honour the limit by default
@@ -7963,6 +8029,78 @@ static int ntop_host_set_cached_alert_value(lua_State* vm) {
 
 /* ****************************************** */
 
+static int ntop_get_alerts(lua_State* vm, AlertableEntity *entity) {
+  ntop->getTrace()->traceEvent(TRACE_DEBUG, "%s() called", __FUNCTION__);
+  u_int idx = 0;
+
+  if(!entity) return(CONST_LUA_ERROR);
+
+  lua_newtable(vm);
+  entity->getAlerts(vm, alert_none, alert_level_none, &idx);
+
+  return(CONST_LUA_OK);
+}
+
+/* ****************************************** */
+
+static int ntop_interface_get_alerts(lua_State* vm) {
+  struct ntopngLuaContext *c = getLuaVMContext(vm);
+  return ntop_get_alerts(vm, c->iface);
+}
+
+static int ntop_host_get_alerts(lua_State* vm) {
+  struct ntopngLuaContext *c = getLuaVMContext(vm);
+  return ntop_get_alerts(vm, c->host);
+}
+
+static int ntop_network_get_alerts(lua_State* vm) {
+  struct ntopngLuaContext *c = getLuaVMContext(vm);
+  return ntop_get_alerts(vm, c->network);
+}
+
+/* ****************************************** */
+
+static int ntop_interface_release_engaged_alerts(lua_State* vm) {
+  NetworkInterface *iface = getCurrentInterface(vm);
+
+  ntop->getTrace()->traceEvent(TRACE_DEBUG, "%s() called", __FUNCTION__);
+  if(!iface) return(CONST_LUA_ERROR);
+
+  iface->releaseAllEngagedAlerts();
+
+  lua_pushnil(vm);
+  return(CONST_LUA_OK);
+}
+
+/* ****************************************** */
+
+static int ntop_interface_inc_total_host_alerts(lua_State* vm) {
+  NetworkInterface *iface = getCurrentInterface(vm);
+  u_int16_t vlan_id = 0;
+  AlertType alert_type;
+  char buf[64], *host_ip;
+  Host *h;
+
+  ntop->getTrace()->traceEvent(TRACE_DEBUG, "%s() called", __FUNCTION__);
+  if(!iface) return(CONST_LUA_ERROR);
+
+  if(ntop_lua_check(vm, __FUNCTION__, 1, LUA_TSTRING) != CONST_LUA_OK) return(CONST_LUA_ERROR);
+  get_host_vlan_info((char*)lua_tostring(vm, 1), &host_ip, &vlan_id, buf, sizeof(buf));
+
+  if(ntop_lua_check(vm, __FUNCTION__, 2, LUA_TNUMBER) != CONST_LUA_OK) return(CONST_LUA_ERROR);
+  alert_type = (AlertType)lua_tonumber(vm, 2);
+
+  h = iface->findHostByIP(get_allowed_nets(vm), host_ip, vlan_id);
+
+  if(h)
+    h->incTotalAlerts(alert_type);
+
+  lua_pushboolean(vm, h ? true : false);
+  return(CONST_LUA_OK);
+}
+
+/* ****************************************** */
+
 static int ntop_host_get_expired_alerts(lua_State* vm) {
   ScriptPeriodicity periodicity;
   struct ntopngLuaContext *c = getLuaVMContext(vm);
@@ -8111,9 +8249,10 @@ static int ntop_store_triggered_alert(lua_State* vm, AlertableEntity *alertable)
   ScriptPeriodicity periodicity;
   AlertLevel alert_severity;
   AlertType alert_type;
-  bool triggered;
+  Host *host;
+  bool triggered, alert_disabled;
 
-  if(!alertable) return(CONST_LUA_PARAM_ERROR);
+  if(!alertable || !c->iface) return(CONST_LUA_PARAM_ERROR);
 
   if(ntop_lua_check(vm, __FUNCTION__, 1, LUA_TSTRING) != CONST_LUA_OK) return(CONST_LUA_ERROR);
   if((key = (char*)lua_tostring(vm, 1)) == NULL) return(CONST_LUA_PARAM_ERROR);
@@ -8133,9 +8272,14 @@ static int ntop_store_triggered_alert(lua_State* vm, AlertableEntity *alertable)
   if(ntop_lua_check(vm, __FUNCTION__, 6, LUA_TSTRING) != CONST_LUA_OK) return(CONST_LUA_ERROR);
   if((alert_json = (char*)lua_tostring(vm, 6)) == NULL) return(CONST_LUA_PARAM_ERROR);
 
-  if((triggered = alertable->triggerAlert(std::string(key), periodicity, time(NULL),
-      alert_severity, alert_type, alert_subtype, alert_json)))
-    c->iface->incNumAlertsEngaged(periodicity);
+  if(ntop_lua_check(vm, __FUNCTION__, 7, LUA_TBOOLEAN) != CONST_LUA_OK) return(CONST_LUA_ERROR);
+  alert_disabled = lua_toboolean(vm, 7);
+
+  triggered = alertable->triggerAlert(std::string(key), c->iface, periodicity, time(NULL),
+    alert_severity, alert_type, alert_subtype, alert_json, alert_disabled);
+
+  if(triggered && !alert_disabled && (host = dynamic_cast<Host*>(alertable)))
+    host->incTotalAlerts(alert_type);
 
   lua_pushboolean(vm, triggered);
   return(CONST_LUA_OK);
@@ -8168,6 +8312,7 @@ static int ntop_release_triggered_alert(lua_State* vm, AlertableEntity *alertabl
   struct ntopngLuaContext *c = getLuaVMContext(vm);
   char *key;
   ScriptPeriodicity periodicity;
+  time_t when;
 
   if(!c->iface || !alertable) return(CONST_LUA_PARAM_ERROR);
 
@@ -8177,9 +8322,11 @@ static int ntop_release_triggered_alert(lua_State* vm, AlertableEntity *alertabl
   if(ntop_lua_check(vm, __FUNCTION__, 2, LUA_TNUMBER) != CONST_LUA_OK) return(CONST_LUA_ERROR);
   if((periodicity = (ScriptPeriodicity)lua_tonumber(vm, 2)) >= MAX_NUM_PERIODIC_SCRIPTS) return(CONST_LUA_PARAM_ERROR);
 
+  if(ntop_lua_check(vm, __FUNCTION__, 3, LUA_TNUMBER) != CONST_LUA_OK) return(CONST_LUA_ERROR);
+  when = (time_t)lua_tonumber(vm, 3);
+
   /* The released alert will be pushed to LUA */
-  if(alertable->releaseAlert(vm, std::string(key), periodicity))
-    c->iface->decNumAlertsEngaged(periodicity);
+  alertable->releaseAlert(vm, c->iface, std::string(key), periodicity, when);
 
   return(CONST_LUA_OK);
 }
@@ -8920,6 +9067,7 @@ static const luaL_Reg ntop_interface_reg[] = {
   { "loadScalingFactorPrefs",           ntop_load_scaling_factor_prefs },
   { "reloadHideFromTop",                ntop_reload_hide_from_top },
   { "reloadDhcpRanges",                 ntop_reload_dhcp_ranges },
+  { "reloadHostDisableFlowAlertTypes",  ntop_reload_host_disabled_flow_alert_types },
 
   /* Mac */
   { "getMacsInfo",                      ntop_get_interface_macs_info },
@@ -9034,11 +9182,27 @@ static const luaL_Reg ntop_interface_reg[] = {
   { "getEngagedAlerts",       ntop_interface_get_engaged_alerts       },
   { "getEngagedAlertsCount",  ntop_interface_get_engaged_alerts_count },
   { "incNumDroppedAlerts",    ntop_interface_inc_num_dropped_alerts   },
+  { "getAlerts",              ntop_interface_get_alerts               },
+  { "releaseEngagedAlerts",   ntop_interface_release_engaged_alerts   },
+  { "incTotalHostAlerts",     ntop_interface_inc_total_host_alerts    },
 
-  { "checkAlertsMin",        ntop_check_interface_alerts_min   },
-  { "checkAlerts5Min",       ntop_check_interface_alerts_5min  },
-  { "checkAlertsHour",       ntop_check_interface_alerts_hour  },
-  { "checkAlertsDay",        ntop_check_interface_alerts_day   },
+  /* Interface Alerts */
+  { "checkInterfaceAlertsMin",    ntop_check_interface_alerts_min     },
+  { "checkInterfaceAlerts5Min",   ntop_check_interface_alerts_5min    },
+  { "checkInterfaceAlertsHour",   ntop_check_interface_alerts_hour    },
+  { "checkInterfaceAlertsDay",    ntop_check_interface_alerts_day     },
+
+  /* Host Alerts */
+  { "checkHostsAlertsMin",        ntop_check_hosts_alerts_min         },
+  { "checkHostsAlerts5Min",       ntop_check_hosts_alerts_5min        },
+  { "checkHostsAlertsHour",       ntop_check_hosts_alerts_hour        },
+  { "checkHostsAlertsDay",        ntop_check_hosts_alerts_day         },
+
+  /* Network Alerts */
+  { "checkNetworksAlertsMin",     ntop_check_networks_alerts_min   },
+  { "checkNetworksAlerts5Min",    ntop_check_networks_alerts_5min  },
+  { "checkNetworksAlertsHour",    ntop_check_networks_alerts_hour  },
+  { "checkNetworksAlertsDay",     ntop_check_networks_alerts_day   },
 
   /* eBPF, Containers and Companion Interfaces */
   { "getPodsStats",           ntop_interface_get_pods_stats           },
@@ -9058,6 +9222,7 @@ static const luaL_Reg ntop_host_reg[] = {
   { "storeTriggeredAlert",    ntop_host_store_triggered_alert   },
   { "releaseTriggeredAlert",  ntop_host_release_triggered_alert },
   { "getExpiredAlerts",       ntop_host_get_expired_alerts      },
+  { "getAlerts",              ntop_host_get_alerts              },
   
   { NULL,                     NULL }
 };
@@ -9071,6 +9236,7 @@ static const luaL_Reg ntop_network_reg[] = {
   { "storeTriggeredAlert",      ntop_network_store_triggered_alert   },
   { "releaseTriggeredAlert",    ntop_network_release_triggered_alert },
   { "getExpiredAlerts",         ntop_network_get_expired_alerts      },
+  { "getAlerts",                ntop_network_get_alerts              },
   
   { NULL,                     NULL }
 };
@@ -9142,18 +9308,6 @@ static const luaL_Reg ntop_reg[] = {
 #endif
   { "reloadPreferences",   ntop_reload_preferences },
   { "setAlertsTemporaryDisabled", ntop_temporary_disable_alerts },
-
-  /* Host Alerts */
-  { "checkHostsAlertsMin",        ntop_check_hosts_alerts_min   },
-  { "checkHostsAlerts5Min",       ntop_check_hosts_alerts_5min  },
-  { "checkHostsAlertsHour",       ntop_check_hosts_alerts_hour  },
-  { "checkHostsAlertsDay",        ntop_check_hosts_alerts_day   },
-
-  /* Network Alerts */
-  { "checkNetworksAlertsMin",        ntop_check_networks_alerts_min   },
-  { "checkNetworksAlerts5Min",       ntop_check_networks_alerts_5min  },
-  { "checkNetworksAlertsHour",       ntop_check_networks_alerts_hour  },
-  { "checkNetworksAlertsDay",        ntop_check_networks_alerts_day   },
   
 #ifdef NTOPNG_PRO
 #ifndef WIN32
@@ -9310,6 +9464,11 @@ static const luaL_Reg ntop_reg[] = {
   { "isExtractionRunning",   ntop_is_extraction_running },
   { "getExtractionStatus",   ntop_get_extraction_status },
   { "runLiveExtraction",     ntop_run_live_extraction   },
+
+  /* Bitmap functions */
+  { "bitmapIsSet",           ntop_bitmap_is_set         },
+  { "bitmapSet",             ntop_bitmap_set            },
+  { "bitmapClear",           ntop_bitmap_clear          },
 
   /* nEdge */
 #ifdef HAVE_NEDGE

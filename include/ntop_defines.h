@@ -506,6 +506,9 @@
 #define CONST_AGGREGATIONS            "aggregations"
 #define CONST_HOST_CONTACTS           "host_contacts"
 
+#define ALERT_ENTITY_CALLBACK_CHECK_ALERTS    "checkAlerts"
+#define ALERT_ENTITY_CALLBACK_RELEASE_ALERTS  "releaseAlerts"
+
 #define CONST_INFLUXDB_FILE_QUEUE          "ntopng.influx_file_queue"
 #define CONST_INFLUXDB_FLUSH_TIME          10 /* sec */
 #define CONST_INFLUXDB_MAX_DUMP_SIZE       4194304 /* 4 MB */
@@ -547,6 +550,7 @@
 #define CONST_IFACE_PACKET_DROPS_ALERT_PREFS NTOPNG_PREFS_PREFIX".iface_%d.packet_drops_alert"
 #define CONST_IFACE_HIDE_FROM_TOP_PREFS     NTOPNG_PREFS_PREFIX".iface_%d.hide_from_top"
 #define CONST_IFACE_COMPANIONS_SET          NTOPNG_PREFS_PREFIX".companion_interface.ifid_%d.companion_of"
+#define CONST_HOST_REFRESH_DISABLED_FLOW_ALERT_TYPES NTOPNG_PREFS_PREFIX".alerts.ifid_%d.disabled_status.host_%s"
 #define CONST_REMOTE_HOST_IDLE_PREFS        NTOPNG_PREFS_PREFIX".non_local_host_max_idle"
 #define CONST_FLOW_MAX_IDLE_PREFS           NTOPNG_PREFS_PREFIX".flow_max_idle"
 #define CONST_INTF_RRD_RAW_DAYS             NTOPNG_PREFS_PREFIX".intf_rrd_raw_days"
@@ -997,7 +1001,7 @@
 #define NO_HOST_POOL_ID                 0
 /* Flow aggregation duration is expressed in housekeeping periods. If housekeeping frequency
    is 5 secs, a flow aggregation duration of 12 equals to 1 minute. */
-#define FLOW_AGGREGATION_DURATION       60
+#define FLOW_AGGREGATION_DURATION       300  /* seconds, 5 minutes */
 #define FLOW_AGGREGATION_MAX_AGGREGATES 1000
 #define FLOW_AGGREGATION_NUM_TOP_AGGRS  1000
 #define FLOW_AGGREGATION_NUM_TOP_HOSTS  100
@@ -1053,7 +1057,7 @@ extern struct ntopngLuaContext* getUserdata(struct lua_State *vm);
         ticks __profiling_sect_start[n]; \
         const char *__profiling_sect_label[n]; \
         ticks __profiling_sect_tot[n]
-#define PROFILING_INIT() memset(__profiling_sect_tot, 0, sizeof(__profiling_sect_tot))
+#define PROFILING_INIT() memset(__profiling_sect_tot, 0, sizeof(__profiling_sect_tot)), memset(__profiling_sect_label, 0, sizeof(__profiling_sect_label))
 #define PROFILING_SECTION_ENTER(l,i) __profiling_sect_start[i] = Utils::getticks(), __profiling_sect_label[i] = l
 #define PROFILING_SECTION_EXIT(i)    __profiling_sect_tot[i] += Utils::getticks() - __profiling_sect_start[i]
 #define PROFILING_SUB_SECTION_ENTER(f, l, i) f->profiling_section_enter(l, i)

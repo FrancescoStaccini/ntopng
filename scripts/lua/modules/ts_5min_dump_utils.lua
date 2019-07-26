@@ -42,11 +42,12 @@ end
 -- ########################################################
 
 --WIP
-
 --TODO: SINCRONIZZA A MANO CON IL FILE ORIGINALE DEL REPO DI NTOP
 --      ricontrolla i nomi delle utils e anche in generale che alcune cosine sono cambiate
 --      per pulizia: in ts_dump.run_5min_dump(...) la table.merge al volo non è elegantissima
 --note: sono divise in gruppi (max 3 per limiti dovuti al grafico delle ts)
+--      potrei rtattare i tipi di device come le ndpi_categories, però poi dovrei organizzare a modo la vicualizzazione nell'interfaccia (l'elenco a scorrimento coi nomi delle label)
+
 function ts_dump.l2_device_update_talkers_stats_rrds( when, devicename, device, ifstats, verbose, talkers)
   local tt = arp_matrix_utils.talkersTot(talkers)
 
@@ -489,15 +490,23 @@ function ts_dump.run_5min_dump(_ifname, ifstats, config, when, time_threshold, s
 
         if(host_ts.initial_point ~= nil) then
           -- Dump the first point
+          --io.write("pre DUMP-1  hostname: ".. hostname.."  -  ".. min_host_instant.."\n")
           ts_dump.host_update_rrd(host_ts.initial_point_time, host_key, host_ts.initial_point, ifstats, verbose, config)
           min_host_instant = math.max(min_host_instant, host_ts.initial_point_time - 1)
+          --io.write("post DUMP-1 hostname: ".. hostname.."  -  ".. min_host_instant.."\n")
         end
 
         for _, host_point in ipairs(host_ts or {}) do
           local instant = host_point.instant
 
           if instant >= min_host_instant then
+            
+            --io.write("pre DUMP-2  hostname: ".. hostname.."  -  ".. min_host_instant .."\n")
+
             ts_dump.host_update_rrd(instant, host_key, table.merge( host_point, {hostname = hostname}), ifstats, verbose, config) --wip: hostname added in "host_point" for the dropbpox share timeseries
+          
+            --io.write("post DUMP-2 hostname: ".. hostname.."  -  ".. min_host_instant.."\n")
+
           end
         end
 

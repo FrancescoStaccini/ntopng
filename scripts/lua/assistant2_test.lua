@@ -19,7 +19,10 @@ local limit_num_devices_protocol_chart = 4
 local limit_num_chart_top_categories  = 6
 
 --TODO: 
---      - la + grande indecisione: mettere gli aggregatori in un dato contesto, così che non si attivino per sbaglio durante il resto del discorso. capita trroppo spesso!
+--      - SISTEMA I NOMI DEI PERCORSI: NETWORK ha senso diverso nelle info aggregate che in quelle dettagliate!
+--      - SPECIFICA SEMPRE QUANDO NON ASPETTI LA RISPOSTA UTENTE! (non ti pubblicano l'app altrimenti)
+--      - completa il trasferimento di intent da nAssistant 1 al 2
+--      - GUARDA LA SCHEDA PEERS IN HOST_DETAILS (VEDI CODICE E CAPISCI COME FUNGE, C'È ROBA POTENZIALMENTE UTILE)
 --      -RICH MESSAGE [https://cloud.dialogflow.com/dialogflow/docs/intents-rich-messages ] inoltre esempi json tra i preferiti
 --        idea: nell'URL dell'immagine metto il link al(lo scriptino lua nel) server ntop (o a quanto pare a quickchart.io" ) con alla fine i parametri necessari per fare il grafico
 --      -metti altri intent per farsi dare elenchi/vai grafici 
@@ -37,17 +40,19 @@ local limit_num_chart_top_categories  = 6
 --      -Aggiungere dimensione temporale nelle info (tipo traffico/app/categorie ecc.) così d adare un idea del tempo di monitoraggio
 --      -aggiungere la getHostAltName(ip,mac) dove serve ma occhio! mettila solo quando devi esporre i dati!
 --      -la possibilità di settare Alias per i dispositivi, direttamente dall'assistente
+--      -intent per cambiare tipo di grafico quando possibile, rimanendo però sull'intent
 
---NOTE:
+--NOTE/IDEE:
 -- !!!  - È possibile salvare dati sul dispositivo dell'utente! [ https://developers.google.com/actions/assistant/save-data ]
 --      - come ottengo il nome alias? con getHostAltName(ip,mac) ma ip può essere un mac e mac può essere nil
 --      - (dalla docs dei reprompt) Reprompts aren't supported on all Actions on Google surfaces. We recommend you handle no-input errors but keep in mind that they may not appear on all user devices.
-
+--      - Maximum num of suggestion chips is 8, and the maximum text length is 20 characters each.
 
 --+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 --####################################- nAssistant - UTILS -###############################################
 --+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
+--ABOUT: traffic volume, in/out, TCP efficiency
 local function get_aggregated_info_traffic()
   local stats, text = net_state.check_net_communication(),""
   local ctg, prc = net_state.check_top_traffic_application_protocol_categories()
@@ -79,6 +84,7 @@ end
 
 --#########################################################################################################
 
+--ABOUT: num devices and type
 local function get_aggregated_info_devices()
   local info, devices_num = net_state.check_devices_type()
   local text2 = ""
@@ -157,6 +163,7 @@ end
   
 --#########################################################################################################
 
+--ABOUT: security stuff: alert triggered, bad host, traffic breed
 local function get_aggregated_info_network()
   local stats = net_state.check_ifstats_table()
   local alert_num, severity = net_state.get_num_alerts_and_severity()
@@ -195,6 +202,7 @@ local function get_aggregated_info_network()
   return text
 end
 
+--ABOUT: summary of the others topic
 --#########################################################################################################
 local function get_aggregated_info_generic()
   local stats = net_state.check_ifstats_table()
@@ -235,9 +243,10 @@ local function find_mac_hosts(name)
   local hosts_names = interface.findHost(name) --it search "names" among (and inside) all the host names
   if not hosts_names then return 0, nil end
 
+  --tprint(hosts_names)
+
   local macs_table, tmp_host_info, tmp_mac_info = {}, {}, {}
 
-  
   for i,v in pairs(hosts_names) do--"i" contiene gli ip, "v" contiene il nome (può essere mac, alias o ip)
     tmp_host_info = interface.getHostInfo(i)
 
@@ -255,39 +264,151 @@ local function find_mac_hosts(name)
   end
 
 end
+--#########################################################################################################
+--[[
+  QUANDO NON HO RISULTATI DALLA QUERY PARTE QUESTO ERRORE:
+    25/Jul/2019 17:48:02 [LuaEngine.cpp:174] ERROR: ntop_set_redis : expected string[@pos 2], got nil
+
+]]
+
+
+
+--DOMANDA: ma il nome è legato all'host o al mac? una machina può avere più nomi?
+--parte del codice è di find_host.lua
+local function find_device_name_and_addresses(query)
+
+  local max_total_items = 8
+  local results = {}
+
+  if(query == nil) then query = "" end
+
+  interface.select(ifname)
+
+  -- Hosts
+  local res = interface.findHost(query)
+  --findHost restituirsce la tabella con entry fatte--> [ IP - mac ]
+
+  -- Also look at the custom names
+  local ip_to_name = ntop.getHashAllCache(getHostAltNamesKey()) or {}
+  for ip,name in pairs(ip_to_name) do
+    if string.contains(string.lower(name), string.lower(query)) then
+        res[ip] = hostVisualization(ip, name)     --note: hostVisualization(...) mette "[IPv6]"agli host con ip v6
+    end
+  end
+
+      --NOTE: in questa cache c'è il problema che ci vengono a finire anche i dispositivi che sono stati "purgiati",
+        -- come tratto il caso? se li voglio togliere basta non controllare nella 
+        --cache dhcp. MA! attualmente questa funzione viene invocata dall'utente per cercare un dispositivo
+        --quindi l'utente presumibilmente vuole info a riguardo, deve poter continuare la ricerca di info. QUINDI:
+        --TOLGO IL CONTROLLO IN CACHE
+
+  -- Also look at the DHCP cache
+  -- local mac_to_name = ntop.getHashAllCache(getDhcpNamesKey(getInterfaceId(ifname))) or {}
+  -- for mac, name in pairs(mac_to_name) do
+  --   if string.contains(string.lower(name), string.lower(query)) then
+  --       res[mac] = hostVisualization(mac, name)
+  --   end
+  -- end
+
+    --[[es di interface.findHostByMac(mac):
+    ""                        "2a00:1620:c0:60:9890:aad6:7947:cc19"
+    fe80::280:b079:295b:757a	"fe80::280:b079:295b:757a"
+    146.48.99.100	             "146.48.99.100"
+    ]]
+
+  --tprint(res)
+
+  local ips = {}
+  local info_host_by_mac = nil
+  local num_items = 0
+  for k, v in pairs(res) do
+    if num_items >= max_total_items then break end
+
+    if v ~= "" then
+      --note: non so se lasciarlo [IPv6], vediamo, se non da noia lascialo
+      if isIPv6(v) and (not string.contains(v, "%[IPv6%]")) then
+        v = v.." [IPv6]"
+      end
+
+      if isMacAddress(v) then         --caso in cui il mac è anche il nome --> v = k
+        info_host_by_mac = interface.findHostByMac(v)
+        for _,vv in pairs(info_host_by_mac) do
+          table.insert(ips,vv)
+        end
+
+        results[v] = {name = v, ip = ips}
+        num_items = num_items + 1 
+
+      elseif isMacAddress(k) then     --caso in cui la chiave è il mac
+
+        --NOTE: col check alla cache dhcp tolto, pare non avere senso questo caso
+        info_host_by_mac = interface.findHostByMac(k)
+        for _,vv in pairs(info_host_by_mac) do
+          table.insert(ips,vv)
+        end
+        results[k] = {name = v, ip = ips}
+        num_items = num_items + 1 
+      else                            --caso in cui ne k ne v sono mac --> k è ip, v è nome
+
+        local h_info = interface.getHostInfo(k)
+        if h_info then
+          info_host_by_mac = interface.findHostByMac(h_info["mac"])
+
+          for _,vv in pairs(info_host_by_mac) do
+            table.insert(ips,vv)
+          end
+          results[h_info["mac"]] = {name = v, ip = ips}
+          num_items = num_items + 1 
+        end
+
+      end
+      ips = {}
+
+    end 
+  end--\for
+  ----MEGATODO: attualmente restituisce una tabella con nome, mac, tipo(da togliere), ip(tutti gli ip del device
+  return results, num_items
+
+end
 
 --#########################################################################################################
+
+--TODO: METTI UN LIMITE TEMPORALE SE CI SONO MOLTI IP NELLA IP_TABLE
+
+--TODO: astrai di più! fai una funzione per iterare tra gli host di un mac, che accetti una callback per elaborare le info
+
 --TODO: studia le varie "duration" in getMacInfo / getHostInfo / categories / app ecc.... (guarda le viste di dettaglio dei mac/host)
---return info about a device and its hosts
+--      ANCHE "total_activity_time" in getHsotInfo
+
+--return info about a device and it's hosts
 local function merge_hosts_info(ip_table)
   local res = nil
   local ndpi_categories_tot_bytes, ndpi_tot_bytes = 0, 0
 
-  for _,v in ipairs(ip_table) do   --fondo insieme le tavole
-    --[[
-      TODO: controlla se il num di bytes torna con le ndpi app e coi i bytes inviai/ricevuti su getMAc/HostInfo(..) )   )
+  for _,ip in ipairs(ip_table) do   
+    --tprint(ip)
+    --[[TODO: controlla se il num di bytes torna con le ndpi app e coi i bytes inviai/ricevuti su getMAc/HostInfo(..) )   )
+        TODO: le varie info per stabilire se la connessione è buona. aspetto che tale lavoro (anche se aggregato) venga fatto su network_state perché
+          sono state introdotte nuove info da controllare e c'è da rifare roba  ]]
 
-      TODO: le varie info per stabilire se la connessione è buona. aspetto che tale lavoro (anche se aggregato) venga fatto su network_state perché
-        sono state introdotte nuove info da controllare e c'è da rifare roba
-    ]]
-
-    tmp = interface.getHostInfo(v.ip)
+    local host_info = interface.getHostInfo(ip)
 
     if res == nil then --tabella vuota, popolo con le info che sono uguali per ogni host del device, lo faccio solo la prima volta
       --attualmente tengo più info di quante ne uso:
       --TODO:(salta http - sites - dns che li vedrei solo della macchina dove gira ntopng, però i contatori dei metodi hhtp funzionano ugualmente)
       --la tabella di ndpi_categories e ndpi, tutta. dagli host
       
-      res = tmp 
-      local mac_info = interface.getMacInfo(tmp.mac)
+      res = host_info 
+      local mac_info = interface.getMacInfo(host_info.mac)
 
-      if tmp.devtype and tmp.devtype ~= 0 then 
+      if host_info.devtype and host_info.devtype ~= 0 then 
         local discover = require "discover_utils" 
-        res["devtype_name"] = discover.devtype2string(tmp.devtype) 
+        res["devtype_name"] = discover.devtype2string(host_info.devtype) 
       else 
         res["devtype_name"]  = "Unknown"
       end
-
+      res["num_blacklisted_host"] = ternary( host_info.is_blacklisted, 1, 0 )
+      res["num_childSafe_host"] = ternary( host_info.childSafe, 1, 0 )
       res["manufacturer"] = ternary( mac_info and mac_info.manufacturer, mac_info.manufacturer, "Unknown"  )
       res["model"] = ternary( mac_info and mac_info.model, mac_info.model, "Unknown"  )
       res["operatingSystem"] = ternary( mac_info and mac_info.operatingSystem ~= 0, getOperatingSystemName(mac_info.operatingSystem), "Unknown"  )
@@ -308,7 +429,7 @@ local function merge_hosts_info(ip_table)
       ]]
     else --qui faccio i merge
       ------ndpi_categories------
-      for name, info in pairs(tmp.ndpi_categories) do
+      for name, info in pairs(host_info.ndpi_categories) do
         if res.ndpi_categories[name] then --esiste già in res (aggiorno solo le info che incrementano)
           res.ndpi_categories[name].bytes           = res.ndpi_categories[name].bytes + info.bytes
           res.ndpi_categories[name]["bytes.rcvd"]   = res.ndpi_categories[name]["bytes.rcvd"] + info["bytes.rcvd"]
@@ -320,7 +441,7 @@ local function merge_hosts_info(ip_table)
         ndpi_categories_tot_bytes = ndpi_categories_tot_bytes + info.bytes
       end
       ------ndpi------
-      for name, info in pairs(tmp.ndpi) do
+      for name, info in pairs(host_info.ndpi) do
         if res.ndpi[name] then --esiste già in res (aggiorno solo le info che incrementano)
           res.ndpi[name]["bytes.rcvd"]          = res.ndpi[name]["bytes.rcvd"] + info["bytes.rcvd"]
           res.ndpi[name]["bytes.sent"]          = res.ndpi[name]["bytes.sent"] + info["bytes.sent"]
@@ -332,19 +453,24 @@ local function merge_hosts_info(ip_table)
         ndpi_tot_bytes = ndpi_tot_bytes + info["bytes.sent"]  + info["bytes.rcvd"] 
       end
       -------alerts--------
-      if tmp.is_blacklisted and tmp.is_blacklisted == "true" then res["is_blacklisted"] =  "true" end -- lo metto solo se è true
-      res["num_alerts"] = res["num_alerts"] + tmp["num_alerts"] --TODO: ma num_aletrs si riferisce all'host, farne la somma non credo abbia senso
-      res["total_alerts"] = res["total_alerts"] + tmp["total_alerts"]
+      if host_info.is_blacklisted then res["num_blacklisted_host"] = res["num_blacklisted_host"] + 1 end --TODO: test
+      if host_info.childSafe then res["num_childSafe_host"] = res["num_childSafe_host"] + 1 end --TODO: test
+       --TODO: ma num_aletrs si riferisce all'host, farne la somma non credo abbia senso
+       --non sono molto convinto degli alert
+      res["num_alerts"] = res["num_alerts"] + host_info["num_alerts"]
+      res["total_alerts"] = res["total_alerts"] + host_info["total_alerts"]
 
       --note faccio ciò per togliere il tag [...] a seguito del nome ( es. nome & nome [IPv6] )
-      if tmp.name and ( string.len(res.name) > string.len(tmp.name) ) then res.name = tmp.name end
+      if host_info.name and ( string.len(res.name) > string.len(host_info.name) ) then res.name = host_info.name end
+
+      
 
     end
   end--end-for
 
   --ordino ndpi app e categories
-  tmp = {}
-  if res.ndpi then 
+  local tmp = {}
+  if res and res.ndpi then 
     for i,v in pairs(res.ndpi) do
       table.insert(tmp, {name = i, info = v, percentage = math.floor( ( (v["bytes.rcvd"] + v["bytes.sent"]) / ndpi_tot_bytes) * 100 ) } )
     end
@@ -353,7 +479,7 @@ local function merge_hosts_info(ip_table)
   end
 
   tmp = {}
-  if res.ndpi_categories then 
+  if res and res.ndpi_categories then 
     for i,v in pairs(res.ndpi_categories) do
       table.insert(tmp, {name = i, info = v, percentage = math.floor( (v.bytes / ndpi_categories_tot_bytes) * 100 ) } )
     end
@@ -377,7 +503,7 @@ function handler_if_active_flow_top_application()
         return
     end
     local labels, values, datasets = {},{},{}
-    local legend_label = "Traffic (KB)"
+    local legend_label = "Traffic Breeds (KB)"
     local data = {labels = {}, values = {}, legend_label = legend_label}
     local options = { 
         w = "600",
@@ -428,7 +554,7 @@ function handler_get_aggregated_info()
       response_text = get_aggregated_info_devices()
   
   else
-       --[[fallback]]
+       --fallback qui no ndovrei mai arrivarci
        --non credo ci sia bisogno di implementare una fallback apposita per aggregated_info
        dialogflow.send("Ops! I've a problem, sorry. Ask me something else")--TODO fai un messaggio di errore a modo con link esterno verso una issue di github
   end
@@ -438,7 +564,7 @@ end
 
 --#########################################################################################################
 
---WIP
+--TODO
 function handler_get_aggregated_info_more()
   -- local response_text = ""
   -- local tips = {}
@@ -497,7 +623,7 @@ function handler_if_active_flow_top_categories()
       url,
       "Top Categories Chart"
   )
-  --local speech_text = df_utils.create_top_categories_speech_text(top_cat)
+  --local speech_text = df_utils.create_top_categories_speech_text(top_cat) TODO!
   local display_text = "Here is the chart"
 
   --dialogflow.send(speech_text, display_text, nil, nil, card)
@@ -553,9 +679,9 @@ function handler_who_is_categories()
   --local speech_text = df_utils.create_top_categories_speech_text(top_cat)
   local display_text = "Here is the chart"
 
-  --TODO: aggiungi i suggerimenti coi nomi dei dispositivi e la parte vocale
+  --TODO: aggiungi la parte vocale
   --dialogflow.send(speech_text, display_text, nil, nil, card)
-  dialogflow.send(display_text, nil, nil, nil, card)
+  dialogflow.send(display_text, nil, nil, data.labels, card)
 end
 
 --#########################################################################################################
@@ -613,281 +739,150 @@ function handler_who_is_protocols()
   --local speech_text = df_utils.create_top_categories_speech_text(top_cat)
   local display_text = "Here is the chart"
 
-  --TODO: aggiungi i suggerimenti coi nomi dei dispositivi e la parte vocale
+  --TODO: aggiungi la parte vocale
   --dialogflow.send(speech_text, display_text, nil, nil, card)
-  dialogflow.send(display_text, nil, nil, nil, card)
+  dialogflow.send(display_text, nil, nil, data.labels, card)
 end
 
 --#########################################################################################################
+
+--[[ esempio di find_device_name_and_addresses()
+   table
+    00:0C:29:74:E2:A8 table
+    00:0C:29:74:E2:A8.name string 00:0C:29:74:E2:A8
+    00:0C:29:74:E2:A8.ip table
+    00:0C:29:74:E2:A8.ip.1 string fe80::20c:29ff:fe74:e2a8
+    00:0C:29:74:E2:A8.type string mac
+    00:0C:29:74:E2:A8.mac string 00:0C:29:74:E2:A8
+    58:B0:35:FF:D1:23 table
+    58:B0:35:FF:D1:23.name string 58:B0:35:FF:D1:23
+    58:B0:35:FF:D1:23.ip table
+    58:B0:35:FF:D1:23.ip.1 string 0.0.0.0
+    58:B0:35:FF:D1:23.ip.2 string ::
+    58:B0:35:FF:D1:23.ip.3 string 146.48.98.6
+    58:B0:35:FF:D1:23.ip.4 string fe80::5ab0:35ff:feff:d123
+    58:B0:35:FF:D1:23.type string mac
+    58:B0:35:FF:D1:23.mac string 58:B0:35:FF:D1:23
+    01:00:5E:00:00:01 table
+    01:00:5E:00:00:01.name string 01:00:5E:00:00:01
+    01:00:5E:00:00:01.ip table
+    01:00:5E:00:00:01.ip.1 string 224.0.0.1
+    01:00:5E:00:00:01.type string mac
+    01:00:5E:00:00:01.mac string 01:00:5E:00:00:01
+    01:00:5E:00:00:12 table
+    01:00:5E:00:00:12.name string 01:00:5E:00:00:12
+    01:00:5E:00:00:12.ip table
+    01:00:5E:00:00:12.ip.1 string 224.0.0.18
+    01:00:5E:00:00:12.type string mac
+    01:00:5E:00:00:12.mac string 01:00:5E:00:00:12
+    01:00:5E:00:00:F9 table
+    01:00:5E:00:00:F9.name string 01:00:5E:00:00:F9
+    01:00:5E:00:00:F9.ip table
+    01:00:5E:00:00:F9.ip.1 string 224.0.0.249
+    01:00:5E:00:00:F9.type string mac
+    01:00:5E:00:00:F9.mac string 01:00:5E:00:00:F9
+    D8:18:D3:78:CB:2F table
+    D8:18:D3:78:CB:2F.name string D8:18:D3:78:CB:2F
+    D8:18:D3:78:CB:2F.ip table
+    D8:18:D3:78:CB:2F.ip.1 string 60.179.145.55
+    D8:18:D3:78:CB:2F.ip.2 string 58.21.140.143
+    D8:18:D3:78:CB:2F.ip.3 string 185.209.0.17
+    D8:18:D3:78:CB:2F.ip.4 string 129.82.138.44
+    D8:18:D3:78:CB:2F.ip.5 string 46.101.19.126
+    D8:18:D3:78:CB:2F.ip.6 string 122.228.19.79
+    D8:18:D3:78:CB:2F.ip.7 string 91.206.15.239
+    D8:18:D3:78:CB:2F.ip.8 string 184.105.139.87
+    D8:18:D3:78:CB:2F.ip.9 string 184.105.139.96
+    D8:18:D3:78:CB:2F.ip.10 string 1.52.7.65
+    D8:18:D3:78:CB:2F.ip.11 string 104.206.128.78
+    D8:18:D3:78:CB:2F.type string mac
+    D8:18:D3:78:CB:2F.mac string D8:18:D3:78:CB:2F
+]]
 
 --TODO: alla risposta, comunica anche il nome che ho inteso del dispositivo
 function handler_ask_for_single_device_info() --in realtà è la fallback dell'intent "ask_for_single_device_info"
-  local text = "I didn't find any device with that name"
+  local text = "I didn't find any device with that name, can you repeat please?"
   local device_name = request.queryText
+  if (not device_name) or (device_name == "") then dialogflow.send(text); return end
+  local macs_table, macs_table_len = find_device_name_and_addresses(device_name) 
+  local mac = nil
+  local d_info, sugg = {}, {}
 
-  local macs_table_len, macs_table, mac = find_mac_hosts(device_name)
-  local d_info = {}
+  --TODO: controllo su qyery text, è una fallback, può essere anche vuoto!
+  -- tprint("\n--------------------------------------------------\n")
+  -- tprint(macs_table)
 
-  if macs_table_len > 1 then 
+
+  --controllo se un nome trovato è identico alla query (il nome di un device potrebbe essere una parte del nome di un altro, così tratto tale caso)
+  local found = false
+  local name = nil
+
+  for k,v in pairs(macs_table) do
+    if device_name == v.name then 
+      found = true
+      name = v.name
+    end
+  end
+
+  if macs_table_len > 1 and not found then 
     --TODO: metti suggerimenti e diversifica la risposta audio
     text = "I found this, please select one of the suggestions"
-
-  elseif macs_table_len == 1 then 
-    d_info = merge_hosts_info(macs_table[mac])
   
-    text = "\tName: ".. d_info.name .. "\nType: "..d_info.devtype_name.."\nManufacturer: ".. d_info.manufacturer
+    for k,v in pairs(macs_table) do
+      table.insert(sugg, v.name)
+    end
+
+  elseif macs_table_len == 1 or found then 
+
+    for k,v in pairs(macs_table) do
+      if macs_table_len == 1 then 
+        mac = k
+        break
+      elseif name and v.name == name then 
+        mac = k 
+      end
+    end 
+
+    d_info = merge_hosts_info(macs_table[mac].ip)
+
+    local alias = ""
+    if getHostAltName(mac) ~= d_info.name then 
+      alias = " [".. getHostAltName(mac) .." ]"
+    end
+  
+    text = "\tName: ".. d_info.name ..alias.."\nType: "..d_info.devtype_name.."\nManufacturer: ".. d_info.manufacturer
     if d_info.model then text = text .."\nModel: "..d_info.model end
+    if d_info.operatingSystem then text = text .."\nOS: "..getOperatingSystemName(d_info.operatingSystem) end
     if d_info.ndpi then text = text .. "\nMost used app: "..d_info.ndpi[1].name end
     if d_info.ndpi_categories then text = text .. "\nMost traffic belong to category: "..d_info.ndpi_categories[1].name end
-    --TODO: add host pool
-  end
-  --TODO: salva un qualche id (mac + i vari host ip? non sarebbe male) del device. serve per il followup intent "more"
-  ntop.setCache("nAssistant_device_info_mac", mac, 60*20 ) -- 20 min tempo max di vita
 
-  dialogflow.send(text)
+    sugg = {"more applications", "more categories", "more alerts", "more network", "more security", }
+
+    --TODO: add host pool
+      --TODO: salva un qualche id (mac + i vari host ip? non sarebbe male) del device. serve per il followup intent "more"
+    ntop.setCache("nAssistant_device_info_mac", mac, 60*20 ) -- 20 min tempo max di vita
+
+  end
+
+  dialogflow.send(text, nil, nil, sugg)
 
 end
 
 --#########################################################################################################
-        --[[
-          macs_table:
-          10:65:30:08:97:08 table
-          10:65:30:08:97:08.1 table
-          10:65:30:08:97:08.1.ip string 146.48.99.133
-          10:65:30:08:97:08.1.name string kilian-IIT
-        ]]
-        --[[ d_info ha una (casuale) tabella info di un host MA ndpi e ndpi_categories sono unite tra tutti gli host
 
-          longitude number 12.109700202942
-          ifid number 1
-          other_ip.bytes.rcvd.anomaly_index number 0
-          flows.as_client number 1665
-          name string kilian-IIT
-          icmp.bytes.rcvd.anomaly_index number 0
-          throughput_pps number 0.1999549716711
-          host_unreachable_flows.as_server number 0
-          model string Unknown
-          unreachable_flows.as_client number 1
-          asname string Consortium GARR
-          tcp.bytes.rcvd number 0
-          host_pool_id number 0
-          dns table
-          [...]
-          tcp.bytes.rcvd.anomaly_index number 0
-          is_broadcast boolean false
-          childSafe boolean false
-          anomalous_flows.as_server number 427
-          udpBytesSent.non_unicast number 2299931
-          bytes.sent number 2301499
-          ndpi table
-              [...]
-          flows.as_server number 470
-          icmp.packets.sent number 0
-          bytes.rcvd number 51700
-          manufacturer string Dell Inc.
-          total_flows.as_client number 1665
-          low_goodput_flows.as_client number 0
-          tcp.bytes.sent number 0
-          icmp.bytes.rcvd number 0
-          sites.old string { }
-          devtype number 0
-          packets.rcvd number 663
-          operatingSystem string Unknown
-          asn number 137
-          other_ip.bytes.sent.anomaly_index number 0
-          localhost boolean true
-          throughput_bps number 63.385726928711
-          systemhost boolean false
-          udp.packets.sent number 175
-          tcpPacketStats.sent table
-          tcpPacketStats.sent.retransmissions number 0
-          tcpPacketStats.sent.keep_alive number 0
-          tcpPacketStats.sent.lost number 0
-          tcpPacketStats.sent.out_of_order number 0
-          has_dropbox_shares boolean false
-          tcp.bytes.sent.anomaly_index number 0
-          other_ip.packets.rcvd number 0
-          seen.last number 1563380319
-          bytes.rcvd.anomaly_index number 0
-          city string 
-          low_goodput_flows.as_server.anomaly_index number 0
-          host_unreachable_flows.as_client number 0
-          broadcast_domain_host boolean true
-          low_goodput_flows.as_client.anomaly_index number 0
-          packets.sent.anomaly_index number 66
-          dhcpHost boolean true
-          os string 
-          privatehost boolean false
-          throughput_trend_bps number 1
-          tcpPacketStats.rcvd table
-          tcpPacketStats.rcvd.retransmissions number 114
-          tcpPacketStats.rcvd.keep_alive number 0
-          tcpPacketStats.rcvd.lost number 8
-          tcpPacketStats.rcvd.out_of_order number 3
-          tcp.packets.sent number 0
-          devtype_name string Unknown
-          ndpi_categories table
-              [...]
-          other_ip.packets.sent number 0
-          country string IT
-          bytes.ndpi.unknown number 51151
-          continent string EU
-          names table
-          names.dhcp string kilian-IIT
-          duration number 2512289
-          mac string 10:65:30:08:97:08
-          ssl_fingerprint table
-          udpBytesSent.unicast number 0
-          icmp.bytes.sent.anomaly_index number 0
-          num_triggered_alerts table
-          num_triggered_alerts.day number 0
-          num_triggered_alerts.min number 0
-          num_triggered_alerts.hour number 0
-          num_triggered_alerts.5mins number 0
-          anomalous_flows.as_client number 9
-          http table
-          http.virtual_hosts table
-          http.receiver table
-          http.receiver.query table
-          http.receiver.query.num_other number 0
-          http.receiver.query.num_head number 0
-          http.receiver.query.num_put number 0
-          http.receiver.query.num_post number 0
-          http.receiver.query.total number 0
-          http.receiver.query.num_get number 0
-          http.receiver.response table
-          http.receiver.response.num_1xx number 0
-          http.receiver.response.num_2xx number 0
-          http.receiver.response.num_4xx number 0
-          http.receiver.response.num_5xx number 0
-          http.receiver.response.total number 0
-          http.receiver.response.num_3xx number 0
-          http.receiver.rate table
-          http.receiver.rate.response table
-          http.receiver.rate.response.1xx number 0
-          http.receiver.rate.response.2xx number 0
-          http.receiver.rate.response.3xx number 0
-          http.receiver.rate.response.4xx number 0
-          http.receiver.rate.response.5xx number 0
-          http.receiver.rate.query table
-          http.receiver.rate.query.put number 0
-          http.receiver.rate.query.other number 0
-          http.receiver.rate.query.head number 0
-          http.receiver.rate.query.get number 0
-          http.receiver.rate.query.post number 0
-          http.sender table
-          http.sender.query table
-          http.sender.query.num_other number 0
-          http.sender.query.num_head number 0
-          http.sender.query.num_put number 0
-          http.sender.query.num_post number 0
-          http.sender.query.total number 0
-          http.sender.query.num_get number 0
-          http.sender.response table
-          http.sender.response.num_1xx number 0
-          http.sender.response.num_2xx number 0
-          http.sender.response.num_4xx number 0
-          http.sender.response.num_5xx number 0
-          http.sender.response.total number 0
-          http.sender.response.num_3xx number 0
-          http.sender.rate table
-          http.sender.rate.response table
-          http.sender.rate.response.1xx number 0
-          http.sender.rate.response.2xx number 0
-          http.sender.rate.response.3xx number 0
-          http.sender.rate.response.4xx number 0
-          http.sender.rate.response.5xx number 0
-          http.sender.rate.query table
-          http.sender.rate.query.put number 0
-          http.sender.rate.query.other number 0
-          http.sender.rate.query.head number 0
-          http.sender.rate.query.get number 0
-          http.sender.rate.query.post number 0
-          hiddenFromTop boolean false
-          udp.packets.rcvd number 0
-          active_http_hosts number 0
-          other_ip.bytes.sent number 0
-          icmp.bytes.sent number 0
-          latitude number 43.147899627686
-          local_network_id number 2
-          packets.rcvd.anomaly_index number 0
-          icmp.packets.rcvd number 0
-          udp.bytes.rcvd number 0
-          bytes.sent.anomaly_index number 60
-          udp.bytes.sent number 30048
-          total_alerts number 426
-          drop_all_host_traffic boolean false
-          local_network_name string 146.48.96.0/22
-          packets.sent number 8002
-          throughput_trend_pps number 2
-          total_activity_time number 22510
-          contacts.as_server number 0
-          contacts.as_client number 2
-          ip string 146.48.99.133
-          active_flows.as_server number 0
-          sites string { }
-          seen.first number 1560868031
-          udp.bytes.sent.anomaly_index number 60
-          pktStats.sent table
-          pktStats.sent.upTo9000 number 0
-          pktStats.sent.upTo1518 number 3
-          pktStats.sent.upTo512 number 8
-          pktStats.sent.upTo256 number 48
-          pktStats.sent.above9000 number 0
-          pktStats.sent.rst number 0
-          pktStats.sent.finack number 0
-          pktStats.sent.upTo64 number 0
-          pktStats.sent.upTo6500 number 0
-          pktStats.sent.upTo128 number 111
-          pktStats.sent.synack number 0
-          pktStats.sent.upTo2500 number 0
-          pktStats.sent.upTo1024 number 5
-          pktStats.sent.syn number 0
-          low_goodput_flows.as_server number 0
-          is_blacklisted boolean false
-          unreachable_flows.as_server number 0
-          active_flows.as_client number 5
-          total_flows.as_server number 470
-          udp.bytes.rcvd.anomaly_index number 0
-          other_ip.bytes.rcvd number 0
-          tcp.packets.seq_problems boolean true
-          vlan number 0
-          tcp.packets.rcvd number 0
-          num_alerts number 0
-          ipkey number 2452644741
-          last_throughput_pps number 0.19995501637459
-          last_throughput_bps number 17.196130752563
-          pktStats.recv table
-          pktStats.recv.upTo9000 number 0
-          pktStats.recv.upTo1518 number 0
-          pktStats.recv.upTo512 number 0
-          pktStats.recv.upTo256 number 0
-          pktStats.recv.above9000 number 0
-          pktStats.recv.rst number 0
-          pktStats.recv.finack number 0
-          pktStats.recv.upTo64 number 0
-          pktStats.recv.upTo6500 number 0
-          pktStats.recv.upTo128 number 0
-          pktStats.recv.synack number 0
-          pktStats.recv.upTo2500 number 0
-          pktStats.recv.upTo1024 number 0
-          pktStats.recv.syn number 0
-          throughput_trend_bps_diff number 46.189598083496
-          tskey string 10:65:30:08:97:08_v4
-          is_multicast boolean false
-        ]]
-
---TODO! controlla se possibile 
---nel param device_info trovi cosa devi controllare, in chache troverai l'id (mac + i vari host ip? non sarebbe male, così no ndevo ricalcolarlo, però non è fondamentale)
+--in chache troverai l'id (mac + i vari host ip? non sarebbe male, così no ndevo ricalcolarlo, però non è fondamentale)
 function handler_ask_for_single_device_info_more()
   local info_type = request.parameters.device_info--note: info type = alerts - applications - security - tech-specs - categories - network
   local mac = ntop.getCache("nAssistant_device_info_mac")
-  local macs_table_len, macs_table = find_mac_hosts(mac)
-  local d_info = merge_hosts_info(macs_table[mac])
+  --TODO: gestisci bene il caso del mac non segnato
+  if not mac then dialogflow.send("Please, tell me a specific defice first"); return end
+
+  local macs_table, macs_table_len = find_device_name_and_addresses( getHostAltName(mac))
+  local d_info = merge_hosts_info(macs_table[mac].ip)
   local is_chart = false
   local speech_text, display_text = "WIP", "WIP"
 
---il seguente è un copia incolla degli intent top app/categories: FAI DELLE FOTTUTE API!
+  --il seguente è un copia incolla degli intent top app/categories: FAI DELLE FOTTUTE API!
   if not d_info then 
     dialogflow.send("I have not found any active communication! Please try again later")
     return
@@ -907,13 +902,16 @@ function handler_ask_for_single_device_info_more()
   local i = 0
   local card_title, chart_description = "Chart", "Chart"
 
+  --note/todo: usare le query dns? capire i siti richiesti e cose del genere? boh
+  --            e gli unreachable_flow????
+
   --TODO: vari check per vedere se tali tabelle non sono nil
-  if info_type == "applications" then
+  if     info_type == "applications" then
     is_chart = true
     chart_description = "Top Application for ".. d_info.name 
     card_title = "Top Application for ".. d_info.name
 
-     for _,v in ipairs(d_info.ndpi) do
+    for _,v in ipairs(d_info.ndpi) do
       table.insert(data.labels, v.name) 
       table.insert(data.values, (v.info["bytes.rcvd"]+v.info["bytes.sent"])/1024 )
       i = i + 1
@@ -945,20 +943,50 @@ function handler_ask_for_single_device_info_more()
 
   elseif info_type == "security" then
 
-    dialogflow.send("WIP - security")
-    return
+    --d_info.num_blacklisted_host     d_info.num_childSafe_host
+    --childsafe (flag che ti dice se è attivo il "safe child dns")
+
+    display_text = "This device have ".. d_info.num_blacklisted_host .. " blacklisted host, "..
+        d_info.num_childSafe_host .. " of them have child-safe turn on.\nHere you have a chart about the security of traffic:"
+
+    is_chart = true
+    chart_description = "Traffic Breed for ".. d_info.name 
+    card_title = "Traffic Breed for ".. d_info.name
+
+    local breeds_table = {}
+
+    for _,v in ipairs(d_info.ndpi) do
+      if breeds_table[v.info.breed] then 
+        breeds_table[v.info.breed] = breeds_table[v.info.breed] + v.info["bytes.rcvd"] + v.info["bytes.sent"]
+      else
+        breeds_table[v.info.breed] = v.info["bytes.rcvd"] + v.info["bytes.sent"]
+      end
+    end
+
+    for ii,v in pairs(breeds_table) do
+      table.insert(data.labels, ii) 
+      table.insert(data.values, (v/1024) )
+      i = i + 1
+      if i >= 6 then break end    --NOTE: 6 and 1 are arbitrary 
+    end
+
+    speech_text = display_text --TODO: change this, is temporary
 
   elseif info_type == "network" then
+
+    --TODO: goodput, tcpPktStats per l'efficienza, 
+
     --TODO: sempre i vari check sulle tabelle prima di iterarci
 
     --TODO: pensa un modo elencare LE interfacce attive
     -- local if_name = interface.getIfNames()[d_info.ifid]
 
     display_text = "Interface Name = "..ifname.."\nAddresses:\nMAC = "..mac
-    local i = 1
-    for _,v in pairs(macs_table) do
-      display_text = display_text .. "\n\tIP Host("..i..") = "..v[i].ip
-    end
+
+    local i = 1--TODO: trova modo per recuperare gli ip
+    -- for _,v in pairs(macs_table) do
+    --   display_text = display_text .. "\n\tIP Host("..i..") = "..v[i].ip
+    -- end
 
     local tot_sent, tot_rcvd = 0,0
     for i,v in pairs(d_info.ndpi_categories) do --scelgo le categories perché quasi certamente contiene meno elementi
@@ -969,9 +997,6 @@ function handler_ask_for_single_device_info_more()
     display_text = display_text .. "\nApplications Traffic Volume(KB):\n\tsent/rcvd = "..
       string.format("%.2f",tot_sent/1024).." / "..string.format("%.2f",tot_rcvd/1024)
 
-  elseif info_type == "tech-specs" then -- ha senso?
-
-    display_text = "WIP - hw specs"
   else
     --problemi! in teoria qui non dovrei mai capitarci
   end 
@@ -980,13 +1005,51 @@ function handler_ask_for_single_device_info_more()
     local url = df_utils.create_chart_url(data, options)
     local card = dialogflow.create_card(card_title, url, chart_description)
     -- TODO speech_text 
-    display_text = "Here is the chart"
+    if display_text =="WIP" then  display_text = "Here is the chart" end
 
     dialogflow.send(speech_text, display_text, nil, nil, card)
   else
     -- TODO speech_text
     dialogflow.send(display_text)
   end
+end
+
+--#########################################################################################################
+
+function handler_get_single_device_info_from_who_is()
+  local text = ternary( -- great randomization!
+        os.time()%2==0 ,
+        "Sorry, I didn't understand correctly. Can you repeat, please? ",
+        "Sorry I didn't understand what you mean, can you please repeat?"
+      )
+  local device_name = request.queryText
+  if (not device_name) or (device_name == "") then dialogflow.send(text); return end
+
+  local macs_table_len, macs_table, mac = find_mac_hosts(device_name)
+  local d_info = {}
+
+  if macs_table_len > 1 then 
+    --TODO: metti suggerimenti e diversifica la risposta audio
+    text = "I found this, please select one of the suggestions"
+
+  elseif macs_table_len == 1 then 
+    d_info = merge_hosts_info(macs_table[mac].ip)
+  
+    text = "\tName: ".. d_info.name .. "\nType: "..d_info.devtype_name.."\nManufacturer: ".. d_info.manufacturer
+    if d_info.model then text = text .."\nModel: "..d_info.model end
+    if d_info.operatingSystem then text = text .."\nOS: "..getOperatingSystemName(d_info.operatingSystem) end
+    if d_info.ndpi then text = text .. "\nMost used app: "..d_info.ndpi[1].name end
+    if d_info.ndpi_categories then text = text .. "\nMost traffic belong to category: "..d_info.ndpi_categories[1].name end
+
+    --TODO: add host pool
+  end
+  --TODO: salva un qualche id (mac + i vari host ip? non sarebbe male) del device. serve per il followup intent "more"
+  ntop.setCache("nAssistant_device_info_mac", mac, 60*20 ) -- 20 min tempo max di vita
+
+  --TODO: resetta contesti!
+  dialogflow.deleteContext() --TODO: TEST guarda se basta ciò:
+
+  dialogflow.send(text)
 end
 
 --+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -1009,19 +1072,38 @@ elseif  request.intent_name == "if_active_flow_top_categories"  then response = 
 
 
   --TODO: aggiungi frasi per il training
-elseif  request.intent_name == "who_is - categories"  then response = handler_who_is_categories()--WIP
+elseif  request.intent_name == "who_is - categories" then response = handler_who_is_categories()--WIP
 elseif  request.intent_name == "who_is - protocols"  then response = handler_who_is_protocols()--WIP
 
 
---TODO: di questi qua sotto cambia i nomi in qualcosa di più leggibile, MA ATTENTO, prima guardati bene "action and parameters" perché devi comunque portarti dietro le info tra i contesti
 --CHECK: nuovo contesto per gli "who_is" così da poter triggerare l'individuazione del nome dell'host/device da lì (es tappando sul suggerimento)
 elseif  request.intent_name == "ask_for_single_device_info - fallback" then response = handler_ask_for_single_device_info()
 
-  --info dettagliate relative a: categorie, app, sicurezza, tech specs, (aggiungiere altre, tipo i talkers se la matrice è attiva??)
+  --info dettagliate relative a: categorie, app, sicurezza (aggiungiere altre, tipo i talkers se la matrice è attiva??)
 elseif  request.intent_name == "ask_for_single_device_info - fallback - more" then response = handler_ask_for_single_device_info_more()
 
+--TODO: controlla e ragiona sui context lasciati vivi dalle fallback custom!!!! (es: potrei anche deciderli qui, nel back-end)
+
+
+
+--intent who_are_you implementato direttamente su dialogflow!  
+--TODO: immagine migliore, ritocchini di flavour
+
+
+--[[----------------------------------------------------------------------------
+
+WIP & TODO: UNA FALLBACK PER GLI "who_is"
+così se l'utente preme una chips per info su un determinato devices, SBEM! passo alle info dettagliate per quel device ]]
+elseif  request.intent_name == "who_is - categories - fallback" then response = handler_ask_for_single_device_info() --handler_get_single_device_info_from_who_is()
+elseif  request.intent_name == "who_is - protocols - fallback" then response = handler_ask_for_single_device_info() --handler_get_single_device_info_from_who_is()
 
   
+
+-------------------------------------------------------------------------------
+
+
+--IDEA: per il repeat facci oun intent solo, generico, e quando capita guardo in cache e replico l'ultimo intent con relativi param ecc:
+--potrei salvarmi l'intera precedente richiesta! e simulare che arrivi (occhio solo a più rietizioni conecutive)
 
 
 else response = dialogflow.send("Sorry, but I didn't understand, can you repeat please?") 

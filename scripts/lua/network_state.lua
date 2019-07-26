@@ -95,6 +95,8 @@ function network_state.check_ndpi_categories()
   return t
 end
 
+--##############################################################################################
+
 --return ndpi proto table [ "proto_name" = "bytes sent + rcvd" ]
 function network_state.get_ndpi_proto_traffic_volume()
   local t, ndpi_stats = {}, interface.getActiveFlowsStats() 
@@ -106,6 +108,8 @@ function network_state.get_ndpi_proto_traffic_volume()
   
   return t
 end
+
+--##############################################################################################
 
 --return a table with name and volume-percentage for each ndpi traffic category
 function network_state.check_traffic_categories()
@@ -128,6 +132,8 @@ function network_state.check_traffic_categories()
   return res
 end
 
+--##############################################################################################
+
 --return the name and percentage of the ndpi proto that has generated more traffic
 function network_state.check_top_traffic_application_protocol_categories()
   local traffic = network_state.check_ndpi_categories()
@@ -143,6 +149,7 @@ function network_state.check_top_traffic_application_protocol_categories()
   return name, perc
 end
 
+--##############################################################################################
 
 --return an array-table of all ndpi_proto_name and traffic percentage
 function network_state.check_top_application_protocol()
@@ -162,6 +169,8 @@ function network_state.check_top_application_protocol()
   return res
 end
 
+--##############################################################################################
+
 --return table with just some interface stats
 function network_state.check_ifstats_table()
   local t = {
@@ -175,6 +184,8 @@ function network_state.check_ifstats_table()
   return t
 end
 
+--##############################################################################################
+
 function network_state.check_devices_type() 
   local discover = require "discover_utils" 
   local res= {}
@@ -185,6 +196,8 @@ function network_state.check_devices_type()
 
   return res, if_stats.stats.devices
 end
+
+--##############################################################################################
 
 --return respectively: 1) total percentage of goodput, 2) num of bad goodput client, 3) num of bad goodput server, 4) num of total flow
 function network_state.get_aggregated_TCP_flow_goodput_percentage()
@@ -212,6 +225,7 @@ function network_state.get_aggregated_TCP_flow_goodput_percentage()
   return perc, bad_gp_client, bad_gp_server, flow_tot
 end
 
+--##############################################################################################
 
 --!!NOTE!!: La sto lasciando SOLO percompatibilità con nAssistant01, appena sistemato l'assistente in italiano va cancellata/spostata/rinominata
 --return respectively: state of goodput, number of total flow, total number of bad goodput flow
@@ -250,6 +264,7 @@ function network_state.check_TCP_flow_goodput()
   return state, flow_tot, (bad_gp_client + bad_gp_server)
 end
 
+--##############################################################################################
 
 --return a table with tot traffic, remote/local percentage and pkt drop
 function network_state.check_net_communication()
@@ -267,6 +282,8 @@ function network_state.check_net_communication()
   return t
   
 end
+
+--##############################################################################################
 
 --return a table ["breed_name" = "perentage of that breed"], number of blacklisted active host and a flag to report Dangerous traffic
 function network_state.check_bad_hosts_and_app()
@@ -303,6 +320,8 @@ function network_state.check_bad_hosts_and_app()
   return res, blacklisted, danger_flag
 end
 
+--##############################################################################################
+
 --return a table with ndpi application name and traffic volume for each ndpi application with "Dangerous" breed 
 function network_state.check_dangerous_traffic()
   local res= {}
@@ -324,7 +343,9 @@ function network_state.check_dangerous_traffic()
   end
 end
 
-------------------------ALERTS----------------------------
+--##############################################################################################
+---------------------------------------- ALERTS ------------------------------------------------
+--##############################################################################################
 --TODO: NOTIFICHE se possibile. Notificare almeno gli allarmi importanti
 --      distingui/separa/etichetta gli allarmi engaged - released - di flusso...
 --      di sicuro c'è da far capire bene: Soggetto, stato allarme, gravità, tipo. [VEDI APPUNTI ALERT] 
@@ -340,6 +361,8 @@ function network_state.get_alerts()--TODO: cambia nome in get_aletrs
 
   return engaged_alerts, past_alerts, flow_alerts
 end
+
+--##############################################################################################
 
 function network_state.get_num_alerts_and_severity()
   local num_engaged_alerts  = getNumAlerts("engaged", getTabParameters(_GET, "engaged"))
@@ -371,6 +394,8 @@ function network_state.get_num_alerts_and_severity()
 
   return alert_num, severity
 end
+
+--##############################################################################################
 
 function network_state.alerts_details()
   local engaged_alerts, past_alerts, flow_alerts = network_state.get_alerts() 
@@ -438,7 +463,9 @@ function network_state.alerts_details()
 
 end
   
-------------------------------------------------------
+--##############################################################################################
+------------------------------------------------------------------------------------------------
+--##############################################################################################
 
 return network_state
 

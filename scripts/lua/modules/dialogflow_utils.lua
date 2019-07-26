@@ -11,7 +11,6 @@ local json = require("dkjson")
 
 local utils = {}
 
---TODO: controlla se è già presente in ntop una funzione simile
 function utils.url_encode(str)
     if str then
         str = str:gsub("\n", "\r\n")
@@ -101,7 +100,7 @@ function utils.create_chart_url(data, options)
 
     local jn = json.encode(c)
 
-    tprint(jn)
+    --tprint(jn)
 
     local url = ""
     if options.chart_type == "outlabeledPie" then 

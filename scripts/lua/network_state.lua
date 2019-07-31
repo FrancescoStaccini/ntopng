@@ -365,101 +365,101 @@ end
 --##############################################################################################
 
 function network_state.get_num_alerts_and_severity()
-  local num_engaged_alerts  = getNumAlerts("engaged", getTabParameters(_GET, "engaged"))
-  local num_past_alerts     = getNumAlerts("historical", getTabParameters(_GET, "historical"))
-  local num_flow_alerts     = getNumAlerts("historical-flows", getTabParameters(_GET,"historical-flows"))
-  local engaged_alerts      = getAlerts("engaged", getTabParameters(_GET, "engaged"))
-  local past_alerts         = getAlerts("historical", getTabParameters(_GET, "historical"))
-  local flow_alerts         = getAlerts("historical-flows", getTabParameters(_GET, "historical-flows"))
+  -- local num_engaged_alerts  = getNumAlerts("engaged", getTabParameters(_GET, "engaged"))
+  -- local num_past_alerts     = getNumAlerts("historical", getTabParameters(_GET, "historical"))
+  -- local num_flow_alerts     = getNumAlerts("historical-flows", getTabParameters(_GET,"historical-flows"))
+  -- local engaged_alerts      = getAlerts("engaged", getTabParameters(_GET, "engaged"))
+  -- local past_alerts         = getAlerts("historical", getTabParameters(_GET, "historical"))
+  -- local flow_alerts         = getAlerts("historical-flows", getTabParameters(_GET, "historical-flows"))
 
-  local severity = {} --severity: (none,) info, warning, error
-  local alert_num = num_engaged_alerts + num_past_alerts + num_flow_alerts
+  -- local severity = {} --severity: (none,) info, warning, error
+  -- local alert_num = num_engaged_alerts + num_past_alerts + num_flow_alerts
 
-  local function severity_cont(alerts, severity_table )
-    local severity_text = ""
+  -- local function severity_cont(alerts, severity_table )
+  --   local severity_text = ""
 
-    for i,v in pairs(alerts) do
-      if v.alert_severity then 
-        severity_text = alertSeverityLabel(v.alert_severity, true)
-        severity_table[severity_text] = (severity_table[severity_text] or 0) + 1 
-      end
-    end
-  end
+  --   for i,v in pairs(alerts) do
+  --     if v.alert_severity then 
+  --       severity_text = alertSeverityLabel(v.alert_severity, true)
+  --       severity_table[severity_text] = (severity_table[severity_text] or 0) + 1 
+  --     end
+  --   end
+  -- end
 
-  if alert_num > 0 then
-    severity_cont(engaged_alerts, severity)
-    severity_cont(   flow_alerts, severity)
-    severity_cont(   past_alerts, severity)
-  end
+  -- if alert_num > 0 then
+  --   severity_cont(engaged_alerts, severity)
+  --   severity_cont(   flow_alerts, severity)
+  --   severity_cont(   past_alerts, severity)
+  -- end
 
-  return alert_num, severity
+  -- return alert_num, severity
 end
 
 --##############################################################################################
 
 function network_state.alerts_details()
-  local engaged_alerts, past_alerts, flow_alerts = network_state.get_alerts() 
-  local tmp_alerts, alerts = {}, {}
-  local limit= 3 --temporary limit, add effective selection criterion (eg. text limit is 640 char )
+  -- local engaged_alerts, past_alerts, flow_alerts = network_state.get_alerts() 
+  -- local tmp_alerts, alerts = {}, {}
+  -- local limit= 3 --temporary limit, add effective selection criterion (eg. text limit is 640 char )
 
-  j = 0
-  for i,v in pairs(engaged_alerts)  do
-    if j < limit then 
-       table.insert( tmp_alerts, v )
-       j = j+1
-    else break end
-  end
+  -- j = 0
+  -- for i,v in pairs(engaged_alerts)  do
+  --   if j < limit then 
+  --      table.insert( tmp_alerts, v )
+  --      j = j+1
+  --   else break end
+  -- end
 
-  j = 0
-  for i,v in pairs(flow_alerts)  do
-    if j < limit then 
-       table.insert( tmp_alerts, v )
-       j = j+1
-    else break end
-  end
+  -- j = 0
+  -- for i,v in pairs(flow_alerts)  do
+  --   if j < limit then 
+  --      table.insert( tmp_alerts, v )
+  --      j = j+1
+  --   else break end
+  -- end
 
-  j = 0
-  for i,v in pairs(past_alerts)  do
-    if j < limit then 
-       table.insert( tmp_alerts, v )
-       j = j+1
-    else break end
-  end
+  -- j = 0
+  -- for i,v in pairs(past_alerts)  do
+  --   if j < limit then 
+  --      table.insert( tmp_alerts, v )
+  --      j = j+1
+  --   else break end
+  -- end
 
-  local alert_type, rowid, t_stamp, srv_addr, srv_port, cli_addr, cli_port, severity, alert_json  
+  -- local alert_type, rowid, t_stamp, srv_addr, srv_port, cli_addr, cli_port, severity, alert_json  
 
-  for i,v in pairs(tmp_alerts) do 
+  -- for i,v in pairs(tmp_alerts) do 
 
-    if v.alert_type       then alert_type = alertTypeLabel( v.alert_type, true )      else  alert_type      = "Sconosciuto" end
-    if v.rowid            then rowid  =  v.rowid                                      else  rowid           = "Sconosciuto" end
-    if v.alert_tstamp     then t_stamp =  os.date( "%c", tonumber(v.alert_tstamp))    else  t_stamp         = "Sconosciuto" end
-    if v.srv_addr         then srv_addr = v.srv_addr                                  else  srv_addr        = "Sconosciuto" end
-    if v.srv_port         then srv_port = v.srv_port                                  else  srv_port        = "Sconosciuto" end
-    if v.cli_addr         then cli_addr = v.cli_addr                                  else  cli_addr        = "Sconosciuto" end
-    if v.cli_port         then cli_port = v.cli_port                                  else  cli_port        = "Sconosciuto" end
-    if v.alert_severity   then severity = alertSeverityLabel(v.alert_severity, true)  else  severity        = "Sconosciuto" end
-    if v.alert_json       then alert_json = v.alert_json                              else  alert_json      = "Sconosciuto" end 
+  --   if v.alert_type       then alert_type = alertTypeLabel( v.alert_type, true )      else  alert_type      = "Sconosciuto" end
+  --   if v.rowid            then rowid  =  v.rowid                                      else  rowid           = "Sconosciuto" end
+  --   if v.alert_tstamp     then t_stamp =  os.date( "%c", tonumber(v.alert_tstamp))    else  t_stamp         = "Sconosciuto" end
+  --   if v.srv_addr         then srv_addr = v.srv_addr                                  else  srv_addr        = "Sconosciuto" end
+  --   if v.srv_port         then srv_port = v.srv_port                                  else  srv_port        = "Sconosciuto" end
+  --   if v.cli_addr         then cli_addr = v.cli_addr                                  else  cli_addr        = "Sconosciuto" end
+  --   if v.cli_port         then cli_port = v.cli_port                                  else  cli_port        = "Sconosciuto" end
+  --   if v.alert_severity   then severity = alertSeverityLabel(v.alert_severity, true)  else  severity        = "Sconosciuto" end
+  --   if v.alert_json       then alert_json = v.alert_json                              else  alert_json      = "Sconosciuto" end 
     
-    local e = {
-      ID            = rowid,
-      Tipo          = alert_type,
-      Scattato      = t_stamp,
-      Pericolosita  = severity,
-      IP_Server     = srv_addr,
-      Porta_Server  = srv_port,
-      IP_Client     = cli_addr,
-      Porta_Client  = cli_port,
-      JSON_info     = alert_json --sono necessarie le JSON INFO? 
-    }
+  --   local e = {
+  --     ID            = rowid,
+  --     Tipo          = alert_type,
+  --     Scattato      = t_stamp,
+  --     Pericolosita  = severity,
+  --     IP_Server     = srv_addr,
+  --     Porta_Server  = srv_port,
+  --     IP_Client     = cli_addr,
+  --     Porta_Client  = cli_port,
+  --     JSON_info     = alert_json --sono necessarie le JSON INFO? 
+  --   }
 
-    table.insert( alerts, e )
-  end
+  --   table.insert( alerts, e )
+  -- end
 
-  if #alerts > 0 then 
-    return alerts
-  else
-    return nil
-  end
+  -- if #alerts > 0 then 
+  --   return alerts
+  -- else
+  --   return nil
+  -- end
 
 end
   

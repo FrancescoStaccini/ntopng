@@ -41,13 +41,18 @@ end
 
 -- ########################################################
 
---WIP
+--WIP--WIP--WIP--WIP--WIP--WIP--WIP--WIP--WIP--WIP--WIP--WIP
+
+--Problema: quando si disattiva la Arp Matrix dalla preferences ntop non si asrresta correttamente
+--  (nel mio caso sono serviti 2 shutdown forzati per far applicare la modifica)
+
 --TODO: SINCRONIZZA A MANO CON IL FILE ORIGINALE DEL REPO DI NTOP
 --      ricontrolla i nomi delle utils e anche in generale che alcune cosine sono cambiate
 --      per pulizia: in ts_dump.run_5min_dump(...) la table.merge al volo non è elegantissima
 --note: sono divise in gruppi (max 3 per limiti dovuti al grafico delle ts)
 --      potrei rtattare i tipi di device come le ndpi_categories, però poi dovrei organizzare a modo la vicualizzazione nell'interfaccia (l'elenco a scorrimento coi nomi delle label)
 
+--WIP--WIP--WIP--WIP--WIP--WIP--WIP--WIP--WIP--WIP--WIP--WIP
 function ts_dump.l2_device_update_talkers_stats_rrds( when, devicename, device, ifstats, verbose, talkers)
   local tt = arp_matrix_utils.talkersTot(talkers)
 

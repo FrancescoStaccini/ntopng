@@ -8,7 +8,7 @@ local dirs = ntop.getDirs()
 local os_utils = require("os_utils")
 local categories_utils = require("categories_utils")
 local json = require("dkjson")
-local alerts = require("alerts_api")
+local alerts_api = require("alerts_api")
 
 -- ##############################################
 
@@ -178,6 +178,7 @@ function lists_utils.getCategoryLists()
   -- TODO add support for user defined urls
   local lists = {}
   local redis_lists = loadListsFromRedis()
+
   local default_status = {last_update=0, num_hosts=0, last_error=false, num_errors=0}
 
   for key, default_values in pairs(BUILTIN_LISTS) do
@@ -302,28 +303,29 @@ local function checkListsUpdate(timeout)
         local respcode = 0
         local last_error = i18n("delete_data.msg_err_unknown")
 
-        if res and res["RESPONSE_CODE"] ~= nil then
+        if res and res["ERROR"] then
+          last_error = res["ERROR"]
+        elseif res and res["RESPONSE_CODE"] ~= nil then
           respcode = ternary(res["RESPONSE_CODE"], res["RESPONSE_CODE"], "-")
 
           if res["IS_PARTIAL"] then
-            last_error = i18n("category_lists.connection_time_out", {err_code=respcode, duration=(os.time() - started_at)})
+            last_error = i18n("category_lists.connection_time_out", {duration=(os.time() - started_at)})
           else
-            last_error = i18n("category_lists.server_returned_error", {err_code=respcode})
+            last_error = i18n("category_lists.server_returned_error")
+          end
+
+          if(respcode > 0) then
+            last_error = last_error .. i18n("category_lists.http_code", {err_code = respcode})
           end
         end
 
         list.status.last_error = last_error
         list.status.num_errors = list.status.num_errors + 1
 
-        local msg = i18n("category_lists.error_occurred", {name=list_name, err=last_error})
-
-        local list_alert = alerts:newAlert({
-          entity = "category_lists",
-          type = "list_download_failed",
-          severity = "warning",
-        })
-
-        list_alert:trigger(list_name, msg) -- TODO json
+        alerts_api.store(
+          alerts_api.categoryListsEntity(list_name),
+          alerts_api.listDownloadFailedType(list_name, last_error)
+        )
       end
 
       now = os.time()

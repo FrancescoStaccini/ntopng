@@ -308,6 +308,8 @@ function sslVersion2Str(v)
 end
 
 local function cipher2str(c)
+   if(c == nil) then return end
+   
    for s,v in pairs(ssl_cipher_suites) do
       if(v == c) then
 	 return('<A HREF="https://ciphersuite.info/cs/'..s..'">'..s..'</A>')
@@ -1016,12 +1018,19 @@ else
       print("</td></tr>\n")
    end
 
-   if(not isEmptyString(flow["bittorrent_hash"])) then
-      print("<tr><th>"..i18n("flow_details.bittorrent_hash").."</th><td colspan=4><A HREF=\"https://www.google.it/search?q="..flow["bittorrent_hash"].."\">".. flow["bittorrent_hash"].."</A></td></tr>\n")
+   if not isEmptyString(flow["protos.ssh.hassh.client_hash"]) or not isEmptyString(flow["protos.ssh.hassh.server_hash"]) then
+      print("<tr><th><A HREF='https://engineering.salesforce.com/open-sourcing-hassh-abed3ae5044c'>HASSH</A></th><td>")
+      print("<b>"..i18n("client")..":</b> <a href='"..ntop.getHttpPrefix().."/lua/host_details.lua?page=ssh&"..hostinfo2url(flow, "cli").."'>"..(flow["protos.ssh.hassh.client_hash"] or '').."</a></td>")
+      print("<td><b>"..i18n("server")..":</b> <a href='"..ntop.getHttpPrefix().."/lua/host_details.lua?page=ssh&"..hostinfo2url(flow, "srv").."'>"..(flow["protos.ssh.hassh.server_hash"] or '').."</a></td>")
+      print("</td>")
    end
 
    if(not isEmptyString(flow["protos.ssh.client_signature"])) then
       print("<tr><th>"..i18n("flow_details.ssh_signature").."</th><td><b>"..i18n("client")..":</b> "..(flow["protos.ssh.client_signature"] or '').."</td><td><b>"..i18n("server")..":</b> "..(flow["protos.ssh.server_signature"] or '').."</td></tr>\n")
+   end
+
+   if(not isEmptyString(flow["bittorrent_hash"])) then
+      print("<tr><th>"..i18n("flow_details.bittorrent_hash").."</th><td colspan=4><A HREF=\"https://www.google.it/search?q="..flow["bittorrent_hash"].."\">".. flow["bittorrent_hash"].."</A></td></tr>\n")
    end
 
    if(flow["protos.http.last_url"] ~= nil) then

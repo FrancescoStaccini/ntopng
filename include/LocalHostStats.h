@@ -40,6 +40,10 @@ class LocalHostStats: public HostStats {
   LocalHostStats(Host *_host);
   virtual ~LocalHostStats();
 
+  inline DnsStats* getDNSStats() const    { return(dns);  }
+  inline HTTPstats* getHTTPStats() const  { return(http); }
+  inline ICMPstats* getICMPStats() const  { return(icmp); }
+
   virtual void incStats(time_t when, u_int8_t l4_proto, u_int ndpi_proto,
 		custom_app_t custom_app,
 		u_int64_t sent_packets, u_int64_t sent_bytes, u_int64_t sent_goodput_bytes,

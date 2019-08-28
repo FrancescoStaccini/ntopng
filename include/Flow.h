@@ -34,6 +34,10 @@ typedef struct {
 } TCPPacketStats;
 
 typedef struct {
+  u_int64_t last, next;
+} TCPSeqNum;
+
+typedef struct {
   struct timeval lastTime;
   u_int64_t total_delta_ms;
   float min_ms, max_ms;
@@ -47,6 +51,7 @@ typedef struct {
   u_int32_t cli2srv_packets, srv2cli_packets;
   u_int64_t cli2srv_bytes, srv2cli_bytes;
   u_int64_t cli2srv_goodput_bytes, srv2cli_goodput_bytes;
+  TCPPacketStats tcp_stats_s2d, tcp_stats_d2s;
 } FlowTrafficStats;
 
 class Flow : public GenericHashEntry {
@@ -85,7 +90,8 @@ class Flow : public GenericHashEntry {
   ndpi_protocol ndpiDetectedProtocol;
   custom_app_t custom_app;
   void *cli_id, *srv_id;
-  char *json_info, *host_server_name, *bt_hash;
+  json_object *json_info;
+  char *host_server_name, *bt_hash;
   char *community_id_flow_hash;
 #ifdef HAVE_NEDGE
   u_int32_t last_conntrack_update; 
@@ -102,11 +108,17 @@ class Flow : public GenericHashEntry {
 
     struct {
       char *last_query;
+      u_int16_t last_query_type;
+      u_int16_t last_return_code;
       bool invalid_query;
     } dns;
 
     struct {
       char *client_signature, *server_signature;
+      struct {
+	/* https://engineering.salesforce.com/open-sourcing-hassh-abed3ae5044c */
+	char *client_hash, *server_hash;
+      } hassh;
     } ssh;
 
     struct {
@@ -147,7 +159,7 @@ class Flow : public GenericHashEntry {
   IPPacketStats ip_stats_s2d, ip_stats_d2s;
 
   /* TCP stats */
-  TCPPacketStats tcp_stats_s2d, tcp_stats_d2s;
+  TCPSeqNum tcp_seq_s2d, tcp_seq_d2s;
   u_int16_t cli2srv_window, srv2cli_window;
 
   time_t doNotExpireBefore; /*
@@ -218,14 +230,13 @@ class Flow : public GenericHashEntry {
   inline bool isProto(u_int16_t p) const { return(((ndpiDetectedProtocol.master_protocol == p)
 						   || (ndpiDetectedProtocol.app_protocol == p))
 						  ? true : false); }
-#ifdef NTOPNG_PRO
   void update_pools_stats(const struct timeval *tv,
 			  u_int64_t diff_sent_packets, u_int64_t diff_sent_bytes,
 			  u_int64_t diff_rcvd_packets, u_int64_t diff_rcvd_bytes);
-#endif
   bool triggerAlerts() const;
   void dumpFlowAlert();
   void updateJA3();
+  void updateHASSH(bool as_client);
   const char* cipher_weakness2str(ndpi_cipher_weakness w);
   bool get_partial_traffic_stats(FlowTrafficStats **dst, FlowTrafficStats *delta, bool *first_partial) const;  
 
@@ -244,7 +255,7 @@ class Flow : public GenericHashEntry {
   static const ndpi_protocol ndpiUnknownProtocol;
   bool isTiny() const;
   bool isLongLived() const;
-  inline bool isSSL()  const { return(isProto(NDPI_PROTOCOL_SSL));  }
+  inline bool isSSL()  const { return(isProto(NDPI_PROTOCOL_TLS));  }
   inline bool isSSH()  const { return(isProto(NDPI_PROTOCOL_SSH));  }
   inline bool isDNS()  const { return(isProto(NDPI_PROTOCOL_DNS));  }
   inline bool isDHCP() const { return(isProto(NDPI_PROTOCOL_DHCP)); }
@@ -288,8 +299,11 @@ class Flow : public GenericHashEntry {
   void setTcpFlags(u_int8_t flags, bool src2dst_direction);
   void updateTcpFlags(const struct bpf_timeval *when,
 		      u_int8_t flags, bool src2dst_direction);
-  void incTcpBadStats(bool src2dst_direction,
-		      u_int32_t ooo_pkts, u_int32_t retr_pkts, u_int32_t lost_pkts, u_int32_t keep_alive_pkts);
+  static void incTcpBadStats(bool src2dst_direction,
+			     FlowTrafficStats *fts,
+			     Host *cli, Host *srv,
+			     u_int32_t ooo_pkts, u_int32_t retr_pkts,
+			     u_int32_t lost_pkts, u_int32_t keep_alive_pkts);
   
   void updateTcpSeqNum(const struct bpf_timeval *when,
 		       u_int32_t seq_num, u_int32_t ack_seq_num,
@@ -306,7 +320,7 @@ class Flow : public GenericHashEntry {
     return custom_app;
   };
   u_int16_t getStatsProtocol() const;
-  void setJSONInfo(const char *json);
+  void setJSONInfo(json_object *json);
 #ifdef NTOPNG_PRO
   inline bool is_status_counted_in_aggregated_flow()    const { return(status_counted_in_aggregated_flow); };
   inline bool is_counted_in_aggregated_flow()           const { return(counted_in_aggregated_flow);        };
@@ -349,6 +363,7 @@ class Flow : public GenericHashEntry {
   inline u_int64_t get_partial_packets_cli2srv() const { return last_db_dump.delta.cli2srv_packets; };
   inline u_int64_t get_partial_packets_srv2cli() const { return last_db_dump.delta.srv2cli_packets; };
   bool get_partial_traffic_stats_view(FlowTrafficStats *delta, bool *first_partial);
+  inline FlowTrafficStats * getFlowTrafficStats() { return &stats; };
   bool update_partial_traffic_stats_db_dump();
   inline float get_bytes_thpt()          const { return(bytes_thpt);                      };
   inline float get_goodput_bytes_thpt()  const { return(goodput_bytes_thpt);              };
@@ -360,7 +375,7 @@ class Flow : public GenericHashEntry {
   inline Host* get_srv_host()               const { return(srv_host);    };
   inline const IpAddress* get_cli_ip_addr() const { return(cli_ip_addr); };
   inline const IpAddress* get_srv_ip_addr() const { return(srv_ip_addr); };
-  inline char* get_json_info()	         const  { return(json_info);                       };
+  inline json_object* get_json_info()	    const  { return(json_info);                       };
   inline bool has_long_icmp_payload()    const  { return(protos.icmp.has_long_icmp_payload); };
   inline void set_long_icmp_payload()           { protos.icmp.has_long_icmp_payload = true;  };
   inline ndpi_protocol_breed_t get_protocol_breed() const {
@@ -436,8 +451,11 @@ class Flow : public GenericHashEntry {
   }
   inline char* getDNSQuery()        { return(isDNS() ? protos.dns.last_query : (char*)"");  }
   inline void  setDNSQuery(char *v) { if(isDNS()) { if(protos.dns.last_query) free(protos.dns.last_query);  protos.dns.last_query = strdup(v); } }
+  inline void  setDNSQueryType(u_int16_t t) { if(isDNS()) { protos.dns.last_query_type = t; } }
+  inline void  setDNSRetCode(u_int16_t c) { if(isDNS()) { protos.dns.last_return_code = c; } }
   inline char* getHTTPURL()         { return(isHTTP() ? protos.http.last_url : (char*)"");   }
   inline void  setHTTPURL(char *v)  { if(isHTTP()) { if(protos.http.last_url) free(protos.http.last_url);  protos.http.last_url = strdup(v); } }
+  inline void  setHTTPRetCode(u_int16_t c) { if(isHTTP()) { protos.http.last_return_code = c; } }
   inline char* getHTTPContentType() { return(isHTTP() ? protos.http.last_content_type : (char*)"");   }
   inline char* getSSLCertificate()  { return(isSSL() ? protos.ssl.certificate : (char*)""); }
   bool isSSLProto();

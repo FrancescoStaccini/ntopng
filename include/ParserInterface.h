@@ -25,9 +25,19 @@
 #include "ntop_includes.h"
 
 class ParserInterface : public NetworkInterface {
+ private:
+  Mutex companions_lock;
+  u_int8_t num_companion_interfaces;
+  NetworkInterface **companion_interfaces;
+
+  virtual void reloadCompanions();
+
  public:
   ParserInterface(const char *endpoint, const char *custom_interface_type = NULL);
   ~ParserInterface();
+
+  void deliverFlowToCompanions(ParsedFlow * const flow);
+  inline bool companionsEnabled() { return num_companion_interfaces > 0; };
 };
 
 #endif /* _PARSER_INTERFACE_H_ */

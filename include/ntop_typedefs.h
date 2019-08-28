@@ -41,6 +41,12 @@ enum {
 #endif
 #endif
 
+typedef struct {
+  const char *string;
+  u_int64_t uint_num;
+  double double_num;
+} ParsedValue;
+
 typedef enum {
   no_host_mask = 0,
   mask_local_hosts = 1,
@@ -54,8 +60,11 @@ typedef struct {
   struct timeval *tv;
 } update_hosts_stats_user_data_t;
 
+/* Keep in sync with alert_consts.alerts_granularities and Utils */
 typedef enum {
-  minute_script = 0,
+  no_periodicity = -1,
+  aperiodic_script = 0,
+  minute_script,
   five_minute_script,
   hour_script,
   day_script,
@@ -106,6 +115,7 @@ typedef enum {
   policy_source_schedule = 5,
 } L7PolicySource_t;
 
+/* keep in sync with alert_consts.alert_types in alert_const.lua */
 typedef enum {
   alert_none = -1,
   alert_syn_flood = 0,
@@ -114,9 +124,10 @@ typedef enum {
   alert_suspicious_activity,
   alert_interface_alerted,
   alert_flow_misbehaviour,
-  alert_flow_remote_to_remote,
+  alert_remote_to_remote,
   alert_flow_blacklisted,
   alert_flow_blocked,
+  alert_mac_ip_association_change = 17,
   alert_flow_web_mining = 21,
   alert_nfq_flushed = 22,
   alert_device_protocol_not_allowed = 24,
@@ -126,6 +137,9 @@ typedef enum {
   alert_broadcast_domain_too_large = 34,
   alert_ids = 35,
   misconfigured_dhcp_range = 36,
+  slow_periodic_activity = 40,
+  login_failed = 42,
+  alert_potentially_dangerous_protocol = 43,
   /* 
      IMPORTANT IMPORTANT IMPORTANT
      If # status >= 64 then extend Utils.h and Lua bitmap functions to handle it
@@ -350,6 +364,7 @@ typedef enum {
   status_ssl_unsafe_ciphers /* 23 */,
   status_data_exfiltration /* 24 */,
   status_ssl_old_protocol_version /* 25 */,
+  status_potentially_dangerous /* 26 */,
   num_flow_status,
   /* 
      IMPORTANT IMPORTANT IMPORTANT
@@ -401,6 +416,8 @@ typedef enum {
   column_num_flows_as_server,
   column_total_num_anomalous_flows_as_client,
   column_total_num_anomalous_flows_as_server,
+  column_total_num_unreachable_flows_as_client,
+  column_total_num_unreachable_flows_as_server,
   column_total_alerts,
   column_pool_id,
   /* Macs */
@@ -647,6 +664,7 @@ typedef enum {
 } InterfaceType;
 
 /* Update Flow::dissectHTTP when extending the type below */
+/* Keep in sync with discover.os2label */
 typedef enum {
   os_unknown = 0,
   os_linux,
@@ -708,6 +726,14 @@ typedef struct grouped_alerts_counters {
   std::map<AlertType, u_int32_t> types;
   std::map<AlertLevel, u_int32_t> severities;
 } grouped_alerts_counters;
+
+/* ICMP stats required for timeseries generation */
+typedef struct ts_icmp_stats {
+  u_int16_t echo_packets_sent;
+  u_int16_t echo_packets_rcvd;
+  u_int16_t echo_reply_packets_sent;
+  u_int16_t echo_reply_packets_rcvd;
+} ts_icmp_stats;
 
 class AlertableEntity;
 typedef void (alertable_callback)(AlertableEntity *alertable, void *user_data);

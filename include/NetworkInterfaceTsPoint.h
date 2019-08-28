@@ -24,12 +24,14 @@
 
 #include "ntop_includes.h"
 
+/* This is manually populated by NetworkInterface::makeTsPoint */
 class NetworkInterfaceTsPoint: public TimeseriesPoint {
  public:
   nDPIStats ndpi;
   LocalTrafficStats local_stats;
   u_int hosts, local_hosts;
   u_int devices, flows, http_hosts;
+  u_int engaged_alerts;
   TcpPacketStats tcpPacketStats;
   PacketStats packetStats;
   L4Stats l4Stats;

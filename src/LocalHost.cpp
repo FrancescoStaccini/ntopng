@@ -41,7 +41,19 @@ LocalHost::LocalHost(NetworkInterface *_iface, char *ipAddress, u_int16_t _vlanI
 
 LocalHost::~LocalHost() {
   iface->decNumHosts(true /* A local host */);
+  if(NetworkStats *ns = iface->getNetworkStats(local_network_id))
+    ns->decNumHosts();
 
+  if(initial_ts_point) delete(initial_ts_point);
+  freeLocalHostData();
+}
+
+/* *************************************** */
+
+void LocalHost::set_hash_entry_state_idle() {
+  /* Serialization is performed, inline, as soon as the LocalHost becomes idle, and
+     not when it is deleted. This guarantees that, if the same host becomes active again,
+     its counters will be consistent even if its other instance has still to be deleted. */
   if(data_delete_requested)
     deleteRedisSerialization();
   else if((ntop->getPrefs()->is_idle_local_host_cache_enabled()
@@ -50,9 +62,8 @@ LocalHost::~LocalHost() {
     checkStatsReset();
     serializeToRedis();
   }
-  if(initial_ts_point) delete(initial_ts_point);
 
-  freeLocalHostData();
+  GenericHashEntry::set_hash_entry_state_idle();
 }
 
 /* *************************************** */
@@ -66,7 +77,7 @@ void LocalHost::initialize() {
 
   local_network_id = -1;
   drop_all_host_traffic = false;
-  os = NULL;
+  os_detail = NULL;
 
   ip.isLocalHost(&local_network_id);
 
@@ -91,7 +102,7 @@ void LocalHost::initialize() {
 
   /* Clone the initial point. It will be written to the timeseries DB to
    * address the first point problem (https://github.com/ntop/ntopng/issues/2184). */
-  initial_ts_point = new HostTimeseriesPoint(stats);
+  initial_ts_point = new HostTimeseriesPoint((LocalHostStats *)stats);
   initialization_time = time(NULL);
 
   char *strIP = ip.print(buf, sizeof(buf));
@@ -104,6 +115,8 @@ void LocalHost::initialize() {
   PROFILING_SUB_SECTION_EXIT(iface, 18);
 
   iface->incNumHosts(true /* Local Host */);
+  if(NetworkStats *ns = iface->getNetworkStats(local_network_id))
+    ns->incNumHosts();
 
 #ifdef LOCALHOST_DEBUG
   ntop->getTrace()->traceEvent(TRACE_NORMAL, "%s is %s [%p]",
@@ -154,8 +167,8 @@ void LocalHost::deserialize(json_object *o) {
   if(json_object_object_get_ex(o, "broadcastDomainHost", &obj) && json_object_get_boolean(obj))
     setBroadcastDomainHost();
 
-  if(json_object_object_get_ex(o, "os", &obj))
-    inlineSetOS(json_object_get_string(obj));
+  if(json_object_object_get_ex(o, "os_id", &obj))
+    setOS((OperatingSystem)json_object_get_int(obj));
 
   /* We commented the line below to avoid strings too long */
 #if 0
@@ -188,10 +201,10 @@ void LocalHost::updateHostTrafficPolicy(char *key) {
 
 /* ***************************************** */
 
-char * LocalHost::get_os(char * const buf, ssize_t buf_len) {
+const char * LocalHost::getOSDetail(char * const buf, ssize_t buf_len) {
   if(buf && buf_len) {
     m.lock(__FILE__, __LINE__);
-    snprintf(buf, buf_len, "%s", os ? os : "");
+    snprintf(buf, buf_len, "%s", os_detail ? os_detail : "");
     m.unlock(__FILE__, __LINE__);
   }
 
@@ -256,7 +269,8 @@ void LocalHost::luaPortsDump(lua_State* vm) {
 
 /* *************************************** */
 
-void LocalHost::inlineSetOS(const char * const _os) {
+// TODO move into nDPI
+void LocalHost::inlineSetOSDetail(const char *_os_detail) {
   if((mac == NULL)
      /*
        When this happens then this is a (NAT+)router and
@@ -265,21 +279,16 @@ void LocalHost::inlineSetOS(const char * const _os) {
      || (mac->getDeviceType() == device_networking)
      ) return;
 
-  if(os || !_os)
+  if(os_detail || !_os_detail)
     return; /* Already set */
 
+  if((os_detail = strdup(_os_detail))) {
+    // TODO set mac device type
+    ;
+    DeviceType devtype = Utils::getDeviceTypeFromOsDetail(os_detail);
 
-  if((os = strdup(_os))) {
-    if(strcasestr(os, "iPhone")
-       || strcasestr(os, "Android")
-       || strcasestr(os, "mobile"))
-      mac->setDeviceType(device_phone);
-    else if(strcasestr(os, "Mac OS")
-	    || strcasestr(os, "Windows")
-	    || strcasestr(os, "Linux"))
-      mac->setDeviceType(device_workstation);
-    else if(strcasestr(os, "iPad") || strcasestr(os, "tablet"))
-      mac->setDeviceType(device_tablet);
+    if(devtype != device_unknown)
+      mac->setDeviceType(devtype);
   }
 }
 
@@ -315,7 +324,7 @@ void LocalHost::tsLua(lua_State* vm) {
 
 void LocalHost::freeLocalHostData() {
   /* Better not to use a virtual function as it is called in the destructor as well */
-  if(os) { free(os); os = NULL; }
+  if(os_detail) { free(os_detail); os_detail = NULL; }
 }
 
 /* *************************************** */
@@ -328,6 +337,7 @@ void LocalHost::deleteHostData() {
   m.unlock(__FILE__, __LINE__);
 
   updateHostTrafficPolicy(NULL);
+  os = os_unknown;
 }
 
 /* *************************************** */
@@ -358,6 +368,8 @@ void LocalHost::ports2Lua(lua_State* vm, bool proto_udp, bool as_client) {
     std::map<u_int16_t,PortContactStats>::iterator it;
     
     lua_newtable(vm);
+
+    m.lock(__FILE__, __LINE__);
     
     for(it = s->begin(); it != s->end(); ++it) {
       char buf[8];
@@ -372,6 +384,8 @@ void LocalHost::ports2Lua(lua_State* vm, bool proto_udp, bool as_client) {
       lua_insert(vm, -2);
       lua_settable(vm, -3);
     }
+
+    m.unlock(__FILE__, __LINE__);
     
     lua_pushstring(vm, as_client ? "client_ports" : "server_ports");
     lua_insert(vm, -2);
@@ -397,6 +411,7 @@ void LocalHost::updateFlowPort(std::map<u_int16_t,PortContactStats> *c, Host *pe
 void LocalHost::setFlowPort(bool as_server, Host *peer, u_int8_t protocol,
 			    u_int16_t port, u_int16_t l7_proto,
 			    const char *info, time_t when) {
+  m.lock(__FILE__, __LINE__);
   if(as_server) {
     if(protocol == IPPROTO_UDP)
       updateFlowPort(&udp_server_ports, peer, port, l7_proto, info, when);
@@ -408,4 +423,5 @@ void LocalHost::setFlowPort(bool as_server, Host *peer, u_int8_t protocol,
     else
       updateFlowPort(&tcp_client_ports, peer, port, l7_proto, info, when);
   }
+  m.unlock(__FILE__, __LINE__);
 }

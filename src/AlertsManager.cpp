@@ -53,6 +53,10 @@ AlertsManager::AlertsManager(int interface_id, const char *filename) : StoreMana
   unlink(filePath);
   sprintf(&filePath[base_offset], "%s", "alerts_v11.db");
   unlink(filePath);
+  sprintf(&filePath[base_offset], "%s", "alerts_v12.db");
+  unlink(filePath);
+  sprintf(&filePath[base_offset], "%s", "alerts_v13.db");
+  unlink(filePath);
   filePath[base_offset] = 0;
 
   /* open the newest */
@@ -101,6 +105,7 @@ int AlertsManager::openStore() {
 
   snprintf(create_query, sizeof(create_query),
 	   "CREATE TABLE IF NOT EXISTS %s ("
+	   "rowid            INTEGER PRIMARY KEY AUTOINCREMENT, " /* Must tell it is AUTOINCREMENT */
 	   "alert_type       INTEGER NOT NULL, "
 	   "alert_subtype    TEXT NOT NULL, "
 	   "alert_granularity INTEGER NOT NULL, "
@@ -129,6 +134,7 @@ int AlertsManager::openStore() {
 
   snprintf(create_query, sizeof(create_query),
 	   "CREATE TABLE IF NOT EXISTS %s ("
+	   "rowid            INTEGER PRIMARY KEY AUTOINCREMENT, " /* Must tell it is AUTOINCREMENT */
 	   "alert_tstamp     INTEGER NOT NULL, "
 	   "alert_tstamp_end INTEGER DEFAULT NULL, "
 	   "alert_type       INTEGER NOT NULL, "
@@ -265,7 +271,7 @@ out:
 /* NOTE: do not call this from C, use alert queues in LUA */
 int AlertsManager::storeAlert(time_t tstart, time_t tend, int granularity, AlertType alert_type, const char *subtype,
       AlertLevel alert_severity, AlertEntity alert_entity, const char *alert_entity_value,
-      const char *alert_json, bool *new_alert,
+      const char *alert_json, bool *new_alert, u_int64_t *rowid,
       bool ignore_disabled, bool check_maximum) {
   int rc = 0;
 
@@ -312,6 +318,7 @@ int AlertsManager::storeAlert(time_t tstart, time_t tend, int granularity, Alert
       }
 
     /* Success */
+    *rowid = sqlite3_last_insert_rowid(db);
     rc = 0;
 
  out:
@@ -324,88 +331,40 @@ int AlertsManager::storeAlert(time_t tstart, time_t tend, int granularity, Alert
 
 /* **************************************************** */
 
-bool AlertsManager::notifyAlert(AlertEntity alert_entity, const char *alert_entity_value,
-				AlertType alert_type, AlertLevel alert_severity,
-				const char *alert_json,
-				const char *alert_origin, const char *alert_target,
-				const char *action, time_t when, Flow *flow) {
+/* NOTE: notifications should be handled by Lua. However, since Flow alerts
+ * are generated internally, this function is necessary to handle them.
+ * In order to avoid duplicating the same alerts fields in json, the rowid
+ * is returned. Lua can then extract the JSON data by using the rowid.
+ */
+bool AlertsManager::notifyFlowAlert(u_int64_t rowid) {
   bool rv = false;
 
   if(!ntop->getPrefs()->are_alerts_disabled()
 	  && ntop->getPrefs()->are_ext_alerts_notifications_enabled()) {
-    json_object *notification;
-    const char *json_alert;
+    json_object *notif = json_object_new_object();
 
-    if((notification = json_object_new_object()) != NULL) {
-      /* Mandatory information */
-      json_object_object_add(notification, "ifid", json_object_new_int(iface->get_id()));
-      json_object_object_add(notification, "entity_type", json_object_new_int(alert_entity));
-      json_object_object_add(notification, "entity_value", json_object_new_string(alert_entity_value));
-      json_object_object_add(notification, "type", json_object_new_int(alert_type));
-      json_object_object_add(notification, "severity", json_object_new_int(alert_severity));
-      json_object_object_add(notification, "message", json_object_new_string(alert_json));
-      json_object_object_add(notification, "tstamp",  json_object_new_int64(when));
-      json_object_object_add(notification, "action", json_object_new_string(action));
-      
-      /* optional */
-      if(alert_origin) json_object_object_add(notification, "origin", json_object_new_string(alert_origin));
-      if(alert_target) json_object_object_add(notification, "target", json_object_new_string(alert_target));
+    if(notif) {
+      const char *json_alert;
 
-      /* flow only - only put relevant information for message generation */
-      if(flow) {
-	json_object *flow_obj;
-
-	if((flow_obj = json_object_new_object()) == NULL) {
-	  ntop->getTrace()->traceEvent(TRACE_ERROR, "json_object_new_object: Not enough memory");
-	  goto notify_return;
-	}
-
-	char cli_ip_buf[64], srv_ip_buf[64];
-	char *cli_ip = NULL, *srv_ip = NULL;
-	Host *cli = flow->get_cli_host();
-	Host *srv = flow->get_srv_host();
-
-	if(cli && cli->get_ip())
-	  cli_ip = cli->get_ip()->print(cli_ip_buf, sizeof(cli_ip_buf));
-	if(srv && srv->get_ip())
-	  srv_ip = srv->get_ip()->print(srv_ip_buf, sizeof(srv_ip_buf));
-
-	/* mandatory */
-	json_object_object_add(flow_obj, "cli_port", json_object_new_int(flow->get_cli_port()));
-	json_object_object_add(flow_obj, "srv_port", json_object_new_int(flow->get_srv_port()));
-	json_object_object_add(flow_obj, "cli_blacklisted", json_object_new_int((cli && cli->isBlacklisted()) ? 1 : 0));
-	json_object_object_add(flow_obj, "srv_blacklisted", json_object_new_int((srv && srv->isBlacklisted()) ? 1 : 0));
-	json_object_object_add(flow_obj, "vlan_id", json_object_new_int(flow->get_vlan_id()));
-	json_object_object_add(flow_obj, "proto", json_object_new_int(flow->get_protocol()));
-	json_object_object_add(flow_obj, "flow_status", json_object_new_int((int)flow->getFlowStatus()));
-	json_object_object_add(flow_obj, "l7_proto", json_object_new_int(flow->get_detected_protocol().app_protocol));
-
-	/* optional */
-	if(cli_ip) json_object_object_add(flow_obj, "cli_addr", json_object_new_string(cli_ip));
-	if(srv_ip) json_object_object_add(flow_obj, "srv_addr", json_object_new_string(srv_ip));
-
-	json_object_object_add(notification, "flow", flow_obj);
-      }
-
-      json_alert = json_object_to_json_string(notification);
+      json_object_object_add(notif, "ifid", json_object_new_int(ifid));
+      json_object_object_add(notif, "action", json_object_new_string(ALERT_ACTION_STORE));
+      json_object_object_add(notif, "table_name", json_object_new_string(ALERTS_MANAGER_FLOWS_TABLE_NAME));
+      json_object_object_add(notif, "rowid", json_object_new_int64(rowid));
+      json_alert = json_object_to_json_string(notif);
 
       if(ntop->getRedis()->rpush(ALERTS_MANAGER_NOTIFICATION_QUEUE_NAME,
-				 (char*)json_alert, ALERTS_MANAGER_MAX_ENTITY_ALERTS) < 0)
-	ntop->getTrace()->traceEvent(TRACE_WARNING,
-				     "An error occurred when pushing alert %s to redis list %s.",
-				     json_alert, ALERTS_MANAGER_NOTIFICATION_QUEUE_NAME);
-      else
-	rv = true;
+          (char*)json_alert, ALERTS_MANAGER_MAX_ENTITY_ALERTS) < 0) {
+        ntop->getTrace()->traceEvent(TRACE_WARNING,
+          "An error occurred when pushing alert %s to redis list %s.",
+            json_alert, ALERTS_MANAGER_NOTIFICATION_QUEUE_NAME);
+      } else
+        rv = true;
 
-notify_return:
-
-      /* Free memory */
-      json_object_put(notification);
-    } else
-      ntop->getTrace()->traceEvent(TRACE_ERROR, "json_object_new_object: Not enough memory");
+      json_object_put(notif);
+    }
   }
 
-  return rv;
+  return(rv);
 }
 
 /* **************************************************** */
@@ -451,10 +410,6 @@ int AlertsManager::storeFlowAlert(Flow *f) {
     json_object_object_add(alert_json_obj, "info", json_object_new_string(info ? info : (char*)""));
     json_object_object_add(alert_json_obj, "status_info", status_info ? status_info : json_object_new_object());
     alert_json = json_object_to_json_string(alert_json_obj);
-
-    notifyAlert(alert_entity_flow, "flow",
-		alert_type, alert_severity, alert_json,
-		cli_ip, srv_ip, ALERT_ACTION_STORE, now, f);
 
     m.lock(__FILE__, __LINE__);
 
@@ -561,8 +516,8 @@ int AlertsManager::storeFlowAlert(Flow *f) {
 	 || sqlite3_bind_int(stmt3,    8, f->get_detected_protocol().app_protocol)
 	 || sqlite3_bind_text(stmt3,   9, cli ? cli->get_country(cb, sizeof(cb)) : NULL, -1, SQLITE_STATIC)
 	 || sqlite3_bind_text(stmt3,  10, srv ? srv->get_country(cb1, sizeof(cb1)) : NULL, -1, SQLITE_STATIC)
-	 || sqlite3_bind_text(stmt3,  11, cli ? cli->get_os(cli_os, sizeof(cli_os)) : NULL, -1, SQLITE_STATIC)
-	 || sqlite3_bind_text(stmt3,  12, srv ? srv->get_os(srv_os, sizeof(srv_os)) : NULL, -1, SQLITE_STATIC)
+	 || sqlite3_bind_text(stmt3,  11, cli ? cli->getOSDetail(cli_os, sizeof(cli_os)) : NULL, -1, SQLITE_STATIC)
+	 || sqlite3_bind_text(stmt3,  12, srv ? srv->getOSDetail(srv_os, sizeof(srv_os)) : NULL, -1, SQLITE_STATIC)
 	 || sqlite3_bind_int(stmt3,   13, cli ? cli->get_asn() : 0)
 	 || sqlite3_bind_int(stmt3,   14, srv ? srv->get_asn() : 0)
 	 || sqlite3_bind_text(stmt3,  15, cli_ip, -1, SQLITE_STATIC)
@@ -583,13 +538,15 @@ int AlertsManager::storeFlowAlert(Flow *f) {
       }
 
       while((rc = sqlite3_step(stmt3)) != SQLITE_DONE) {
-	if(rc == SQLITE_ERROR) {
-	  ntop->getTrace()->traceEvent(TRACE_ERROR, "SQL Error: step [%s][%s]",
-				       query, sqlite3_errmsg(db));
-	  rc = 1;
-	  goto out;
-	}
+        if(rc == SQLITE_ERROR) {
+          ntop->getTrace()->traceEvent(TRACE_ERROR, "SQL Error: step [%s][%s]",
+                     query, sqlite3_errmsg(db));
+          rc = 1;
+          goto out;
+        }
       }
+
+      cur_rowid = sqlite3_last_insert_rowid(db);
     }
 
     rc = 0;
@@ -599,6 +556,9 @@ int AlertsManager::storeFlowAlert(Flow *f) {
     if(stmt2) sqlite3_finalize(stmt2);
     if(stmt3) sqlite3_finalize(stmt3);
     m.unlock(__FILE__, __LINE__);
+
+    if((rc == 0) && (cur_rowid != (u_int64_t)-1))
+      notifyFlowAlert(cur_rowid);
 
     f->setFlowAlerted();
     if(cli) cli->incTotalAlerts(alert_type);

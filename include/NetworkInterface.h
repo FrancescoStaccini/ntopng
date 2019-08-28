@@ -78,6 +78,15 @@ class NetworkInterface : public AlertableEntity {
   u_int32_t num_alerts_engaged[MAX_NUM_PERIODIC_SCRIPTS];
   u_int32_t num_dropped_alerts;
   bool has_stored_alerts;
+  AlertsQueue *alerts_queue;
+
+  /* External alerts contain alertable entities other than host/interface/network
+   * which are dynamically allocated when an alert for them occurs.
+   * A lock is necessary to guard the insert/delete operations from lookup operations
+   * requested from the GUI and to ensure that a delete operation does generate
+   * a use-after-free. */
+  std::map<std::pair<AlertEntity, std::string>, AlertableEntity*> external_alerts;
+  Mutex external_alerts_lock;
 
   bool is_view;   /* Whether this is a view interface */
   bool is_viewed; /* Whether this interface is 'viewed' by a ViewInterface */
@@ -97,8 +106,9 @@ class NetworkInterface : public AlertableEntity {
   bool reload_hosts_bcast_domain, lbd_serialize_by_mac;
   time_t hosts_bcast_domain_last_update;
   
-  u_int16_t next_ebpf_insert_idx, next_ebpf_remove_idx;
-  ParsedFlow **ebpfFlows;
+  u_int16_t next_compq_insert_idx;
+  u_int16_t next_compq_remove_idx;
+  ParsedFlow **companionQueue;
   
   /* Live Capture */
   Mutex active_captures_lock;
@@ -132,7 +142,7 @@ class NetworkInterface : public AlertableEntity {
   int pcap_datalink_type; /**< Datalink type of pcap. */
   pthread_t pollLoop;
   bool pollLoopCreated, has_too_many_hosts, has_too_many_flows, mtuWarningShown;
-  bool too_many_drops, slow_stats_update, flow_dump_disabled;
+  bool slow_stats_update, flow_dump_disabled;
   u_int32_t ifSpeed, numL2Devices, numHosts, numLocalHosts, scalingFactor;
   u_int64_t checkpointPktCount, checkpointBytesCount, checkpointPktDropCount; /* Those will hold counters at checkpoints */
   u_int16_t ifMTU;
@@ -142,7 +152,6 @@ class NetworkInterface : public AlertableEntity {
   L4Stats l4Stats;
   FlowHash *flows_hash; /**< Hash used to store flows information. */
   u_int32_t last_remote_pps, last_remote_bps;
-  u_int8_t packet_drops_alert_perc;
   TimeseriesExporter *tsExporter;
   TimeseriesRing *ts_ring;
 
@@ -188,7 +197,7 @@ class NetworkInterface : public AlertableEntity {
   time_t last_pkt_rcvd, last_pkt_rcvd_remote, /* Meaningful only for ZMQ interfaces */
     next_idle_flow_purge, next_idle_host_purge;
   bool running, is_idle;
-  NetworkStats *networkStats;
+  NetworkStats **networkStats;
   InterfaceStatsHash *interfaceStats;
   dhcp_range* dhcp_ranges, *dhcp_ranges_shadow;
 
@@ -215,7 +224,7 @@ class NetworkInterface : public AlertableEntity {
 		bool host_details,
 		LocationPolicy location,
 		char *countryFilter, char *mac_filter,
-		u_int16_t vlan_id, char *osFilter,
+		u_int16_t vlan_id, OperatingSystem osFilter,
 		u_int32_t asnFilter, int16_t networkFilter,
 		u_int16_t pool_filter, bool filtered_hosts,
 		bool blacklisted_hosts, bool hide_top_hidden,
@@ -248,11 +257,6 @@ class NetworkInterface : public AlertableEntity {
 
   bool isNumber(const char *str);
   bool checkIdle();
-
-  void sumStats(TcpFlowStats *_tcpFlowStats, EthStats *_ethStats,
-		LocalTrafficStats *_localStats, nDPIStats *_ndpiStats,
-		PacketStats *_pktStats, TcpPacketStats *_tcpPacketStats);
-
   void topItemsCommit(const struct timeval *when);
   void checkMacIPAssociation(bool triggerEvent, u_char *_mac, u_int32_t ipv4);
   void checkDhcpIPRange(Mac *sender_mac, struct dhcp_packet *dhcp_reply, u_int16_t vlan_id);
@@ -391,6 +395,10 @@ class NetworkInterface : public AlertableEntity {
   };
   inline void incnDPIFlows(u_int16_t l7_protocol)    { ndpiStats.incFlowsStats(l7_protocol); }
 
+  virtual void sumStats(TcpFlowStats *_tcpFlowStats, EthStats *_ethStats,
+			LocalTrafficStats *_localStats, nDPIStats *_ndpiStats,
+			PacketStats *_pktStats, TcpPacketStats *_tcpPacketStats) const;
+
   inline EthStats* getStats()      { return(&ethStats);          };
   inline int get_datalink()        { return(pcap_datalink_type); };
   inline void set_datalink(int l)  { pcap_datalink_type = l;     };
@@ -447,7 +455,7 @@ class NetworkInterface : public AlertableEntity {
 			 AddressTree *allowed_hosts,
 			 bool host_details, LocationPolicy location,
 			 char *countryFilter, char *mac_filter,
-			 u_int16_t vlan_id, char *osFilter,
+			 u_int16_t vlan_id, OperatingSystem osFilter,
 			 u_int32_t asnFilter, int16_t networkFilter,
 			 u_int16_t pool_filter, bool filtered_hosts,
 			 bool blacklisted_hosts, bool hide_top_hidden,
@@ -463,7 +471,7 @@ class NetworkInterface : public AlertableEntity {
 			  AddressTree *allowed_hosts,
 			  bool host_details, LocationPolicy location,
 			  char *countryFilter,
-			  u_int16_t vlan_id, char *osFilter,
+			  u_int16_t vlan_id, OperatingSystem osFilter,
 			  u_int32_t asnFilter, int16_t networkFilter,
 			  u_int16_t pool_filter, bool filtered_hosts, u_int8_t ipver_filter,
 			  char *groupColumn);
@@ -534,11 +542,11 @@ class NetworkInterface : public AlertableEntity {
   ArpStatsMatrixElement* getArpHashMatrixElement(const u_int8_t _src_mac[6], const u_int8_t _dst_mac[6],
 						 const u_int32_t _src_ip, const u_int32_t _dst_ip,
 						 bool * const src2dst);
-  Vlan* getVlan(u_int16_t vlanId, bool createIfNotPresent, bool isInlineCall);
-  AutonomousSystem *getAS(IpAddress *ipa, bool createIfNotPresent, bool isInlineCall);
-  Country* getCountry(const char *country_name, bool createIfNotPresent, bool isInlineCall);
-  virtual Mac*  getMac(u_int8_t _mac[6], bool createIfNotPresent, bool isInlineCall);
-  virtual Host* getHost(char *host_ip, u_int16_t vlan_id, bool isInlineCall);
+  Vlan* getVlan(u_int16_t vlanId, bool create_if_not_present, bool is_inline_call);
+  AutonomousSystem *getAS(IpAddress *ipa, bool create_if_not_present, bool is_inline_call);
+  Country* getCountry(const char *country_name, bool create_if_not_present, bool is_inline_call);
+  virtual Mac*  getMac(u_int8_t _mac[6], bool create_if_not_present, bool is_inline_call);
+  virtual Host* getHost(char *host_ip, u_int16_t vlan_id, bool is_inline_call);
   bool getHostInfo(lua_State* vm, AddressTree *allowed_hosts, char *host_ip, u_int16_t vlan_id);
   void findPidFlows(lua_State *vm, u_int32_t pid);
   void findProcNameFlows(lua_State *vm, char *proc_name);
@@ -568,15 +576,14 @@ class NetworkInterface : public AlertableEntity {
   void updateFlowsL7Policy();
 #endif
   void resetPoolsStats(u_int16_t pool_filter);
-  inline void luaHostPoolsStats(lua_State *vm)           { if (host_pools) host_pools->luaStats(vm);           };
   inline void luaHostPoolsVolatileMembers(lua_State *vm) { if (host_pools) host_pools->luaVolatileMembers(vm); };
 #endif
+  inline void luaHostPoolsStats(lua_State *vm)           { if (host_pools) host_pools->luaStats(vm);           };
   void refreshHostPools();
   inline u_int16_t getHostPool(Host *h) { if(h && host_pools) return host_pools->getPool(h); return NO_HOST_POOL_ID; };
   inline u_int16_t getHostPool(Mac *m)  { if(m && host_pools) return host_pools->getPool(m); return NO_HOST_POOL_ID; };
 
   void loadScalingFactorPrefs();
-  void loadPacketsDropsAlertPrefs();
   void getnDPIFlowsCount(lua_State *vm);
 
   inline void setBridgeLanInterfaceId(u_int32_t v) { bridge_lan_interface_id = v;     };
@@ -627,8 +634,7 @@ class NetworkInterface : public AlertableEntity {
   inline void getSFlowDeviceInfo(lua_State *vm, u_int32_t deviceIP) {
     if(interfaceStats) interfaceStats->luaDeviceInfo(vm, deviceIP); else lua_newtable(vm);
   };
-
-  void refreshHostsAlertPrefs(bool full_refresh);
+  void refreshSuppressedAlertsPrefs(AlertEntity entity_type, const char *entity_value);
   int updateHostTrafficPolicy(AddressTree* allowed_networks, char *host_ip, u_int16_t host_vlan);
 
   virtual void reloadCompanions() {};
@@ -654,7 +660,6 @@ class NetworkInterface : public AlertableEntity {
   bool getMacInfo(lua_State* vm, char *mac);
   bool resetMacStats(lua_State* vm, char *mac, bool delete_data);
   bool setMacDeviceType(char *strmac, DeviceType dtype, bool alwaysOverwrite);
-  bool setMacOperatingSystem(lua_State* vm, char *mac, OperatingSystem os);
   bool getASInfo(lua_State* vm, u_int32_t asn);
   bool getCountryInfo(lua_State* vm, const char *country);
   bool getVLANInfo(lua_State* vm, u_int16_t vlan_id);
@@ -701,21 +706,21 @@ class NetworkInterface : public AlertableEntity {
   void topMacsAdd(Mac *mac, u_int16_t protocol, u_int32_t bytes);
   inline bool isDynamicInterface()                { return(is_dynamic_interface);            };
   inline void setDynamicInterface()               { is_dynamic_interface = true;             };
-  bool isLocalBroadcastDomainHost(Host * const h, bool isInlineCall);
+  bool isLocalBroadcastDomainHost(Host * const h, bool is_inline_call);
   inline void luaTopMacsProtos(lua_State *vm) { frequentMacs->luaTopMacsProtocols(vm); }
   inline MDNS* getMDNS() { return(mdns); }
   inline NetworkDiscovery* getNetworkDiscovery() { return(discovery); }
-  inline void incPoolNumHosts(u_int16_t id, bool isInlineCall) {
-    if (host_pools) host_pools->incNumHosts(id, isInlineCall);
+  inline void incPoolNumHosts(u_int16_t id, bool is_inline_call) {
+    if (host_pools) host_pools->incNumHosts(id, is_inline_call);
   };
-  inline void decPoolNumHosts(u_int16_t id, bool isInlineCall) {
-    if (host_pools) host_pools->decNumHosts(id, isInlineCall);
+  inline void decPoolNumHosts(u_int16_t id, bool is_inline_call) {
+    if (host_pools) host_pools->decNumHosts(id, is_inline_call);
   };
-  inline void incPoolNumL2Devices(u_int16_t id, bool isInlineCall) {
-    if (host_pools) host_pools->incNumL2Devices(id, isInlineCall);
+  inline void incPoolNumL2Devices(u_int16_t id, bool is_inline_call) {
+    if (host_pools) host_pools->incNumL2Devices(id, is_inline_call);
   };
-  inline void decPoolNumL2Devices(u_int16_t id, bool isInlineCall) {
-    if (host_pools) host_pools->decNumL2Devices(id, isInlineCall);
+  inline void decPoolNumL2Devices(u_int16_t id, bool is_inline_call) {
+    if (host_pools) host_pools->decNumL2Devices(id, is_inline_call);
   };
   Host* findHostByIP(AddressTree *allowed_hosts, char *host_ip, u_int16_t vlan_id);
 #ifdef HAVE_NINDEX
@@ -735,8 +740,8 @@ class NetworkInterface : public AlertableEntity {
   bool isInDhcpRange(IpAddress *ip);
   void getPodsStats(lua_State* vm);
   void getContainersStats(lua_State* vm, const char *pod_filter);
-  bool enqueueeBPFFlow(ParsedFlow * const pf, bool skip_loopback_traffic);
-  bool dequeueeBPFFlow(ParsedFlow ** pf);
+  bool enqueueFlowToCompanion(ParsedFlow * const pf, bool skip_loopback_traffic);
+  bool dequeueFlowFromCompanion(ParsedFlow ** pf);
 
 #ifdef PROFILING
   inline void profiling_section_enter(const char *label, int id) { PROFILING_SECTION_ENTER(label, id); };
@@ -752,9 +757,14 @@ class NetworkInterface : public AlertableEntity {
   inline bool hasAlerts()                                 { return(has_stored_alerts || (getNumEngagedAlerts() > 0)); }
   inline void refreshHasAlerts()                          { has_stored_alerts = alertsManager ? alertsManager->hasAlerts() : false; }
   inline void incNumDroppedAlerts(u_int32_t num_dropped)  { num_dropped_alerts += num_dropped; }
-  void walkAlertables(int entity_type, const char *entity_value, alertable_callback *callback, void *user_data);
-  void getEngagedAlertsCount(lua_State *vm, int entity_type, const char *entity_value);
-  void getEngagedAlerts(lua_State *vm, int entity_type, const char *entity_value, AlertType alert_type, AlertLevel alert_severity);
+  inline AlertsQueue* getAlertsQueue()                    { return(alerts_queue); }
+  void walkAlertables(int entity_type, const char *entity_value, std::set<int> *entity_excludes, alertable_callback *callback, void *user_data);
+  void getEngagedAlertsCount(lua_State *vm, int entity_type, const char *entity_value, std::set<int> *entity_excludes);
+  void getEngagedAlerts(lua_State *vm, int entity_type, const char *entity_value, AlertType alert_type, AlertLevel alert_severity, std::set<int> *entity_excludes);
+
+  /* unlockExternalAlertable must be called after use whenever a non-null reference is returned */
+  AlertableEntity* lockExternalAlertable(AlertEntity entity, const char *entity_val, bool create_if_missing);
+  void unlockExternalAlertable(AlertableEntity *entity);
 
   virtual bool reproducePcapOriginalSpeed() const         { return(false); }
   u_int32_t getNumEngagedAlerts();

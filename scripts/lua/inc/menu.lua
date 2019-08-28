@@ -135,7 +135,7 @@ end
 
 -- ##############################################
 
-if not ifs.isView and ntop.getPrefs().are_alerts_enabled == true then
+if ntop.getPrefs().are_alerts_enabled == true then
    local active = ""
    local style = ""
    local color = ""
@@ -225,11 +225,7 @@ end
 
 print('<li><a href="'..ntop.getHttpPrefix()..'/lua/network_stats.lua">') print(i18n("networks")) print('</a></li>')
 
-if not ifs.isView then
-   print('<li><a href="'..ntop.getHttpPrefix()..'/lua/pool_stats.lua">') print(i18n("host_pools.host_pools")) print('</a></li>')
-end
-
-
+print('<li><a href="'..ntop.getHttpPrefix()..'/lua/pool_stats.lua">') print(i18n("host_pools.host_pools")) print('</a></li>')
 
 if(ntop.hasGeoIP()) then
    print('<li><a href="'..ntop.getHttpPrefix()..'/lua/as_stats.lua">') print(i18n("prefs.toggle_asn_rrds_title")) print('</a></li>')

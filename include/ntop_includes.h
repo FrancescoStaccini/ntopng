@@ -187,7 +187,6 @@ using namespace std;
 #include "ntop_typedefs.h"
 #include "Alert.h"
 #include "AlertableEntity.h"
-#include "NetworkStats.h"
 #include "Trace.h"
 #include "ProtoStats.h"
 #include "Utils.h"
@@ -199,6 +198,8 @@ using namespace std;
 #include "CustomAppStats.h"
 #endif
 #include "GenericTrafficElement.h"
+#include "AlertCounter.h"
+#include "NetworkStats.h"
 #include "ContainerStats.h"
 #include "ParsedFlowCore.h"
 #include "ParsedeBPF.h"
@@ -218,7 +219,6 @@ using namespace std;
 #include "CounterTrend.h"
 #include "LRUMacIP.h"
 #include "FlowInterfacesStats.h"
-#include "HostPoolStats.h"
 #ifdef HAVE_LDAP
 #include "LdapAuthenticator.h"
 #endif
@@ -226,6 +226,7 @@ using namespace std;
 #include "FrequentStringItems.h"
 #include "FrequentNumericItems.h"
 #include "FrequentTrafficItems.h"
+#include "HostPoolStats.h"
 #include "HostPools.h"
 #include "Fingerprint.h"
 #include "Prefs.h"
@@ -273,6 +274,7 @@ using namespace std;
 #include "HostTimeseriesPoint.h"
 #include "SPSCQueue.h"
 #include "L4Stats.h"
+#include "AlertsQueue.h"
 #include "NetworkInterfaceTsPoint.h"
 #include "NetworkInterface.h"
 #ifndef HAVE_NEDGE
@@ -282,7 +284,6 @@ using namespace std;
 #ifdef HAVE_PF_RING
 #include "PF_RINGInterface.h"
 #endif
-#include "AlertCounter.h"
 #include "FlowAlertCounter.h"
 #include "GenericHash.h"
 #include "VirtualHost.h"

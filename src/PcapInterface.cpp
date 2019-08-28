@@ -278,7 +278,7 @@ static void* packetPollLoop(void* ptr) {
             if (packetTimeDelta > fromStartTimeDelta) {
               u_int32_t sleepMs = packetTimeDelta - fromStartTimeDelta;
                 
-	      ntop->getTrace()->traceEvent(TRACE_NORMAL, "Sleeping %.3f sec", ((float)(sleepMs))/1000);
+	      ntop->getTrace()->traceEvent(TRACE_DEBUG, "Sleeping %.3f sec", ((float)(sleepMs))/1000);
 		
 	      usleep(sleepMs*1000);
 
@@ -321,7 +321,7 @@ static void* packetPollLoop(void* ptr) {
 #endif
 	}
       } else if(rc < 0) {
-	if(iface->read_from_pcap_dump() && !iface->reproducePcapOriginalSpeed())
+	if(iface->read_from_pcap_dump())
 	  break;
       } else {
 	/* No packet received before the timeout */

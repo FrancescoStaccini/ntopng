@@ -327,7 +327,7 @@ if(isAdministrator()) then
    end
 end
 
-if isAdministrator() and (not ifstats.isView) then
+if isAdministrator() then
    local num_pool_hosts = ifstats.num_members.num_hosts
    local label
 
@@ -1096,6 +1096,7 @@ elseif(page == "historical") then
       timeseries = {
          {schema="iface:flows",                 label=i18n("graphs.active_flows")},
          {schema="iface:hosts",                 label=i18n("graphs.active_hosts")},
+         {schema="iface:engaged_alerts",        label=i18n("show_alerts.engaged_alerts")},
          {schema="custom:flows_vs_local_hosts", label=i18n("graphs.flows_vs_local_hosts"), check={"iface:flows", "iface:local_hosts"}, step=60},
          {schema="custom:flows_vs_traffic",     label=i18n("graphs.flows_vs_traffic"), check={"iface:flows", "iface:traffic"}, step=60},
          {schema="custom:memory_vs_flows_hosts", label=i18n("graphs.memory_vs_hosts_flows"), check={"process:memory", "iface:flows", "iface:hosts"}},
@@ -1251,8 +1252,7 @@ elseif(page == "alerts") then
 
    drawAlertSourceSettings("interface", ifname_clean,
       i18n("show_alerts.iface_delete_config_btn", {iface=if_name}), "show_alerts.iface_delete_config_confirm",
-      "if_stats.lua", {ifid=ifid},
-      if_name)
+      "if_stats.lua", {ifid=ifid}, if_name, "interface")
 
 elseif(page == "config") then
    if(not isAdministrator()) then
@@ -1733,10 +1733,6 @@ elseif(page == "snmp_bind") then
    });
 </script>]]
 elseif(page == "pools") then
-    if ifstats.isView then
-      error()
-    end
-
     dofile(dirs.installdir .. "/scripts/lua/admin/host_pools.lua")
 elseif(page == "dhcp") then
     dofile(dirs.installdir .. "/scripts/lua/admin/dhcp.lua")

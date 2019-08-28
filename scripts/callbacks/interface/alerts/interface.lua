@@ -20,10 +20,11 @@ function setup(str_granularity)
    if(do_trace) then print("alert.lua:setup("..str_granularity..") called\n") end
    ifid = interface.getId()
    local ifname = interface.setActiveInterfaceId(ifid)
-   config_alerts = getInterfaceConfiguredAlertThresholds(ifname, str_granularity)
 
    -- Load the threshold checking functions
    available_modules = alerts_api.load_check_modules("interface", str_granularity)
+
+   config_alerts = getInterfaceConfiguredAlertThresholds(ifname, str_granularity, available_modules)
 end
 
 -- #################################################################
@@ -38,18 +39,13 @@ function checkAlerts(granularity)
    local has_configured_alerts = (table.len(interface_config) or table.len(global_config))
    local entity_info = alerts_api.interfaceAlertEntity(ifid)
 
-   if are_alerts_suppressed(interface_key, ifid) then
-     releaseAlerts()
-     return
-   end
-
    if(do_trace) then print("checkInterfaceAlerts()\n") end
 
    if(has_configured_alerts) then
       for _, check in pairs(available_modules) do
         local config = interface_config[check.key] or global_config[check.key]
 
-        if config then
+        if config or check.always_enabled then
            check.check_function({
               granularity = granularity,
               alert_entity = entity_info,
@@ -66,9 +62,9 @@ end
 
 -- #################################################################
 
-function releaseAlerts()
+function releaseAlerts(granularity)
   local ifid = interface.getId()
   local entity_info = alerts_api.interfaceAlertEntity(ifid)
 
-  alerts_api.releaseEntityAlerts(entity_info, interface.getAlerts())
+  alerts_api.releaseEntityAlerts(entity_info, interface.getAlerts(granularity))
 end

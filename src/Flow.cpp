@@ -62,7 +62,7 @@ Flow::Flow(NetworkInterface *_iface,
 
   ndpiFlow = NULL, cli_id = srv_id = NULL;
   cli_ebpf = srv_ebpf = NULL;
-  json_info = strdup("{}"), cli2srv_direction = true, twh_over = twh_ok = false,
+  json_info = NULL, cli2srv_direction = true, twh_over = twh_ok = false,
     dissect_next_http_packet = false,
     check_tor = false, host_server_name = NULL, diff_num_http_requests = 0,
     bt_hash = NULL, community_id_flow_hash = NULL;
@@ -87,15 +87,19 @@ Flow::Flow(NetworkInterface *_iface,
   PROFILING_SUB_SECTION_EXIT(iface, 7);
 
   if(cli_host) {
+    NetworkStats *network_stats = cli_host->getNetworkStats(cli_host->get_local_network_id());
     cli_host->incUses();
     cli_host->incNumFlows(last_seen, true, srv_host);
+    if(network_stats) network_stats->incNumFlows(last_seen, true);
     cli_ip_addr = cli_host->get_ip();
   } else /* Client host has not been allocated, let's keep the info in an IpAddress */
     cli_ip_addr = new (std::nothrow) IpAddress(*_cli_ip);
 
   if(srv_host) {
+    NetworkStats *network_stats = srv_host->getNetworkStats(srv_host->get_local_network_id());
     srv_host->incUses();
     srv_host->incNumFlows(last_seen, false, cli_host);
+    if(network_stats) network_stats->incNumFlows(last_seen, false);
     srv_ip_addr = srv_host->get_ip();
   } else /* Server host has not been allocated, let's keep the info in an IpAddress */
     srv_ip_addr = new (std::nothrow) IpAddress(*_srv_ip);
@@ -139,7 +143,7 @@ Flow::Flow(NetworkInterface *_iface,
     rttSec = 0, cli2srv_window = srv2cli_window = 0,
     c2sFirstGoodputTime.tv_sec = c2sFirstGoodputTime.tv_usec = 0;
   memset(&ip_stats_s2d, 0, sizeof(ip_stats_s2d)), memset(&ip_stats_d2s, 0, sizeof(ip_stats_d2s));
-  memset(&tcp_stats_s2d, 0, sizeof(tcp_stats_s2d)), memset(&tcp_stats_d2s, 0, sizeof(tcp_stats_d2s));
+  memset(&tcp_seq_s2d, 0, sizeof(tcp_seq_s2d)), memset(&tcp_seq_d2s, 0, sizeof(tcp_seq_d2s));
   memset(&clientNwLatency, 0, sizeof(clientNwLatency)), memset(&serverNwLatency, 0, sizeof(serverNwLatency));
 
   if(!iface->isPacketInterface())
@@ -221,7 +225,7 @@ Flow::~Flow() {
 
   if(last_partial)         free(last_partial);
   if(last_db_dump.partial) free(last_db_dump.partial);
-  if(json_info)            free(json_info);
+  if(json_info)            json_object_put(json_info);
   if(host_server_name)     free(host_server_name);
 
   if(cli_ebpf) delete cli_ebpf;
@@ -236,6 +240,8 @@ Flow::~Flow() {
   } else if(isSSH()) {
     if(protos.ssh.client_signature)  free(protos.ssh.client_signature);
     if(protos.ssh.server_signature)  free(protos.ssh.server_signature);
+    if(protos.ssh.hassh.client_hash) free(protos.ssh.hassh.client_hash);
+    if(protos.ssh.hassh.server_hash) free(protos.ssh.hassh.server_hash);
   } else if(isSSL()) {
     if(protos.ssl.certificate)         free(protos.ssl.certificate);
     if(protos.ssl.server_certificate)  free(protos.ssl.server_certificate);
@@ -347,6 +353,10 @@ void Flow::dumpFlowAlert() {
 
     case status_device_protocol_not_allowed:
       do_dump = ntop->getPrefs()->are_device_protocols_alerts_enabled();
+      break;
+
+    case status_potentially_dangerous:
+      do_dump = ntop->getPrefs()->are_potentially_dangerous_protocols_alerts_enabled();
       break;
 
     case status_elephant_local_to_remote:
@@ -521,14 +531,27 @@ void Flow::processDetectedProtocol() {
     break;
 
   case NDPI_PROTOCOL_SSH:
-    if(protos.ssh.client_signature)  free(protos.ssh.client_signature);
-    if(protos.ssh.server_signature)  free(protos.ssh.server_signature);
-    protos.ssh.client_signature = strdup(ndpiFlow->protos.ssh.client_signature);
-    protos.ssh.server_signature = strdup(ndpiFlow->protos.ssh.server_signature);
+    if(protos.ssh.client_signature == NULL)
+      protos.ssh.client_signature = strdup(ndpiFlow->protos.ssh.client_signature);
+    if(protos.ssh.server_signature == NULL)
+      protos.ssh.server_signature = strdup(ndpiFlow->protos.ssh.server_signature);
+
+    if(protos.ssh.hassh.client_hash == NULL
+       && ndpiFlow->protos.ssh.hassh_client[0] != '\0') {
+      protos.ssh.hassh.client_hash = strdup(ndpiFlow->protos.ssh.hassh_client);
+      updateHASSH(true /* As client */);
+    }
+
+    if(protos.ssh.hassh.server_hash == NULL
+       && ndpiFlow->protos.ssh.hassh_server[0] != '\0') {
+      protos.ssh.hassh.server_hash = strdup(ndpiFlow->protos.ssh.hassh_server);
+      updateHASSH(false /* As server */);
+    }
+
     break;
 
   case NDPI_PROTOCOL_TOR:
-  case NDPI_PROTOCOL_SSL:
+  case NDPI_PROTOCOL_TLS:
     protos.ssl.ssl_version = ndpiFlow->protos.stun_ssl.ssl.ssl_version;
 
 #if 0
@@ -598,7 +621,7 @@ void Flow::processDetectedProtocol() {
 	doublecol[0] = '\0';
 
       if(srv_host && (ndpiFlow->protos.http.detected_os[0] != '\0') && cli_host)
-	cli_host->inlineSetOS((char*)ndpiFlow->protos.http.detected_os);
+	cli_host->inlineSetOSDetail((char*)ndpiFlow->protos.http.detected_os);
 
       if(cli_host && cli_host->isLocalHost())
 	cli_host->incrVisitedWebSite(host_server_name);
@@ -620,12 +643,19 @@ void Flow::setDetectedProtocol(ndpi_protocol proto_id, bool forceDetection) {
   /* Let the client SSL certificate win over the server SSL certificate
      this addresses detection for youtube, e.g., when the client
      requests s.youtube.com but the server responds with google.com */
-  if((!forceDetection)
-     && (proto_id.master_protocol == NDPI_PROTOCOL_SSL)
-     && (get_packets() < NDPI_MIN_NUM_PACKETS)
+
+  if(!forceDetection
+     && get_packets() < NDPI_MIN_NUM_PACKETS
      && (ndpif = get_ndpi_flow())
-     && ((ndpif->protos.stun_ssl.ssl.client_certificate[0] == '\0')
-	 || (ndpif->protos.stun_ssl.ssl.server_certificate[0] == '\0'))) {
+     && (
+         (proto_id.master_protocol == NDPI_PROTOCOL_TLS
+          && (ndpif->protos.stun_ssl.ssl.client_certificate[0] == '\0'
+              || ndpif->protos.stun_ssl.ssl.server_certificate[0] == '\0'))
+         || (proto_id.app_protocol == NDPI_PROTOCOL_SSH
+          && (ndpif->protos.ssh.hassh_client[0] == '\0'
+	      || ndpif->protos.ssh.hassh_server[0] == '\0'))
+         )
+     ) {
     ndpif->detected_protocol_stack[0] = NDPI_PROTOCOL_UNKNOWN;
     return;
   }
@@ -687,11 +717,13 @@ void Flow::setDetectedProtocol(ndpi_protocol proto_id, bool forceDetection) {
 
 /* *************************************** */
 
-void Flow::setJSONInfo(const char *json) {
+void Flow::setJSONInfo(json_object *json) {
   if(json == NULL) return;
 
-  if(json_info != NULL) free(json_info);
-  json_info = strdup(json);
+  if(json_info != NULL) 
+    json_object_put(json_info);
+
+  json_info = json_object_get(json);
 }
 
 /* *************************************** */
@@ -861,21 +893,21 @@ char* Flow::print(char *buf, u_int buf_len) const {
   if(protocol == IPPROTO_TCP) {
     int len = 0;
 
-    if((tcp_stats_s2d.pktOOO+tcp_stats_d2s.pktOOO) > 0)
+    if((stats.tcp_stats_s2d.pktOOO+stats.tcp_stats_d2s.pktOOO) > 0)
       len += snprintf(&tcp_buf[len], sizeof(tcp_buf)-len, "[OOO=%u/%u]",
-		      tcp_stats_s2d.pktOOO, tcp_stats_d2s.pktOOO);
+		      stats.tcp_stats_s2d.pktOOO, stats.tcp_stats_d2s.pktOOO);
 
-    if((tcp_stats_s2d.pktLost+tcp_stats_d2s.pktLost) > 0)
+    if((stats.tcp_stats_s2d.pktLost+stats.tcp_stats_d2s.pktLost) > 0)
       len += snprintf(&tcp_buf[len], sizeof(tcp_buf)-len, "[Lost=%u/%u]",
-		      tcp_stats_s2d.pktLost, tcp_stats_d2s.pktLost);
+		      stats.tcp_stats_s2d.pktLost, stats.tcp_stats_d2s.pktLost);
 
-    if((tcp_stats_s2d.pktRetr+tcp_stats_d2s.pktRetr) > 0)
+    if((stats.tcp_stats_s2d.pktRetr+stats.tcp_stats_d2s.pktRetr) > 0)
       len += snprintf(&tcp_buf[len], sizeof(tcp_buf)-len, "[Retr=%u/%u]",
-		      tcp_stats_s2d.pktRetr, tcp_stats_d2s.pktRetr);
+		      stats.tcp_stats_s2d.pktRetr, stats.tcp_stats_d2s.pktRetr);
 
-    if((tcp_stats_s2d.pktKeepAlive+tcp_stats_d2s.pktKeepAlive) > 0)
+    if((stats.tcp_stats_s2d.pktKeepAlive+stats.tcp_stats_d2s.pktKeepAlive) > 0)
       len += snprintf(&tcp_buf[len], sizeof(tcp_buf)-len, "[KeepAlive=%u/%u]",
-		      tcp_stats_s2d.pktKeepAlive, tcp_stats_d2s.pktKeepAlive);
+		      stats.tcp_stats_s2d.pktKeepAlive, stats.tcp_stats_d2s.pktKeepAlive);
   }
 
   snprintf(buf, buf_len,
@@ -1094,13 +1126,13 @@ void Flow::update_hosts_stats(struct timeval *tv, bool dump_alert) {
       set_acknowledge_to_purge();
     } else {
       /* Marked as ready to be purged, will be purged by NetworkInterface::purgeIdleFlows */
-      set_state(hash_entry_state_ready_to_be_purged);
+      set_hash_entry_state_ready_to_be_purged();
     }
 
     postFlowSetIdle(tv->tv_sec);
   }
 
-  if(check_tor && (ndpiDetectedProtocol.app_protocol == NDPI_PROTOCOL_SSL)) {
+  if(check_tor && (ndpiDetectedProtocol.app_protocol == NDPI_PROTOCOL_TLS)) {
     char rsp[256];
 
     if(ntop->getRedis()->getAddress(protos.ssl.certificate, rsp, sizeof(rsp), false) == 0) {
@@ -1179,10 +1211,10 @@ void Flow::update_hosts_stats(struct timeval *tv, bool dump_alert) {
 	if(trafficProfile)
 	  trafficProfile->incBytes(diff_sent_bytes+diff_rcvd_bytes);
 #endif
-
-	update_pools_stats(tv, diff_sent_packets, diff_sent_bytes, diff_rcvd_packets, diff_rcvd_bytes);
       }
 #endif
+      update_pools_stats(tv, diff_sent_packets, diff_sent_bytes, diff_rcvd_packets, diff_rcvd_bytes);
+
       if(iface && iface->hasSeenVlanTaggedPackets() && (vl = iface->getVlan(vlanId, false, false /* NOT an inline call */))) {
 	/* Note: source and destination hosts have, by definition, the same VLAN so the increase is done only one time. */
 	/* Note: vl will never be null as we're in a flow with that vlan. Hence, it is guaranteed that at least
@@ -1296,14 +1328,7 @@ void Flow::update_hosts_stats(struct timeval *tv, bool dump_alert) {
        && get_srv_ip_addr()->isNonEmptyUnicastAddress()
        && ntop->getPrefs()->are_remote_to_remote_alerts_enabled()
        && !cli_host->setRemoteToRemoteAlerts()) {
-      json_object *jo;
-
-      if((jo = json_object_new_object()) != NULL) {
-	cli_host->serialize(jo, details_normal);
-      	ntop->getRedis()->rpush(CONST_ALERT_HOST_REMOTE_TO_REMOTE, json_object_to_json_string(jo), CONST_REMOTE_TO_REMOTE_MAX_QUEUE);
-
-      	json_object_put(jo);
-      }
+      iface->getAlertsQueue()->pushRemoteToRemoteAlert(cli_host);
     }
   } /* Closes if(cli_host && srv_host) */
 
@@ -1472,8 +1497,6 @@ void Flow::update_hosts_stats(struct timeval *tv, bool dump_alert) {
 
 /* *************************************** */
 
-#ifdef NTOPNG_PRO
-
 void Flow::update_pools_stats(const struct timeval *tv,
 				u_int64_t diff_sent_packets, u_int64_t diff_sent_bytes,
 				u_int64_t diff_rcvd_packets, u_int64_t diff_rcvd_bytes) {
@@ -1503,6 +1526,7 @@ void Flow::update_pools_stats(const struct timeval *tv,
 	hp->incPoolStats(tv->tv_sec, cli_host_pool_id, ndpiDetectedProtocol.master_protocol, category_id,
 		       diff_sent_packets, diff_sent_bytes, diff_rcvd_packets, diff_rcvd_bytes);
 
+#ifdef NTOPNG_PRO
       /* Per host quota-enforcement stats */
       if(hp->enforceQuotasPerPoolMember(cli_host_pool_id)) {
 	cli_host->incQuotaEnforcementStats(tv->tv_sec, ndpiDetectedProtocol.master_protocol,
@@ -1511,6 +1535,7 @@ void Flow::update_pools_stats(const struct timeval *tv,
 					   diff_sent_packets, diff_sent_bytes, diff_rcvd_packets, diff_rcvd_bytes);
 	cli_host->incQuotaEnforcementCategoryStats(tv->tv_sec, category_id, diff_sent_bytes, diff_rcvd_bytes);
       }
+#endif
     }
 
     /* Server host */
@@ -1533,6 +1558,7 @@ void Flow::update_pools_stats(const struct timeval *tv,
       }
 
       /* When quotas have to be enforced per pool member, stats must be increased even if cli and srv are on the same pool */
+#ifdef NTOPNG_PRO
       if(hp->enforceQuotasPerPoolMember(srv_host_pool_id)) {
 	srv_host->incQuotaEnforcementStats(tv->tv_sec, ndpiDetectedProtocol.master_protocol,
 			 diff_rcvd_packets, diff_rcvd_bytes, diff_sent_packets, diff_sent_bytes);
@@ -1540,11 +1566,10 @@ void Flow::update_pools_stats(const struct timeval *tv,
 			 diff_rcvd_packets, diff_rcvd_bytes, diff_sent_packets, diff_sent_bytes);
 	srv_host->incQuotaEnforcementCategoryStats(tv->tv_sec, category_id, diff_rcvd_bytes, diff_sent_bytes);
       }
+#endif
     }
   }
 }
-
-#endif
 
 /* *************************************** */
 
@@ -1821,14 +1846,14 @@ void Flow::lua(lua_State* vm, AddressTree * ptree,
 
     if(protocol == IPPROTO_TCP) {
       lua_push_bool_table_entry(vm, "tcp.seq_problems",
-				(tcp_stats_s2d.pktRetr
-				 | tcp_stats_s2d.pktOOO
-				 | tcp_stats_s2d.pktLost
-				 | tcp_stats_s2d.pktKeepAlive
-				 | tcp_stats_d2s.pktRetr
-				 | tcp_stats_d2s.pktOOO
-				 | tcp_stats_d2s.pktLost
-				 | tcp_stats_d2s.pktKeepAlive) ? true : false);
+				(stats.tcp_stats_s2d.pktRetr
+				 | stats.tcp_stats_s2d.pktOOO
+				 | stats.tcp_stats_s2d.pktLost
+				 | stats.tcp_stats_s2d.pktKeepAlive
+				 | stats.tcp_stats_d2s.pktRetr
+				 | stats.tcp_stats_d2s.pktOOO
+				 | stats.tcp_stats_d2s.pktLost
+				 | stats.tcp_stats_d2s.pktKeepAlive) ? true : false);
 
       lua_push_float_table_entry(vm, "tcp.nw_latency.client", toMs(&clientNwLatency));
       lua_push_float_table_entry(vm, "tcp.nw_latency.server", toMs(&serverNwLatency));
@@ -1836,14 +1861,14 @@ void Flow::lua(lua_State* vm, AddressTree * ptree,
       lua_push_float_table_entry(vm, "tcp.max_thpt.cli2srv", getCli2SrvMaxThpt());
       lua_push_float_table_entry(vm, "tcp.max_thpt.srv2cli", getSrv2CliMaxThpt());
 
-      lua_push_uint64_table_entry(vm, "cli2srv.retransmissions", tcp_stats_s2d.pktRetr);
-      lua_push_uint64_table_entry(vm, "cli2srv.out_of_order", tcp_stats_s2d.pktOOO);
-      lua_push_uint64_table_entry(vm, "cli2srv.lost", tcp_stats_s2d.pktLost);
-      lua_push_uint64_table_entry(vm, "cli2srv.keep_alive", tcp_stats_s2d.pktKeepAlive);
-      lua_push_uint64_table_entry(vm, "srv2cli.retransmissions", tcp_stats_d2s.pktRetr);
-      lua_push_uint64_table_entry(vm, "srv2cli.out_of_order", tcp_stats_d2s.pktOOO);
-      lua_push_uint64_table_entry(vm, "srv2cli.lost", tcp_stats_d2s.pktLost);
-      lua_push_uint64_table_entry(vm, "srv2cli.keep_alive", tcp_stats_d2s.pktKeepAlive);
+      lua_push_uint64_table_entry(vm, "cli2srv.retransmissions", stats.tcp_stats_s2d.pktRetr);
+      lua_push_uint64_table_entry(vm, "cli2srv.out_of_order", stats.tcp_stats_s2d.pktOOO);
+      lua_push_uint64_table_entry(vm, "cli2srv.lost", stats.tcp_stats_s2d.pktLost);
+      lua_push_uint64_table_entry(vm, "cli2srv.keep_alive", stats.tcp_stats_s2d.pktKeepAlive);
+      lua_push_uint64_table_entry(vm, "srv2cli.retransmissions", stats.tcp_stats_d2s.pktRetr);
+      lua_push_uint64_table_entry(vm, "srv2cli.out_of_order", stats.tcp_stats_d2s.pktOOO);
+      lua_push_uint64_table_entry(vm, "srv2cli.lost", stats.tcp_stats_d2s.pktLost);
+      lua_push_uint64_table_entry(vm, "srv2cli.keep_alive", stats.tcp_stats_d2s.pktKeepAlive);
 
       lua_push_uint64_table_entry(vm, "cli2srv.tcp_flags", src2dst_tcp_flags);
       lua_push_uint64_table_entry(vm, "srv2cli.tcp_flags", dst2src_tcp_flags);
@@ -1863,6 +1888,11 @@ void Flow::lua(lua_State* vm, AddressTree * ptree,
     if(isHTTP() && protos.http.last_url) {
       lua_push_str_table_entry(vm, "protos.http.last_method", protos.http.last_method);
       lua_push_uint64_table_entry(vm, "protos.http.last_return_code", protos.http.last_return_code);
+    }
+
+    if(isDNS() && protos.dns.last_query) {
+      lua_push_uint64_table_entry(vm, "protos.dns.last_query_type", protos.dns.last_query_type);
+      lua_push_uint64_table_entry(vm, "protos.dns.last_return_code", protos.dns.last_return_code);
     }
 
 #ifdef HAVE_NEDGE
@@ -1902,6 +1932,9 @@ void Flow::lua(lua_State* vm, AddressTree * ptree,
       if(isSSH()) {
 	if(protos.ssh.client_signature) lua_push_str_table_entry(vm, "protos.ssh.client_signature", protos.ssh.client_signature);
 	if(protos.ssh.server_signature) lua_push_str_table_entry(vm, "protos.ssh.server_signature", protos.ssh.server_signature);
+
+	if(protos.ssh.hassh.client_hash) lua_push_str_table_entry(vm, "protos.ssh.hassh.client_hash", protos.ssh.hassh.client_hash);
+	if(protos.ssh.hassh.server_hash) lua_push_str_table_entry(vm, "protos.ssh.hassh.server_hash", protos.ssh.hassh.server_hash);
       }
 
       if(isSSL()) {
@@ -1926,7 +1959,7 @@ void Flow::lua(lua_State* vm, AddressTree * ptree,
       }
     }
 
-    lua_push_str_table_entry(vm, "moreinfo.json", get_json_info());
+    lua_push_str_table_entry(vm, "moreinfo.json", get_json_info() ? json_object_to_json_string(get_json_info()) : "{}");
 
     if(cli_ebpf) processLua(vm, cli_ebpf, true);
     if(srv_ebpf) processLua(vm, srv_ebpf, false);
@@ -2300,22 +2333,8 @@ json_object* Flow::flow2json() {
   json_object_object_add(my_object, Utils::jsonLabel(LAST_SWITCHED, "LAST_SWITCHED", jsonbuf, sizeof(jsonbuf)),
 			 json_object_new_int((u_int32_t)get_partial_last_seen()));
 
-  if(json_info && strcmp(json_info, "{}")) {
-    json_object *o;
-    enum json_tokener_error jerr = json_tokener_success;
-
-    if((o = json_tokener_parse_verbose(json_info, &jerr)) != NULL) {
-      json_object_object_add(my_object, "json", o);
-    } else {
-      ntop->getTrace()->traceEvent(TRACE_INFO,
-				   "JSON Parse error [%s]: %s "
-				   " adding as a plain string",
-				   json_tokener_error_desc(jerr),
-				   json_info);
-      /* Experimental to attempt to fix https://github.com/ntop/ntopng/issues/522 */
-      json_object_object_add(my_object, "json", json_object_new_string(json_info));
-    }
-  }
+  if(json_info && json_object_object_length(json_info) > 0)
+    json_object_object_add(my_object, "json", json_object_get(json_info));
 
   if(vlanId > 0) json_object_object_add(my_object,
 					Utils::jsonLabel(SRC_VLAN, "SRC_VLAN", jsonbuf, sizeof(jsonbuf)),
@@ -2481,6 +2500,16 @@ bool Flow::get_partial_traffic_stats(FlowTrafficStats **dst, FlowTrafficStats *f
   fts->cli2srv_goodput_bytes = tmp.cli2srv_goodput_bytes - (*dst)->cli2srv_goodput_bytes;
   fts->srv2cli_goodput_bytes = tmp.srv2cli_goodput_bytes - (*dst)->srv2cli_goodput_bytes;
 
+  fts->tcp_stats_s2d.pktRetr = tmp.tcp_stats_s2d.pktRetr - (*dst)->tcp_stats_s2d.pktRetr,
+    fts->tcp_stats_s2d.pktOOO = tmp.tcp_stats_s2d.pktOOO - (*dst)->tcp_stats_s2d.pktOOO,
+    fts->tcp_stats_s2d.pktLost = tmp.tcp_stats_s2d.pktLost - (*dst)->tcp_stats_s2d.pktLost,
+    fts->tcp_stats_s2d.pktKeepAlive = tmp.tcp_stats_s2d.pktKeepAlive - (*dst)->tcp_stats_s2d.pktKeepAlive;
+
+  fts->tcp_stats_d2s.pktRetr = tmp.tcp_stats_d2s.pktRetr - (*dst)->tcp_stats_d2s.pktRetr,
+    fts->tcp_stats_d2s.pktOOO = tmp.tcp_stats_d2s.pktOOO - (*dst)->tcp_stats_d2s.pktOOO,
+    fts->tcp_stats_d2s.pktLost = tmp.tcp_stats_d2s.pktLost - (*dst)->tcp_stats_d2s.pktLost,
+    fts->tcp_stats_d2s.pktKeepAlive = tmp.tcp_stats_d2s.pktKeepAlive - (*dst)->tcp_stats_d2s.pktKeepAlive;
+
   memcpy(*dst, &tmp, sizeof(tmp));
 
   return true;
@@ -2574,7 +2603,7 @@ bool Flow::isSSLProto() {
   u_int16_t lower = ndpi_get_lower_proto(ndpiDetectedProtocol);
 
   return(
-    (lower == NDPI_PROTOCOL_SSL) ||
+    (lower == NDPI_PROTOCOL_TLS) ||
     (lower == NDPI_PROTOCOL_MAIL_IMAPS) ||
     (lower == NDPI_PROTOCOL_MAIL_SMTPS) ||
     (lower == NDPI_PROTOCOL_MAIL_POPS)
@@ -2694,16 +2723,27 @@ void Flow::setTcpFlags(u_int8_t flags, bool src2dst_direction) {
 
 void Flow::updateTcpFlags(const struct bpf_timeval *when,
 			  u_int8_t flags, bool src2dst_direction) {
+  NetworkStats *cli_network_stats = NULL, *srv_network_stats = NULL;
+
   if(!iface->isPacketInterface())
     return; /* Use setTcpFlags for non-packet interfaces */
 
   iface->incFlagsStats(flags);
-  if(cli_host) cli_host->incFlagStats(src2dst_direction, flags);
-  if(srv_host) srv_host->incFlagStats(!src2dst_direction, flags);
+  if(cli_host) {
+    cli_host->incFlagStats(src2dst_direction, flags);
+    cli_network_stats = cli_host->getNetworkStats(cli_host->get_local_network_id());
+  }
+  if(srv_host) {
+    srv_host->incFlagStats(!src2dst_direction, flags);
+    srv_network_stats = srv_host->getNetworkStats(srv_host->get_local_network_id());
+  }
 
   if(flags == TH_SYN) {
     if(cli_host) cli_host->updateSynAlertsCounter(when->tv_sec, flags, this, true);
     if(srv_host) srv_host->updateSynAlertsCounter(when->tv_sec, flags, this, false);
+
+    if(cli_network_stats) cli_network_stats->updateSynAlertsCounter(when->tv_sec, true);
+    if(srv_network_stats) srv_network_stats->updateSynAlertsCounter(when->tv_sec, false);
   }
 
   if((flags & TH_SYN) && (((src2dst_tcp_flags | dst2src_tcp_flags) & TH_SYN) != TH_SYN))
@@ -2830,6 +2870,8 @@ u_int32_t Flow::getNextTcpSeq ( u_int8_t tcpFlags,
 /* *************************************** */
 
 void Flow::incTcpBadStats(bool src2dst_direction,
+			  FlowTrafficStats *fts,
+			  Host *cli, Host *srv,
 			  u_int32_t ooo_pkts,
 			  u_int32_t retr_pkts,
 			  u_int32_t lost_pkts,
@@ -2838,45 +2880,51 @@ void Flow::incTcpBadStats(bool src2dst_direction,
   return;
 #endif
 
-  TCPPacketStats * stats;
+  if(!ooo_pkts && !retr_pkts && !lost_pkts && !keep_alive_pkts)
+    return;
+  
   int16_t cli_network_id = -1, srv_network_id = -1;
   u_int32_t cli_asn = (u_int32_t)-1, srv_asn = (u_int32_t)-1;
   AutonomousSystem *cli_as = NULL, *srv_as = NULL;
   NetworkStats *cli_network_stats = NULL, *srv_network_stats = NULL;
   bool cli_and_srv_in_same_subnet = false, cli_and_srv_in_same_as = false;
 
-  if(src2dst_direction)
-    stats = &tcp_stats_s2d;
-  else
-    stats = &tcp_stats_d2s;
-
-  stats->pktKeepAlive += keep_alive_pkts;
-  stats->pktRetr += retr_pkts;
-  stats->pktOOO += ooo_pkts;
-  stats->pktLost += lost_pkts;
-
-  if(cli_host) {
-    cli_network_id = cli_host->get_local_network_id();
-    cli_network_stats = cli_host->getNetworkStats(cli_network_id);
-    cli_asn = cli_host->get_asn();
-    cli_as = cli_host->get_as();
+  if(fts) {
+    TCPPacketStats * cur_stats;
 
     if(src2dst_direction)
-      cli_host->incSentTcp(ooo_pkts, retr_pkts, lost_pkts, keep_alive_pkts);
+      cur_stats = &fts->tcp_stats_s2d;
     else
-      cli_host->incRcvdTcp(ooo_pkts, retr_pkts, lost_pkts, keep_alive_pkts);
+      cur_stats = &fts->tcp_stats_d2s;
+
+    cur_stats->pktKeepAlive += keep_alive_pkts;
+    cur_stats->pktRetr += retr_pkts;
+    cur_stats->pktOOO += ooo_pkts;
+    cur_stats->pktLost += lost_pkts;
   }
 
-  if(srv_host) {
-    srv_network_id = srv_host->get_local_network_id();
-    srv_network_stats = srv_host->getNetworkStats(srv_network_id);
-    srv_asn = srv_host->get_asn();
-    srv_as = srv_host->get_as();
+  if(cli) {
+    cli_network_id = cli->get_local_network_id();
+    cli_network_stats = cli->getNetworkStats(cli_network_id);
+    cli_asn = cli->get_asn();
+    cli_as = cli->get_as();
 
     if(src2dst_direction)
-      srv_host->incRcvdTcp(ooo_pkts, retr_pkts, lost_pkts, keep_alive_pkts);
+      cli->incSentTcp(ooo_pkts, retr_pkts, lost_pkts, keep_alive_pkts);
     else
-      srv_host->incSentTcp(ooo_pkts, retr_pkts, lost_pkts, keep_alive_pkts);
+      cli->incRcvdTcp(ooo_pkts, retr_pkts, lost_pkts, keep_alive_pkts);
+  }
+
+  if(srv) {
+    srv_network_id = srv->get_local_network_id();
+    srv_network_stats = srv->getNetworkStats(srv_network_id);
+    srv_asn = srv->get_asn();
+    srv_as = srv->get_as();
+
+    if(src2dst_direction)
+      srv->incRcvdTcp(ooo_pkts, retr_pkts, lost_pkts, keep_alive_pkts);
+    else
+      srv->incSentTcp(ooo_pkts, retr_pkts, lost_pkts, keep_alive_pkts);
   }
 
   if(cli_network_id >= 0 && (cli_network_id == srv_network_id))
@@ -2946,73 +2994,73 @@ void Flow::updateTcpSeqNum(const struct bpf_timeval *when,
 				 payload_Len);
 
   if(src2dst_direction) {
-    if(debug) ntop->getTrace()->traceEvent(TRACE_WARNING, "[src2dst][last: %u][next: %u]", tcp_stats_s2d.last, tcp_stats_s2d.next);
+    if(debug) ntop->getTrace()->traceEvent(TRACE_WARNING, "[src2dst][last: %u][next: %u]", tcp_seq_s2d.last, tcp_seq_s2d.next);
 
     if(window > 0) srv2cli_window = window; /* Note the window is reverted */
-    if(tcp_stats_s2d.next > 0) {
-      if((tcp_stats_s2d.next != seq_num) /* If equal, seq_num is the expected seq_num as determined with prev. segment */
-	 && (tcp_stats_s2d.next != (seq_num - 1))) {
-	if((seq_num == tcp_stats_s2d.next - 1)
+    if(tcp_seq_s2d.next > 0) {
+      if((tcp_seq_s2d.next != seq_num) /* If equal, seq_num is the expected seq_num as determined with prev. segment */
+	 && (tcp_seq_s2d.next != (seq_num - 1))) {
+	if((seq_num == tcp_seq_s2d.next - 1)
 	   && (payload_Len == 0 || payload_Len == 1)
 	   && ((flags & (TH_SYN|TH_FIN|TH_RST)) == 0)) {
 	  if(debug) ntop->getTrace()->traceEvent(TRACE_WARNING, "[src2dst] Packet KeepAlive");
 	  cnt_keep_alive++;
-	} else if(tcp_stats_s2d.last == seq_num) {
-          if (tcp_stats_s2d.next != tcp_stats_s2d.last) {
+	} else if(tcp_seq_s2d.last == seq_num) {
+          if (tcp_seq_s2d.next != tcp_seq_s2d.last) {
 	    cnt_retx++;
 	    if(debug) ntop->getTrace()->traceEvent(TRACE_WARNING, "[src2dst] Packet retransmission");
           }
-	} else if((tcp_stats_s2d.last > seq_num)
-		  && (seq_num < tcp_stats_s2d.next)) {
+	} else if((tcp_seq_s2d.last > seq_num)
+		  && (seq_num < tcp_seq_s2d.next)) {
 	  cnt_lost++;
-	  if(debug) ntop->getTrace()->traceEvent(TRACE_WARNING, "[src2dst] Packet lost [last: %u][act: %u]", tcp_stats_s2d.last, seq_num);
+	  if(debug) ntop->getTrace()->traceEvent(TRACE_WARNING, "[src2dst] Packet lost [last: %u][act: %u]", tcp_seq_s2d.last, seq_num);
 	} else {
 	  cnt_ooo++;
-	  update_last_seqnum = ((seq_num - 1) > tcp_stats_s2d.last) ? true : false;
-	  if(debug) ntop->getTrace()->traceEvent(TRACE_WARNING, "[src2dst] Packet OOO [last: %u][act: %u]", tcp_stats_s2d.last, seq_num);
+	  update_last_seqnum = ((seq_num - 1) > tcp_seq_s2d.last) ? true : false;
+	  if(debug) ntop->getTrace()->traceEvent(TRACE_WARNING, "[src2dst] Packet OOO [last: %u][act: %u]", tcp_seq_s2d.last, seq_num);
 	}
       }
     }
 
-    tcp_stats_s2d.next = next_seq_num;
-    if(update_last_seqnum) tcp_stats_s2d.last = seq_num;
+    tcp_seq_s2d.next = next_seq_num;
+    if(update_last_seqnum) tcp_seq_s2d.last = seq_num;
   } else {
-    if(debug) ntop->getTrace()->traceEvent(TRACE_WARNING, "[dst2src][last: %u][next: %u]", tcp_stats_d2s.last, tcp_stats_d2s.next);
+    if(debug) ntop->getTrace()->traceEvent(TRACE_WARNING, "[dst2src][last: %u][next: %u]", tcp_seq_d2s.last, tcp_seq_d2s.next);
 
     if(window > 0) cli2srv_window = window; /* Note the window is reverted */
-    if(tcp_stats_d2s.next > 0) {
-      if((tcp_stats_d2s.next != seq_num)
-	 && (tcp_stats_d2s.next != (seq_num-1))) {
-	if((seq_num == tcp_stats_d2s.next - 1)
+    if(tcp_seq_d2s.next > 0) {
+      if((tcp_seq_d2s.next != seq_num)
+	 && (tcp_seq_d2s.next != (seq_num-1))) {
+	if((seq_num == tcp_seq_d2s.next - 1)
 	   && (payload_Len == 0 || payload_Len == 1)
 	   && ((flags & (TH_SYN|TH_FIN|TH_RST)) == 0)) {
 	  if(debug) ntop->getTrace()->traceEvent(TRACE_WARNING, "[dst2src] Packet KeepAlive");
 	  cnt_keep_alive++;
-	} else if(tcp_stats_d2s.last == seq_num) {
-          if (tcp_stats_d2s.next != tcp_stats_d2s.last) {
+	} else if(tcp_seq_d2s.last == seq_num) {
+          if (tcp_seq_d2s.next != tcp_seq_d2s.last) {
 	    cnt_retx++;
 	    if(debug) ntop->getTrace()->traceEvent(TRACE_WARNING, "[dst2src] Packet retransmission");
           }
 	  // bytes
-	} else if((tcp_stats_d2s.last > seq_num)
-		  && (seq_num < tcp_stats_d2s.next)) {
+	} else if((tcp_seq_d2s.last > seq_num)
+		  && (seq_num < tcp_seq_d2s.next)) {
 	  cnt_lost++;
-	  if(debug) ntop->getTrace()->traceEvent(TRACE_WARNING, "[dst2src] Packet lost [last: %u][act: %u]", tcp_stats_d2s.last, seq_num);
+	  if(debug) ntop->getTrace()->traceEvent(TRACE_WARNING, "[dst2src] Packet lost [last: %u][act: %u]", tcp_seq_d2s.last, seq_num);
 	} else {
 	  cnt_ooo++;
-	  update_last_seqnum = ((seq_num - 1) > tcp_stats_d2s.last) ? true : false;
-	  if(debug) ntop->getTrace()->traceEvent(TRACE_WARNING, "[dst2src] [last: %u][next: %u]", tcp_stats_d2s.last, tcp_stats_d2s.next);
-	  if(debug) ntop->getTrace()->traceEvent(TRACE_WARNING, "[dst2src] Packet OOO [last: %u][act: %u]", tcp_stats_d2s.last, seq_num);
+	  update_last_seqnum = ((seq_num - 1) > tcp_seq_d2s.last) ? true : false;
+	  if(debug) ntop->getTrace()->traceEvent(TRACE_WARNING, "[dst2src] [last: %u][next: %u]", tcp_seq_d2s.last, tcp_seq_d2s.next);
+	  if(debug) ntop->getTrace()->traceEvent(TRACE_WARNING, "[dst2src] Packet OOO [last: %u][act: %u]", tcp_seq_d2s.last, seq_num);
 	}
       }
     }
 
-    tcp_stats_d2s.next = next_seq_num;
-    if(update_last_seqnum) tcp_stats_d2s.last = seq_num;
+    tcp_seq_d2s.next = next_seq_num;
+    if(update_last_seqnum) tcp_seq_d2s.last = seq_num;
   }
 
   if(cnt_keep_alive || cnt_lost || cnt_ooo || cnt_retx)
-    incTcpBadStats(src2dst_direction, cnt_ooo, cnt_retx, cnt_lost, cnt_keep_alive);
+    incTcpBadStats(src2dst_direction, getFlowTrafficStats(), get_cli_host(), get_srv_host(), cnt_ooo, cnt_retx, cnt_lost, cnt_keep_alive);
 }
 
 /* *************************************** */
@@ -3209,6 +3257,7 @@ void Flow::dissectHTTP(bool src2dst_direction, char *payload, u_int16_t payload_
 	      char *end = strchr(buf, ')');
 
 	      if(end) {
+        /* TODO: move into nDPI */
 		OperatingSystem os = os_unknown;
 
 		end[0] = '\0';
@@ -3236,7 +3285,7 @@ void Flow::dissectHTTP(bool src2dst_direction, char *payload, u_int16_t payload_
 
 		  if(!(get_cli_ip_addr()->isBroadcastAddress()
 		       || get_cli_ip_addr()->isMulticastAddress()))
-		  cli_host->getMac()->setOperatingSystem(os);
+		  cli_host->setOS(os);
 		}
 	      }
 	    }
@@ -3698,6 +3747,9 @@ FlowStatus Flow::getFlowStatus() {
   if(isBlacklistedFlow())
     return status_blacklisted;
 
+  if(get_protocol_breed() == NDPI_PROTOCOL_DANGEROUS)
+    return status_potentially_dangerous;
+
   if(!isDeviceAllowedProtocol())
     return status_device_protocol_not_allowed;
 
@@ -3710,7 +3762,7 @@ FlowStatus Flow::getFlowStatus() {
 
 #ifndef HAVE_NEDGE
   /* All flows */
-  issues_count = tcp_stats_s2d.pktRetr + tcp_stats_s2d.pktOOO + tcp_stats_s2d.pktLost;
+  issues_count = stats.tcp_stats_s2d.pktRetr + stats.tcp_stats_s2d.pktOOO + stats.tcp_stats_s2d.pktLost;
   if(issues_count > CONST_TCP_CHECK_ISSUES_THRESHOLD) {
     if(issues_count > (stats.cli2srv_packets / CONST_TCP_CHECK_SEVERE_ISSUES_RATIO))
       return status_tcp_severe_connection_issues;
@@ -3718,7 +3770,7 @@ FlowStatus Flow::getFlowStatus() {
       return status_tcp_connection_issues;
   }
 
-  issues_count = tcp_stats_d2s.pktRetr + tcp_stats_d2s.pktOOO + tcp_stats_d2s.pktLost;
+  issues_count = stats.tcp_stats_d2s.pktRetr + stats.tcp_stats_d2s.pktOOO + stats.tcp_stats_d2s.pktLost;
   if(issues_count > CONST_TCP_CHECK_ISSUES_THRESHOLD) {
     if(issues_count > (stats.srv2cli_packets / CONST_TCP_CHECK_SEVERE_ISSUES_RATIO))
       return status_tcp_severe_connection_issues;
@@ -3749,7 +3801,7 @@ FlowStatus Flow::getFlowStatus() {
       } else {
 	/* 3WH is over */
 	switch(l7proto) {
-	case NDPI_PROTOCOL_SSL:
+	case NDPI_PROTOCOL_TLS:
 	  /*
 	    CNs are NOT case sensitive as per RFC 5280
 	    so we use ...case... functions to do the comparisions
@@ -3964,14 +4016,31 @@ void Flow::setParsedeBPFInfo(const ParsedeBPF * const ebpf, bool src2dst_directi
   }
 
   updateJA3();
+  updateHASSH(true /* AS client */);
+  updateHASSH(false /* AS server */);
 }
 
 /* ***************************************************** */
 
 void Flow::updateJA3() {
-  if(cli_host && protos.ssl.ja3.client_hash)
-    cli_host->getSSLFingerprint()->update(protos.ssl.ja3.client_hash,
+  if(cli_host && isSSL() && protos.ssl.ja3.client_hash)
+    cli_host->getJA3Fingerprint()->update(protos.ssl.ja3.client_hash,
 					  cli_ebpf ? cli_ebpf->process_info.process_name : NULL);
+}
+
+/* ***************************************************** */
+
+void Flow::updateHASSH(bool as_client) {
+  if(!isSSH())
+    return;
+
+  Host *h = as_client ? get_cli_host() : get_srv_host();
+  const char *hassh = as_client ? protos.ssh.hassh.client_hash : protos.ssh.hassh.server_hash;
+  ParsedeBPF *pebpf = as_client ? cli_ebpf : srv_ebpf;
+  Fingerprint *fp;
+
+  if(h && hassh && hassh[0] != '\0' && (fp = h->getHASSHFingerprint()))
+    fp->update(hassh, pebpf ? pebpf->process_info.process_name : NULL);
 }
 
 /* ***************************************************** */

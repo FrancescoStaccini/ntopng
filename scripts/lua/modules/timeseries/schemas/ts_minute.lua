@@ -70,6 +70,13 @@ schema:addMetric("packets_ingress")
 schema:addMetric("packets_egress")
 schema:addMetric("packets_inner")
 
+-- ##############################################
+
+schema = ts_utils.newSchema("subnet:engaged_alerts", {step=60, metrics_type=ts_utils.metrics.gauge})
+schema:addTag("ifid")
+schema:addTag("subnet")
+schema:addMetric("alerts")
+
 -------------------------------------------------------
 -- INTERFACES SCHEMAS
 -------------------------------------------------------
@@ -191,6 +198,12 @@ schema:addMetric("packets")
 schema = ts_utils.newSchema("iface:nfq_pct", {step=60, rrd_fname="num_nfq_pct", metrics_type=ts_utils.metrics.gauge})
 schema:addTag("ifid")
 schema:addMetric("num_nfq_pct")
+
+-- ##############################################
+
+schema = ts_utils.newSchema("iface:engaged_alerts", {step=60, metrics_type=ts_utils.metrics.gauge})
+schema:addTag("ifid")
+schema:addMetric("alerts")
 
 -- ##############################################
 

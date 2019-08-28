@@ -181,16 +181,19 @@ class Utils {
 
   /* Bitmap functions */
   static inline bool bitmapIsSet(u_int64_t bitmap, u_int64_t v) {
-    return(((bitmap >> v) & 1U) ? true : false);
+    return(((bitmap >> v) & 1) ? true : false);
   }
   static inline u_int64_t bitmapSet(u_int64_t bitmap, u_int64_t v) {
-    bitmap |= 1U << v;
+    bitmap |= ((u_int64_t)1) << v;
     return(bitmap);
   }
   static inline u_int64_t bitmapClear(u_int64_t bitmap, u_int64_t v) {
-    bitmap &= ~(1U << v);
+    bitmap &= ~(((u_int64_t)1) << v);
     return(bitmap);
   }
+
+  static OperatingSystem getOSFromFingerprint(const char *fingerprint, const char*manuf, DeviceType devtype);
+  static DeviceType getDeviceTypeFromOsDetail(const char *os_detail);
 };
 
 #endif /* _UTILS_H_ */

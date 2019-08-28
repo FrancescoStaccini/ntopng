@@ -95,6 +95,10 @@ function ts_dump.subnet_update_rrds(when, ifstats, verbose)
 		      packets_ingress=sstats["tcpPacketStats.ingress"]["keep_alive"],
 		      packets_egress=sstats["tcpPacketStats.egress"]["keep_alive"],
 		      packets_inner=sstats["tcpPacketStats.inner"]["keep_alive"]}, when)
+
+     ts_utils.append("subnet:engaged_alerts",
+		     {ifid=ifstats.id, subnet=subnet,
+		      alerts=sstats["engaged_alerts"]}, when)
   end
 end
 
@@ -107,6 +111,7 @@ function ts_dump.iface_update_general_stats(when, ifstats, verbose)
   ts_utils.append("iface:devices", {ifid=ifstats.id, num_devices=ifstats.stats.devices}, when, verbose)
   ts_utils.append("iface:flows", {ifid=ifstats.id, num_flows=ifstats.stats.flows}, when, verbose)
   ts_utils.append("iface:http_hosts", {ifid=ifstats.id, num_hosts=ifstats.stats.http_hosts}, when, verbose)
+  ts_utils.append("iface:engaged_alerts", {ifid=ifstats.id, alerts=ifstats.stats.engaged_alerts}, when, verbose)
 end
 
 function ts_dump.iface_update_l4_stats(when, ifstats, verbose)

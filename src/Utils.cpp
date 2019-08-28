@@ -616,7 +616,7 @@ const char* Utils::flowStatus2str(FlowStatus s, AlertType *aType, AlertLevel *aL
     *aType = alert_suspicious_activity;
     return("Invalid DNS query");
   case status_remote_to_remote:
-    *aType = alert_flow_remote_to_remote;
+    *aType = alert_remote_to_remote;
     return("Remote client and remote server");
   case status_web_mining_detected:
     *aType = alert_flow_web_mining;
@@ -634,6 +634,11 @@ const char* Utils::flowStatus2str(FlowStatus s, AlertType *aType, AlertLevel *aL
     *aType = alert_device_protocol_not_allowed;
     *aLevel = alert_level_warning;
     return("Protocol not allowed for this device type");
+  case status_potentially_dangerous:
+    *aType = alert_potentially_dangerous_protocol;
+    *aLevel = alert_level_error;
+    return("Potentially dangerous protocol");
+    break;
   case status_elephant_local_to_remote:
     return("Elephant flow (local to remote)");
     break;
@@ -1792,6 +1797,7 @@ bool Utils::httpGetPost(lua_State* vm, char *url, char *username,
   if(curl) {
     DownloadState *state = NULL;
     ProgressState progressState;
+    CURLcode curlcode;
     long response_code;
     char *content_type, *redirection;
     char ua[64];
@@ -1886,7 +1892,7 @@ bool Utils::httpGetPost(lua_State* vm, char *url, char *username,
 
     if(vm) lua_newtable(vm);
 
-    if(curl_easy_perform(curl) == CURLE_OK) {
+    if((curlcode = curl_easy_perform(curl)) == CURLE_OK) {
       readCurlStats(curl, stats, vm);
 	
       if(return_content && vm) {
@@ -1895,8 +1901,11 @@ bool Utils::httpGetPost(lua_State* vm, char *url, char *username,
       }
       
       ret = true;
-    } else
+    } else {
+      if(vm)
+        lua_push_str_table_entry(vm, "ERROR", curl_easy_strerror(curlcode));
       ret = false;
+    }
 
     if(vm) {
       if(curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code) == CURLE_OK)
@@ -2504,7 +2513,7 @@ in_addr_t Utils::inet_addr(const char *cp) {
 /* ****************************************************** */
 
 char* Utils::intoaV4(unsigned int addr, char* buf, u_short bufLen) {
-  char *cp, *retStr;
+  char *cp;
   int n;
 
   cp = &buf[bufLen];
@@ -2522,14 +2531,12 @@ char* Utils::intoaV4(unsigned int addr, char* buf, u_short bufLen) {
       if(byte > 0)
 	*--cp = byte + '0';
     }
-    *--cp = '.';
+    if(n > 1)
+      *--cp = '.';
     addr >>= 8;
   } while (--n > 0);
 
-  /* Convert the string to lowercase */
-  retStr = (char*)(cp+1);
-
-  return(retStr);
+  return(cp);
 }
 
 /* ****************************************************** */
@@ -3863,10 +3870,11 @@ void Utils::containerInfoLua(lua_State *vm, const ContainerInfo * const cont) {
 
 const char* Utils::periodicityToScriptName(ScriptPeriodicity p) {
   switch(p) {
-  case 0: return("min");
-  case 1: return("5mins");
-  case 2: return("hour");
-  case 3: return("day");
+  case aperiodic_script:    return("aperiodic");
+  case minute_script:       return("min");
+  case five_minute_script:  return("5mins");
+  case hour_script:         return("hour");
+  case day_script:          return("day");
   default:
     ntop->getTrace()->traceEvent(TRACE_WARNING, "Unknown periodicity value: %d", p);
     return("");
@@ -3877,12 +3885,85 @@ const char* Utils::periodicityToScriptName(ScriptPeriodicity p) {
 
 int Utils::periodicityToSeconds(ScriptPeriodicity p) {
   switch(p) {
-  case 0: return(60);
-  case 1: return(300);
-  case 2: return(3600);
-  case 3: return(86400);
+  case aperiodic_script:    return(0);
+  case minute_script:       return(60);
+  case five_minute_script:  return(300);
+  case hour_script:         return(3600);
+  case day_script:          return(86400);
   default:
     ntop->getTrace()->traceEvent(TRACE_WARNING, "Unknown periodicity value: %d", p);
     return(0);
   }
+}
+
+/* ****************************************************** */
+
+/* TODO move into nDPI */
+OperatingSystem Utils::getOSFromFingerprint(const char *fingerprint, const char*manuf, DeviceType devtype) {
+  /*
+    Inefficient with many signatures but ok for the
+    time being that we have little data
+  */
+  if(!fingerprint)
+    return(os_unknown);
+
+  if(!strcmp(fingerprint,      "017903060F77FC"))
+    return(os_ios);
+  else if((!strcmp(fingerprint, "017903060F77FC5F2C2E"))
+	  || (!strcmp(fingerprint, "0103060F775FFC2C2E2F"))
+	  || (!strcmp(fingerprint, "0103060F775FFC2C2E"))
+	  )
+    return(os_macos);
+  else if((!strcmp(fingerprint, "0103060F1F212B2C2E2F79F9FC"))
+	  || (!strcmp(fingerprint, "010F03062C2E2F1F2179F92B"))
+	  )
+    return(os_windows);
+  else if((!strcmp(fingerprint, "0103060C0F1C2A"))
+	  || (!strcmp(fingerprint, "011C02030F06770C2C2F1A792A79F921FC2A"))
+	  )
+    return(os_linux); /* Android is also linux */
+  else if((!strcmp(fingerprint, "0603010F0C2C51452B1242439607"))
+	  || (!strcmp(fingerprint, "01032C06070C0F16363A3B45122B7751999A"))
+	  )
+    return(os_laserjet);
+  else if(!strcmp(fingerprint, "0102030F060C2C"))
+    return(os_apple_airport);
+  else if(!strcmp(fingerprint, "01792103060F1C333A3B77"))
+    return(os_android);
+
+  /* Below you can find ambiguous signatures */
+  if(manuf) {
+    if(!strcmp(fingerprint, "0103063633")) {
+      if(strstr(manuf, "Apple"))
+        return(os_macos);
+      else if(devtype == device_unknown)
+        return(os_windows);
+    }
+  }
+
+  return(os_unknown);
+}
+/*
+  Missing OS mapping
+
+  011C02030F06770C2C2F1A792A
+  010F03062C2E2F1F2179F92BFC
+*/
+
+/* ****************************************************** */
+
+/* TODO move into nDPI? */
+DeviceType Utils::getDeviceTypeFromOsDetail(const char *os) {
+  if(strcasestr(os, "iPhone")
+      || strcasestr(os, "Android")
+      || strcasestr(os, "mobile"))
+    return(device_phone);
+  else if(strcasestr(os, "Mac OS")
+      || strcasestr(os, "Windows")
+      || strcasestr(os, "Linux"))
+    return(device_workstation);
+  else if(strcasestr(os, "iPad") || strcasestr(os, "tablet"))
+    return(device_tablet);
+
+  return(device_unknown);
 }

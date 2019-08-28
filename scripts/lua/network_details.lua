@@ -121,6 +121,7 @@ if page == "historical" then
       timeseries = {
 	 {schema="subnet:traffic",             label=i18n("traffic")},
 	 {schema="subnet:broadcast_traffic",   label=i18n("broadcast_traffic")},
+	 {schema="subnet:engaged_alerts",      label=i18n("show_alerts.engaged_alerts")},
 	 {schema="subnet:tcp_retransmissions", label=i18n("graphs.tcp_packets_retr"), nedge_exclude=1},
 	 {schema="subnet:tcp_out_of_order",    label=i18n("graphs.tcp_packets_ooo"), nedge_exclude=1},
 	 {schema="subnet:tcp_lost",            label=i18n("graphs.tcp_packets_lost"), nedge_exclude=1},
@@ -161,7 +162,7 @@ elseif(page == "alerts") then
 
     drawAlertSourceSettings("network", network_name,
 	i18n("show_alerts.network_delete_config_btn", {network=network_name}), "show_alerts.network_delete_config_confirm",
-	"network_details.lua", {network=network})
+	"network_details.lua", {network=network}, network_name, "network")
 
 elseif page == "traffic_report" then
     dofile(dirs.installdir .. "/pro/scripts/lua/enterprise/traffic_report.lua")

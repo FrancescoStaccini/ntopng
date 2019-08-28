@@ -24,7 +24,7 @@
 /* *************************************** */
 
 Host::Host(NetworkInterface *_iface, char *ipAddress, u_int16_t _vlanId) : GenericHashEntry(_iface),
-									   AlertableEntity(alert_entity_host) {
+									   AlertableEntity(_iface, alert_entity_host) {
   ip.set(ipAddress);
   initialize(NULL, _vlanId, true);
 }
@@ -32,7 +32,7 @@ Host::Host(NetworkInterface *_iface, char *ipAddress, u_int16_t _vlanId) : Gener
 /* *************************************** */
 
 Host::Host(NetworkInterface *_iface, Mac *_mac,
-	   u_int16_t _vlanId, IpAddress *_ip) : GenericHashEntry(_iface), AlertableEntity(alert_entity_host) {
+	   u_int16_t _vlanId, IpAddress *_ip) : GenericHashEntry(_iface), AlertableEntity(_iface, alert_entity_host) {
   ip.set(_ip);
 
 #ifdef BROADCAST_DEBUG
@@ -140,6 +140,7 @@ void Host::initialize(Mac *_mac, u_int16_t _vlanId, bool init_all) {
   stats_shadow = NULL;
   data_delete_requested = false, stats_reset_requested = false;
   last_stats_reset = ntop->getLastStatsReset(); /* assume fresh stats, may be changed by deserialize */
+  os = os_unknown;
 
   // readStats(); - Commented as if put here it's too early and the key is not yet set
 
@@ -171,18 +172,12 @@ void Host::initialize(Mac *_mac, u_int16_t _vlanId, bool init_all) {
   reloadHostBlacklist();
   is_dhcp_host = false;
 
-  trigger_host_alerts = false;
-
   PROFILING_SUB_SECTION_ENTER(iface, "Host::initialize: new AlertCounter", 17);
   syn_flood_attacker_alert  = new AlertCounter();
   syn_flood_victim_alert    = new AlertCounter();
   flow_flood_attacker_alert = new AlertCounter();
   flow_flood_victim_alert = new AlertCounter();
   PROFILING_SUB_SECTION_EXIT(iface, 17);
-
-  PROFILING_SUB_SECTION_ENTER(iface, "Host::initialize: refreshHostAlertPrefs", 19);
-  refreshHostAlertPrefs();
-  PROFILING_SUB_SECTION_EXIT(iface, 19);
 
   disabled_flow_status = 0;
   refreshDisableFlowAlertTypes();
@@ -191,7 +186,6 @@ void Host::initialize(Mac *_mac, u_int16_t _vlanId, bool init_all) {
     char country_name[64];
     
     if((as = iface->getAS(&ip, true /* Create if missing */, true /* Inline call */)) != NULL) {
-      as->incUses();
       asn = as->get_asn();
       asname = as->get_asname();
     }
@@ -207,26 +201,6 @@ void Host::initialize(Mac *_mac, u_int16_t _vlanId, bool init_all) {
   setEntityValue(get_hostkey(buf, sizeof(buf), true));
 
   is_in_broadcast_domain = iface->isLocalBroadcastDomainHost(this, true /* Inline call */);
-}
-
-/* *************************************** */
-
-void Host::refreshHostAlertPrefs() {
-  if(!ntop->getPrefs()->are_alerts_disabled()
-      && (!ip.isEmpty())) {
-    char *key, ip_buf[48], rsp[64], rkey[128];
-
-    /* This value always contains vlan information */
-    key = get_hostkey(ip_buf, sizeof(ip_buf), true);
-
-    if(key) {
-      snprintf(rkey, sizeof(rkey), CONST_SUPPRESSED_ALERT_PREFS, getInterface()->get_id());
-      if(ntop->getRedis()->hashGet(rkey, key, rsp, sizeof(rsp)) == 0)
-	trigger_host_alerts = ((strcmp(rsp, "false") == 0) ? 0 : 1);
-      else
-	trigger_host_alerts = true;
-    }
-  }
 }
 
 /* *************************************** */
@@ -407,7 +381,7 @@ void Host::lua(lua_State* vm, AddressTree *ptree,
 
   lua_push_str_table_entry(vm, "mac", Utils::formatMac(cur_mac ? cur_mac->get_mac() : NULL, buf, sizeof(buf)));
   lua_push_uint64_table_entry(vm, "devtype", isBroadcastDomainHost() && cur_mac ? cur_mac->getDeviceType() : device_unknown);
-  lua_push_uint64_table_entry(vm, "operatingSystem", cur_mac ? cur_mac->getOperatingSystem() : os_unknown);
+  lua_push_uint64_table_entry(vm, "operatingSystem", getOS());
 
   lua_push_bool_table_entry(vm, "privatehost", isPrivateHost());
   lua_push_bool_table_entry(vm, "hiddenFromTop", isHiddenFromTop());
@@ -435,17 +409,26 @@ void Host::lua(lua_State* vm, AddressTree *ptree,
   lua_push_uint64_table_entry(vm, "asn", asn);
   lua_push_uint64_table_entry(vm, "host_pool_id", host_pool_id);
   lua_push_str_table_entry(vm, "asname", asname ? asname : (char*)"");
-  lua_push_str_table_entry(vm, "os", get_os(buf, sizeof(buf)));
+  lua_push_int32_table_entry(vm, "os", getOS());
+  lua_push_str_table_entry(vm, "os_detail", getOSDetail(buf, sizeof(buf)));
 
   stats->lua(vm, mask_host, Utils::bool2DetailsLevel(verbose,host_details));
 
+  lua_push_uint64_table_entry(vm, "active_flows.as_client", getNumOutgoingFlows());
+  lua_push_uint64_table_entry(vm, "active_flows.as_server", getNumIncomingFlows());
   lua_push_uint64_table_entry(vm, "anomalous_flows.as_server", getTotalNumAnomalousIncomingFlows());
   lua_push_uint64_table_entry(vm, "anomalous_flows.as_client", getTotalNumAnomalousOutgoingFlows());
   lua_push_uint64_table_entry(vm, "unreachable_flows.as_server", getTotalNumUnreachableIncomingFlows());
   lua_push_uint64_table_entry(vm, "unreachable_flows.as_client", getTotalNumUnreachableOutgoingFlows());
   lua_push_uint64_table_entry(vm, "host_unreachable_flows.as_server", getTotalNumHostUnreachableIncomingFlows());
   lua_push_uint64_table_entry(vm, "host_unreachable_flows.as_client", getTotalNumHostUnreachableOutgoingFlows());
+  lua_push_uint64_table_entry(vm, "contacts.as_client", getNumActiveContactsAsClient());
+  lua_push_uint64_table_entry(vm, "contacts.as_server", getNumActiveContactsAsServer());
   lua_push_uint64_table_entry(vm, "total_alerts", stats->getTotalAlerts());
+
+  luaDNS(vm);
+  luaTCP(vm);
+  luaICMP(vm, get_ip()->isIPv4(), false);
 
 #ifdef NTOPNG_PRO
   lua_push_bool_table_entry(vm, "has_blocking_quota", has_blocking_quota);
@@ -512,7 +495,8 @@ void Host::lua(lua_State* vm, AddressTree *ptree,
 
   // ntop->getTrace()->traceEvent(TRACE_NORMAL, "[pkts_thpt: %.2f] [pkts_thpt_trend: %d]", pkts_thpt,pkts_thpt_trend);
 
-  fingerprints.ssl.lua("ssl_fingerprint", vm);
+  fingerprints.ja3.lua("ja3_fingerprint", vm);
+  fingerprints.hassh.lua("hassh_fingerprint", vm);
 
   if(verbose) {
     if(hasAnomalies()) luaAnomalies(vm);
@@ -618,7 +602,7 @@ char * Host::getMDNSTXTName(char * const buf, ssize_t buf_len) {
 
 /* ***************************************** */
 
-char * Host::get_os(char * const buf, ssize_t buf_len) {
+const char * Host::getOSDetail(char * const buf, ssize_t buf_len) {
   if(buf && buf_len)
     buf[0] = '\0';
 
@@ -691,8 +675,7 @@ void Host::serialize(json_object *my_object, DetailsLevel details_level) {
     get_name(buf, sizeof(buf), false);
     if(strlen(buf)) json_object_object_add(my_object, "symbolic_name", json_object_new_string(buf));
     if(asname)      json_object_object_add(my_object, "asname",    json_object_new_string(asname ? asname : (char*)""));
-    get_os(buf, sizeof(buf));
-    if(strlen(buf)) json_object_object_add(my_object, "os",        json_object_new_string(buf));
+    json_object_object_add(my_object, "os_id", json_object_new_int(getOS()));
 
     json_object_object_add(my_object, "localHost", json_object_new_boolean(isLocalHost()));
     json_object_object_add(my_object, "systemHost", json_object_new_boolean(isSystemHost()));
@@ -916,6 +899,8 @@ void Host::luaUsedQuotas(lua_State* vm) {
 /* *************************************** */
 
 bool Host::incFlowAlertHits(time_t when) {
+  stats->incNumFlowAlerts();
+
   if(flow_alert_counter
      || (flow_alert_counter = new(std::nothrow) FlowAlertCounter(CONST_MAX_FLOW_ALERTS_PER_SECOND, CONST_MAX_THRESHOLD_CROSS_DURATION))) {
     return flow_alert_counter->incHits(when);
@@ -1140,9 +1125,10 @@ bool Host::statsResetRequested() {
 
 void Host::updateStats(update_hosts_stats_user_data_t *update_hosts_stats_user_data) {
   struct timeval *tv = update_hosts_stats_user_data->tv;
+  Mac *cur_mac = getMac();
 
   if(get_state() == hash_entry_state_idle) {
-    set_state(hash_entry_state_ready_to_be_purged);
+    set_hash_entry_state_ready_to_be_purged();
 
     if(getNumTriggeredAlerts()
        && (update_hosts_stats_user_data->acle
@@ -1161,6 +1147,10 @@ void Host::updateStats(update_hosts_stats_user_data_t *update_hosts_stats_user_d
   checkDataReset();
   checkStatsReset();
   checkBroadcastDomain();
+
+  /* OS detection */
+  if((os == os_unknown) && cur_mac && cur_mac->getFingerprint())
+    os = Utils::getOSFromFingerprint(cur_mac->getFingerprint(), cur_mac->get_manufacturer(), cur_mac->getDeviceType());
 
   num_active_flows_as_client.computeAnomalyIndex(tv->tv_sec),
     num_active_flows_as_server.computeAnomalyIndex(tv->tv_sec),

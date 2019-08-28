@@ -118,7 +118,7 @@ int main(int argc, char *argv[])
   char path[MAX_PATH];
   FILE *fd;
   ThreadedActivity *boot_activity;
-    
+
 #ifdef WIN32
   initWinsock32();
 #else

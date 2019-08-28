@@ -24,7 +24,7 @@ print [[
     <script>
     var url_update = "]]
 print (ntop.getHttpPrefix())
-print [[/lua/get_grouped_hosts_data.lua?grouped_by=pool_id]]
+print [[/lua/get_pools_data.lua]]
 
 print ('";')
 ntop.dumpFile(dirs.installdir .. "/httpdocs/inc/pool_stats_id.inc")
@@ -55,6 +55,9 @@ print ('sort: [ ["' .. getDefaultTableSort("pool_id") ..'","' .. getDefaultTable
 
 print [[
         showPagination: true,
+        buttons: [
+         '<a href="]] print(ntop.getHttpPrefix()) print[[/lua/if_stats.lua?ifid=8&page=pools#create" class="add-on btn"><i class="fa fa-plus" aria-hidden="true"></i></a>'
+        ],
         columns: [
         {
             title: "Key",
@@ -66,7 +69,7 @@ print [[
         },{
             title: "]] print(i18n(ternary(have_nedge, "nedge.user", "host_pools.pool_name"))) print[[",
             field: "column_id",
-            sortable: false,
+            sortable: true,
             css: {
                 textAlign: 'left'
             }
@@ -92,15 +95,6 @@ print[[
             }
         },
         {
-            title: "]] print(i18n("flows")) print[[",
-            field: "column_num_flows",
-            sortable: true,
-            hidden: true, /* Sum of flows from grouped hosts can contain duplicates providing wrong a information */
-            css: {
-                textAlign: 'center'
-            }
-        },
-        {
             title: "]] print(i18n("if_stats_overview.blocked_flows")) print[[",
             field: "column_num_dropped_flows",
             sortable: true,
@@ -111,14 +105,6 @@ else
    print("true")
 end
 print[[,
-            css: {
-                textAlign: 'center'
-            }
-        },
-        {
-            title: "]] print(i18n("show_alerts.alerts")) print[[",
-            field: "column_alerts",
-            sortable: true,
             css: {
                 textAlign: 'center'
             }

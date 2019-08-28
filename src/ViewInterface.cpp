@@ -214,6 +214,15 @@ Flow* ViewInterface::findFlowByKey(u_int32_t key, AddressTree *allowed_hosts) {
 
 /* **************************************************** */
 
+void ViewInterface::sumStats(TcpFlowStats *_tcpFlowStats, EthStats *_ethStats,
+			     LocalTrafficStats *_localStats, nDPIStats *_ndpiStats,
+			     PacketStats *_pktStats, TcpPacketStats *_tcpPacketStats) const {
+  for(u_int8_t s = 0; s < num_viewed_interfaces; s++)
+    viewed_interfaces[s]->sumStats(_tcpFlowStats, _ethStats, _localStats, _ndpiStats, _pktStats, _tcpPacketStats);
+}
+
+/* **************************************************** */
+
 Flow* ViewInterface::findFlowByTuple(u_int16_t vlan_id,
 				     IpAddress *src_ip,  IpAddress *dst_ip,
 				     u_int16_t src_port, u_int16_t dst_port,
@@ -250,7 +259,7 @@ static bool viewed_flows_walker(GenericHashEntry *flow, void *user_data, bool *m
   if(acked_to_purge) {
     /* We can set the 'ready to be purged' state on behalf of the underlying viewed interface.
        It is safe as this view is in sync with the viewed interfaces by bean of acked_to_purge */
-    f->set_state(hash_entry_state_ready_to_be_purged);
+    f->set_hash_entry_state_ready_to_be_purged();
   }
 
   f->dumpFlow(tv, iface);
@@ -302,6 +311,14 @@ static bool viewed_flows_walker(GenericHashEntry *flow, void *user_data, bool *m
 		      partials.srv2cli_bytes + partials.cli2srv_bytes,
 		      partials.srv2cli_packets + partials.cli2srv_packets,
 		      24 /* 8 Preamble + 4 CRC + 12 IFG */ + 14 /* Ethernet header */);
+
+      Flow::incTcpBadStats(true /* src2dst */, NULL, cli_host, srv_host,
+			   partials.tcp_stats_s2d.pktOOO, partials.tcp_stats_s2d.pktRetr,
+			   partials.tcp_stats_s2d.pktLost, partials.tcp_stats_s2d.pktKeepAlive);
+
+      Flow::incTcpBadStats(false /* dst2src */, NULL, cli_host, srv_host,
+			   partials.tcp_stats_d2s.pktOOO, partials.tcp_stats_d2s.pktRetr,
+			   partials.tcp_stats_d2s.pktLost, partials.tcp_stats_d2s.pktKeepAlive);
     }
   }
 

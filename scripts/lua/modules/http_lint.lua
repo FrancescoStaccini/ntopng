@@ -208,7 +208,7 @@ end
 
 local function validatePassword(p)
    -- A password (e.g. used in ntopng authentication)
-   return validateSingleWord(p)
+   return validateUnquoted(p)
 end
 
 local function validateAbsolutePath(p)
@@ -242,6 +242,12 @@ local function validateOperator(mode)
    local modes = {"gt", "eq", "lt"}
 
    return validateChoice(modes, mode)
+end
+
+local function validateAlertValue(value)
+  return validateEmpty(value) or
+    validateNumber(value) or
+    validateOnOff(value)
 end
 
 local function validateHttpMode(mode)
@@ -320,6 +326,12 @@ local function validateSendersReceivers(mode)
    local modes = {"senders", "receivers"}
 
    return validateChoice(modes, mode)
+end
+
+local function validateFingerprintType(ft)
+   local fingerprint_types = {"ja3", "hassh"}
+
+   return validateChoice(fingerprint_types, ft)
 end
 
 local function validateClientOrServer(mode)
@@ -950,7 +962,7 @@ local known_parameters = {
    ["referer"]                 = validateUnquoted,             -- An URL referer
    ["url"]                     = validateUnquoted,             -- An URL
    ["label"]                   = validateUnquoted,             -- A device label
-   ["os"]                      = validateUnquoted,             -- An Operating System string
+   ["os"]                      = validateNumber,               -- An Operating System id
    ["info"]                    = validateUnquoted,             -- An information message
    ["entity_val"]              = validateUnquoted,             -- An alert entity value
    ["full_name"]               = validateUnquoted,             -- A user full name
@@ -1130,6 +1142,7 @@ local known_parameters = {
    ["device_type"]             = validateNumber,
    ["ewma_alpha_percent"]      = validateNumber,
    ["senders_receivers"]       = validateSendersReceivers,      -- Used in top scripts
+   ["fingerprint_type"]        = validateFingerprintType,
 
 -- PREFERENCES - see prefs.lua for details
    -- Toggle Buttons
@@ -1149,6 +1162,7 @@ local known_parameters = {
    ["toggle_dropped_flows_alerts"]                 = validateBool,
    ["toggle_malware_probing"]                      = validateBool,
    ["toggle_ids_alerts"]                           = validateBool,
+   ["toggle_potentially_dangerous_protocols_alerts"] = validateBool,
    ["toggle_device_protocols_alerts"]              = validateBool,
    ["toggle_elephant_flows_alerts"]                = validateBool,
    ["toggle_ip_reassignment_alerts"]               = validateBool,
@@ -1517,7 +1531,7 @@ local special_parameters = {   --[[Suffix validator]]     --[[Value Validator]]
 
 -- ALERTS (see alert_utils.lua)
    ["op_"]                     = { validateAlertDescriptor,   validateOperator },    -- key: an alert descriptor, value: alert operator
-   ["value_"]                  = { validateAlertDescriptor,   validateEmptyOr(validateNumber) }, -- key: an alert descriptor, value: alert value
+   ["value_"]                  = { validateAlertDescriptor,   validateAlertValue },  -- key: an alert descriptor, value: alert value
    ["slack_ch_"]               = { validateNumber, validateSingleWord },             -- slack channel name
 
 -- Protocol to categories match

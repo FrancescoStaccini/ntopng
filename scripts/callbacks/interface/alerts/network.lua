@@ -20,10 +20,11 @@ function setup(str_granularity)
    if do_trace then print("alert.lua:setup("..str_granularity..") called\n") end
    ifid = interface.getId()
    local ifname = interface.setActiveInterfaceId(ifid)
-   config_alerts = getNetworksConfiguredAlertThresholds(ifname, str_granularity)
 
    -- Load the threshold checking functions
    available_modules = alerts_api.load_check_modules("network", str_granularity)
+
+   config_alerts = getNetworksConfiguredAlertThresholds(ifname, str_granularity, available_modules)
 end
 
 -- #################################################################
@@ -39,16 +40,11 @@ function checkAlerts(granularity)
    local has_configured_alerts = (table.len(network_config) or table.len(global_config))
    local entity_info = alerts_api.networkAlertEntity(network_key)
 
-   if are_alerts_suppressed(network_key, ifid) then
-     releaseAlerts()
-     return
-   end
-
    if(has_configured_alerts) then
       for _, check in pairs(available_modules) do
         local config = network_config[check.key] or global_config[check.key]
 
-        if config then
+        if config or check.always_enabled then
            check.check_function({
               granularity = granularity,
               alert_entity = entity_info,
@@ -65,12 +61,12 @@ end
 
 -- #################################################################
 
-function releaseAlerts()
+function releaseAlerts(granularity)
   local info = network.getNetworkStats()
   local network_key = info and info.network_key
   if not network_key then return end
 
   local entity_info = alerts_api.networkAlertEntity(network_key)
 
-  alerts_api.releaseEntityAlerts(entity_info, network.getAlerts())
+  alerts_api.releaseEntityAlerts(entity_info, network.getAlerts(granularity))
 end

@@ -11,9 +11,10 @@
 using namespace std;
 
 struct zmq_msg_hdr {
-  char url[32];
-  u_int32_t version;
-  u_int32_t size;
+  char url[16];
+  u_int8_t version, source_id;
+  u_int16_t size;
+  u_int32_t msg_id;
 };
 
 /* *************************************** */
@@ -30,8 +31,10 @@ static pair<char *, size_t> get_corpus(string filename) {
 
     length = buffer.str().size();
 
-    if (posix_memalign( (void **)&aligned_buffer, 64, (length + 63) / 64  * 64))
-      throw "Allocation failed";
+    if (posix_memalign( (void **)&aligned_buffer, 64, (length + 63) / 64  * 64)) {
+      printf("Allocation failed\n");
+      exit(1);
+    }
 
     memset(aligned_buffer, 0x20, (length + 63) / 64  * 64);
     memcpy(aligned_buffer, buffer.str().c_str(), length);
@@ -41,7 +44,7 @@ static pair<char *, size_t> get_corpus(string filename) {
     return make_pair((char *)aligned_buffer, length);
   } 
 
-  cerr << "JSON file " << filename << "not found or empty\n";
+  printf("JSON file %s not found or empty\n", filename.c_str());
   exit(1);
 }
 
@@ -58,7 +61,7 @@ int key_is_int(char *key) {
 }
 
 /* *************************************** */
-void json_to_tlv(json_object * jobj, ndpi_serializer *serializer) {
+void json_to_tlv(json_object *jobj, ndpi_serializer *serializer) {
   enum json_type type;
   int rc, ikey, ival = 0;
   char *sval = NULL;
@@ -141,9 +144,10 @@ int main(int argc, char *argv[]) {
   ndpi_serializer *serializer;
   ndpi_serializer deserializer;
   int rc, i, j, z, num_records, max_tlv_msgs = 0, tlv_msgs = 0;
-  u_int64_t exported_msgs = 0, exported_records = 0;
+  u_int32_t exported_msgs = 0, exported_records = 0;
   u_int8_t use_json_encoding = 0;
   char c;
+  int once = 0;
 
   while ((c = getopt(argc, argv,"hi:jvz:E:D:")) != '?') {
     if (c == (char) 255 || c == -1) break;
@@ -200,14 +204,15 @@ int main(int argc, char *argv[]) {
 
     if (zmq_endpoint[strlen(zmq_endpoint) - 1] == 'c') {
       /* Collector mode */
-      if (zmq_connect(zmq_sock, zmq_endpoint) != 0)
-        printf("Unable to connect to ZMQ socket %s: %s\n", zmq_endpoint, strerror(errno));
-    } else {
-      /* Probe mode */
       if (zmq_bind(zmq_sock, zmq_endpoint) != 0) {
         printf("Unable to bind to ZMQ socket %s: %s\n", zmq_endpoint, strerror(errno));
         exit(1);
       }
+
+    } else {
+      /* Probe mode */
+      if (zmq_connect(zmq_sock, zmq_endpoint) != 0)
+        printf("Unable to connect to ZMQ socket %s: %s\n", zmq_endpoint, strerror(errno));
     }
   }
 
@@ -216,11 +221,15 @@ int main(int argc, char *argv[]) {
   pair<char *, size_t> p = get_corpus(json_path);
 
   enum json_tokener_error jerr = json_tokener_success;
-  char * buffer = (char *) malloc(p.second);
   json_object *f;
   u_int64_t delta_usec, last_delta_usec = 0, last_exported_records = 0;
 
-  f = json_tokener_parse_verbose(buffer, &jerr);
+  f = json_tokener_parse_verbose(p.first, &jerr);
+
+  if (f == NULL) {
+    printf("Error parsing buffer\n");
+    goto exit;
+  }
 
   if (json_object_get_type(f) == json_type_array)
     num_records = json_object_array_length(f);
@@ -228,8 +237,6 @@ int main(int argc, char *argv[]) {
     num_records = 1;
 
   printf("%u records found\n", num_records);
-
-  free(buffer);
 
   /* nDPI TLV Serialization */
 
@@ -256,7 +263,12 @@ int main(int argc, char *argv[]) {
         ndpi_reset_serializer(&serializer[tlv_msgs]);
         j = 0;
         while (i < num_records && j < batch_size) {
-          json_to_tlv(json_object_array_get_idx(f, i), &serializer[tlv_msgs]);
+          json_object *ji = json_object_array_get_idx(f, i);
+          if (ji == NULL) {
+            printf("Error reading flow #%u\n", i);
+            goto exit;
+          }
+          json_to_tlv(ji, &serializer[tlv_msgs]);
           j++, i++;
         }
         tlv_msgs++;
@@ -267,28 +279,36 @@ int main(int argc, char *argv[]) {
       tlv_msgs++;
     }
 
+    if (!once) {
+      printf("Batching %u flows in %u messages (%u per message)\n", num_records, tlv_msgs, batch_size);
+      once = 1;
+    }
+
     /* Sending TLV records over ZMQ */
 
     if (zmq_sock) {
       for(i = 0; i < tlv_msgs; i++) {
         struct zmq_msg_hdr msg_hdr;
-        u_int8_t *buffer = (use_json_encoding ? (u_int8_t *) serializer[i].json_buffer : serializer[i].buffer);
+        u_int32_t buffer_len;
+        u_int8_t *buffer = (u_int8_t *) ndpi_serializer_get_buffer(&serializer[i], &buffer_len);
         strncpy(msg_hdr.url, "flow", sizeof(msg_hdr.url));
         msg_hdr.version = (use_json_encoding ? 2 : 3);
-        msg_hdr.size = (use_json_encoding ? strlen(serializer[i].json_buffer) : serializer[i].size_used);
-        zmq_send(zmq_sock, &msg_hdr, sizeof(msg_hdr), ZMQ_SNDMORE);
+        msg_hdr.size = htonl(buffer_len);
+        msg_hdr.msg_id = htonl(exported_msgs);
+        rc = zmq_send(zmq_sock, &msg_hdr, sizeof(msg_hdr), ZMQ_SNDMORE);
 
         if (use_json_encoding && verbose) {
           enum json_tokener_error jerr = json_tokener_success;
           json_object *f = json_tokener_parse_verbose((char *) buffer, &jerr);
-          printf("Sending JSON #%u '%s' [len=%u][%s]\n", i, (char *) buffer, msg_hdr.size, f == NULL ? "INVALID" : "VALID");
+          printf("Sending JSON #%u '%s' [len=%u][%s]\n", i, (char *) buffer, buffer_len, f == NULL ? "INVALID" : "VALID");
         }
 
-        rc = zmq_send(zmq_sock, buffer, msg_hdr.size, 0);
-
         if (rc > 0)
+          rc = zmq_send(zmq_sock, buffer, buffer_len, 0);
+
+        if (rc > 0) {
           exported_msgs++;
-        else {
+        } else {
           printf("zmq_send failure: %d\n", rc);
           goto exit;
         }
@@ -302,8 +322,9 @@ int main(int argc, char *argv[]) {
     total_time_usec += delta_usec;
 
     if (total_time_usec - last_delta_usec > 1000000 /* every 1 sec */) {
-      printf("%lu flows / %.2f flows/sec exported\n", exported_records, 
-        ((double) (exported_records - last_exported_records) / ((total_time_usec - last_delta_usec)/1000000)));
+      printf("%u flows / %.2f flows/sec / %u messages exported\n", exported_records, 
+        ((double) (exported_records - last_exported_records) / ((total_time_usec - last_delta_usec)/1000000)),
+        exported_msgs);
       last_exported_records = exported_records;
       last_delta_usec = total_time_usec;
     }
@@ -405,7 +426,7 @@ int main(int argc, char *argv[]) {
  exit:
 
   if (zmq_sock)
-    printf("%lu messages %lu records sent over ZMQ\n", exported_msgs, exported_records);
+    printf("%u messages %u records sent over ZMQ\n", exported_msgs, exported_records);
 
   for (i = 0; i < tlv_msgs; i++)
     ndpi_term_serializer(&serializer[i]);

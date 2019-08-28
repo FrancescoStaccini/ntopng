@@ -23,7 +23,7 @@
 
 /* *************************************** */
 
-Country::Country(NetworkInterface *_iface, const char *country) : GenericHashEntry(_iface) {
+Country::Country(NetworkInterface *_iface, const char *country) : GenericHashEntry(_iface), dirstats(_iface, 0) {
   country_name = strdup(country);
 
 #ifdef COUNTRY_DEBUG
@@ -49,6 +49,8 @@ Country::~Country() {
 
 bool Country::idle() {
   bool rc;
+
+  if(GenericHashEntry::idle()) return(true);
   
   if((num_uses > 0) || (!iface->is_purge_idle_interface()))
     return(false);

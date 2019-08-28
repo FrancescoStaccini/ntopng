@@ -672,11 +672,16 @@ function hasNindexSupport()
     prefs = ntop.getPrefs()
    end
 
-   if prefs.is_nindex_enabled and interface.nIndexEnabled() then
+   if prefs.is_nindex_enabled then
       return true
    end
 
    return false
+end
+
+-- NOTE: global nindex support may be enabled but some disable on some interfaces
+function interfaceHasNindexSupport()
+  return(hasNindexSupport() and interface.nIndexEnabled())
 end
 
 --for _key, _value in pairsByKeys(vals, rev) do
@@ -1149,51 +1154,6 @@ end
 
 -- #################################
 
-function getOSIcon(name)
-  icon = ""
-
-  if(findString(name, "Linux") or findString(name, "Ubuntu")) then icon = '<i class=\'fa fa-linux fa-lg\'></i> '
-  elseif(findString(name, "Android")) then icon = '<i class=\'fa fa-android fa-lg\'></i> '
-  elseif(findString(name, "Windows") or findString(name, "Win32") or findString(name, "MSIE")) then icon = '<i class=\'fa fa-windows fa-lg\'></i> '
-  elseif(findString(name, "iPhone") or findString(name, "iPad") or findString(name, "OS X") ) then icon = '<i class=\'fa fa-apple fa-lg\'></i> '
-  end
-
-  return(icon)
-end
-
--- #################################
-
-function getOperatingSystemName(id)
-   if(id == 0) then return("Unknown")
-   elseif(id == 1) then return("Linux")
-   elseif(id == 2) then return("Windows")
-   elseif(id == 3) then return("MacOS")
-   elseif(id == 4) then return("iOS")
-   elseif(id == 5) then return("Android")
-   elseif(id == 6) then return("LaserJET")
-   elseif(id == 7) then return("AppleAirport")
-   else
-      return("") -- Unknown
-   end
-end
-
--- #################################
-
-function getOperatingSystemIcon(id)
-   if(id == 1) then return(' <i class=\'fa fa-linux fa-lg\'></i>')
-   elseif(id == 2) then return(' <i class=\'fa fa-windows fa-lg\'></i>')
-   elseif(id == 3) then return(' <i class=\'fa fa-apple fa-lg\'></i>')
-   elseif(id == 4) then return(' <i class=\'fa fa-apple fa-lg\'></i>')
-   elseif(id == 5) then return(' <i class=\'fa fa-android fa-lg\'></i>')
-   elseif(id == 6) then return(' LasetJET')
-   elseif(id == 7) then return(' Apple Airport')
-
-   else return("")
-   end
-end
-
--- #################################
-
 function getApplicationIcon(name)
   local icon = ""
   if(name == nil) then name = "" end
@@ -1228,14 +1188,6 @@ end
 function getCategoryLabel(cat_name)
   cat_name = cat_name:gsub("^%l", string.upper)
   return(cat_name)
-end
-
-function mapOS2Icon(name)
-  if(name == nil) then
-    return("")
-  else
-    return(getOSIcon(name) .. name)
-  end
 end
 
 function getItemsNumber(n)
@@ -1440,7 +1392,7 @@ function flowinfo2hostname(flow_info, host_type, alerts_view)
    end
 
    if(host_type == "srv") then
-      if(flow_info["host_server_name"] ~= nil and flow_info["host_server_name"] ~= "") then
+      if flow_info["host_server_name"] ~= nil and flow_info["host_server_name"] ~= "" and flow_info["host_server_name"]:match("%w") then
 	 -- remove possible ports from the name
 	 return(flow_info["host_server_name"]:gsub(":%d+$", ""))
       end
@@ -2268,7 +2220,7 @@ function hasKey(key, theTable)
 end
 function getPasswordInputPattern()
   -- maximum len must be kept in sync with MAX_PASSWORD_LEN
-  return [[^[\w\$\\!\/\(\)=\?\^\*@_\-\u0000-\u0019\u0021-\u00ff]{5,31}$]]
+  return [[^[\w\$\\!\/\(\)= \?\^\*@_\-\u0000-\u0019\u0021-\u00ff]{5,31}$]]
 end
 
 function getIPv4Pattern()
@@ -2634,6 +2586,7 @@ function getFlowStatusTypes()
    [23] = i18n("flow_details.ssl_unsafe_ciphers"),
    [24] = i18n("flow_details.data_exfiltration"),
    [25] = i18n("flow_details.ssl_old_protocol_version"),
+   [26] = i18n("flow_details.potentially_dangerous_protocol"),
    }
 
    return entries
@@ -2903,7 +2856,20 @@ function getTzOffsetSeconds()
    local utc_t = os.date("!*t", now)
    local delta = os.time(local_t) - os.time(utc_t)
 
-   return(delta)
+   if utc_t.isdst then
+      -- DST is the practice of advancing clocks during summer months
+      -- so that evening daylight lasts longer, while sacrificing normal sunrise times.
+      -- utc_t is increased by one hour when the time is DST.
+      -- For example, an UTC time of 2pm would be reported by lua as 3pm with
+      -- the isdst flag set.
+      -- For this reason, we need to add back the hour to the computed delta.
+      delta = delta + 3600
+   end
+
+   -- tprint(string.format("local_t %u [%s][isdst: %s]", os.time(local_t), formatEpoch(os.time(local_t)), local_t.isdst))
+   -- tprint(string.format("utc_t   %u [%s][isdst: %s]", os.time(utc_t), formatEpoch(os.time(utc_t)), utc_t.isdst))
+
+   return delta
 end
 
 -- ####################################################
@@ -2915,7 +2881,7 @@ function makeTimeStamp(d, tzoffset)
 
    local timestamp = os.time({year=year, month=month, day=day, hour=hour, min=minute, sec=seconds});
 
-   -- tprint("pre-timestamp is:"..timestamp)
+   -- tprint(string.format("pre-timestamp is %u [%s]", timestamp, formatEpoch(timestamp)))
    if tzoffset then
       -- from browser local time to UTC
       timestamp = timestamp - (tzoffset or 0)
@@ -2923,12 +2889,12 @@ function makeTimeStamp(d, tzoffset)
       -- from UTC to machine local time
       local delta = getTzOffsetSeconds()
 
-      timestamp = timestamp + (delta or 0)
+      timestamp = math.floor(timestamp + (delta or 0))
       -- tprint("delta: "..delta.." tzoffset is: "..tzoffset)
-      -- tprint("post-timestamp is:"..timestamp)
+      -- tprint(string.format("post-timestamp is %u [%s]", timestamp, formatEpoch(timestamp)))
    end
 
-   return math.floor(timestamp).."";
+   return string.format("%u", timestamp)
 end
 
 -- ###########################################

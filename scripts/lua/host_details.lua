@@ -22,8 +22,9 @@ local json = require ("dkjson")
 local host_pools_utils = require "host_pools_utils"
 local discover = require "discover_utils"
 local ts_utils = require "ts_utils"
-local page_utils = require("page_utils")
+local page_utils = require "page_utils"
 local template = require "template_utils"
+local companion_interface_utils = require "companion_interface_utils"
 
 local info = ntop.getInfo()
 
@@ -125,7 +126,7 @@ if (host ~= nil) then
    end
 end
 
-local only_historical = (host == nil) and ((page == "historical") or (page == "config"))
+local only_historical = (host == nil) and ((page == "historical") or (page == "config") or (page == "alerts"))
 
 if(host == nil) and (not only_historical) then
       -- We need to check if this is an aggregated host
@@ -306,12 +307,22 @@ else
    end
 end
 
-if(host["ssl_fingerprint"] ~= nil) then
+if(host["ja3_fingerprint"] ~= nil) then
    if(page == "ssl") then
    print("<li class=\"active\"><a href=\"#\">"..i18n("ssl").."</a></li>\n")
    else
-      if(table.len(host["ssl_fingerprint"]) > 0) then
+      if(table.len(host["ja3_fingerprint"]) > 0) then
         print("<li><a href=\""..url.."&page=ssl\">"..i18n("ssl").."</a></li>")
+      end
+   end
+end
+
+if(host["hassh_fingerprint"] ~= nil) then
+   if(page == "ssh") then
+   print("<li class=\"active\"><a href=\"#\">"..i18n("ssh").."</a></li>\n")
+   else
+      if(table.len(host["hassh_fingerprint"]) > 0) then
+        print("<li><a href=\""..url.."&page=ssh\">"..i18n("ssh").."</a></li>")
       end
    end
 end
@@ -398,7 +409,9 @@ if(not(isLoopback(ifname))) then
    end
 end
 
-if (host["ip"] ~= nil) and areAlertsEnabled() then
+end -- not only_historical
+
+if areAlertsEnabled() then
    if(page == "alerts") then
       print("\n<li class=\"active\"><a href=\"#\"><i class=\"fa fa-warning fa-lg\"></i></a></li>\n")
    elseif interface.isPcapDumpInterface() == false then
@@ -406,9 +419,7 @@ if (host["ip"] ~= nil) and areAlertsEnabled() then
    end
 end
 
-end -- not only_historical
-
-if((page == "historical") or ts_utils.exists("host:traffic", {ifid = ifId, host = tskey})) or hasNindexSupport() then
+if((page == "historical") or ts_utils.exists("host:traffic", {ifid = ifId, host = tskey})) or interfaceHasNindexSupport() then
    if(page == "historical") then
      print("\n<li class=\"active\"><a href=\"#\"><i class='fa fa-area-chart fa-lg'></i></a></li>\n")
    else
@@ -496,7 +507,7 @@ if((page == "overview") or (page == nil)) then
       if(host.childSafe == true) then print(getSafeChildIcon()) end
 
      if(host.operatingSystem ~= 0) then
-       print(" "..getOperatingSystemIcon(host.operatingSystem).." ")
+       print(" "..discover.getOsIcon(host.operatingSystem).." ")
      end
 
       historicalProtoHostHref(getInterfaceId(ifname), host["ip"], nil, nil, nil)
@@ -510,14 +521,9 @@ if((page == "overview") or (page == nil)) then
       end
 
       print[[</td><td><span>]] print(i18n(ternary(have_nedge, "nedge.user", "details.host_pool"))..": ")
-      if not ifstats.isView then
-	 print[[<a href="]] print(ntop.getHttpPrefix()) print[[/lua/hosts_stats.lua?pool=]] print(host_pool_id) print[[">]] print(host_pools_utils.getPoolName(ifId, host_pool_id)) print[[</a></span>]]
-	 print[[&nbsp; <a href="]] print(ntop.getHttpPrefix()) print[[/lua/host_details.lua?]] print(hostinfo2url(host)) print[[&page=config&ifid=]] print(tostring(ifId)) print[[">]]
-	 print[[<i class="fa fa-sm fa-cog" aria-hidden="true"></i></a></span>]]
-      else
-        -- no link for view interfaces
-        print(host_pools_utils.getPoolName(ifId, host_pool_id))
-      end
+      print[[<a href="]] print(ntop.getHttpPrefix()) print[[/lua/hosts_stats.lua?pool=]] print(host_pool_id) print[[">]] print(host_pools_utils.getPoolName(ifId, host_pool_id)) print[[</a></span>]]
+      print[[&nbsp; <a href="]] print(ntop.getHttpPrefix()) print[[/lua/host_details.lua?]] print(hostinfo2url(host)) print[[&page=config&ifid=]] print(tostring(ifId)) print[[">]]
+      print[[<i class="fa fa-sm fa-cog" aria-hidden="true"></i></a></span>]]
       print("</td></tr>")
    else
       if(host["mac"] ~= nil) then
@@ -534,7 +540,12 @@ if((page == "overview") or (page == nil)) then
    if(host["os"] ~= "") then
       print("<tr>")
       if(host["os"] ~= "") then
-         print("<th>"..i18n("os").."</th><td> <A HREF='"..ntop.getHttpPrefix().."/lua/hosts_stats.lua?os=" .. string.gsub(host["os"], " ", '%%20').. "'>"..mapOS2Icon(host["os"]) .. "</A></td><td></td>\n")
+        local os_detail = ""
+        if not isEmptyString(host["os_detail"]) then
+          os_detail = os_detail .. " [" .. host["os_detail"] .. "]"
+        end
+
+         print("<th>"..i18n("os").."</th><td> <A HREF='"..ntop.getHttpPrefix().."/lua/hosts_stats.lua?os=" .. host["os"] .."'>".. discover.getOsAndIcon(host["os"])  .."</A>".. os_detail .."</td><td></td>\n")
       else
          print("<th></th><td></td>\n")
       end
@@ -598,7 +609,11 @@ if((page == "overview") or (page == nil)) then
    end
 
 if(host["num_alerts"] > 0) then
-   print("<tr><th><i class=\"fa fa-warning fa-lg\" style='color: #B94A48;'></i>  <A HREF='"..ntop.getHttpPrefix().."/lua/host_details.lua?ifid="..ifId.."&"..hostinfo2url(host_info).."&page=alerts'>"..i18n("details.alerts").."</A></th><td colspan=2></li> <span id=num_alerts>"..host["num_alerts"] .. "</span> <span id=alerts_trend></span></td></tr>\n")
+   print("<tr><th><i class=\"fa fa-warning fa-lg\" style='color: #B94A48;'></i>  <A HREF='"..ntop.getHttpPrefix().."/lua/host_details.lua?ifid="..ifId.."&"..hostinfo2url(host_info).."&page=alerts'>"..i18n("show_alerts.engaged_alerts").."</A></th><td colspan=2></li> <span id=num_alerts>"..host["num_alerts"] .. "</span> <span id=alerts_trend></span></td></tr>\n")
+end
+
+if(host["num_flow_alerts"] > 0) then
+  print("<tr><th>"..i18n("show_alerts.flow_alerts").."</th><td colspan=2></li> <span id=num_flow_alerts>"..host["num_flow_alerts"] .. "</span> <span id=flow_alerts_trend></span></td></tr>\n")
 end
 
    if ntop.isPro() and ifstats.inline and (host["has_blocking_quota"] or host["has_blocking_shaper"]) then
@@ -643,7 +658,7 @@ end
       flows_th = i18n("details.flows_packet_iface")
    end
 
-   if hasNindexSupport() then
+   if interfaceHasNindexSupport() then
       flows_th = flows_th .. ' <a href="?host='..hostinfo2hostkey(host_info)..'&page=historical&detail_view=flows&zoom=1h&flow_status=alerted"><i class="fa fa-search-plus"></i></a>'
    end
 
@@ -1354,7 +1369,12 @@ print [[
 elseif(page == "ssl") then
   print [[
      <table id="myTable" class="table table-bordered table-striped tablesorter">
-     <thead><tr><th>]] print('<A HREF="https://github.com/salesforce/ja3">'..i18n("ja3_fingerprint")..'</A>') print[[</th><th>]] print(i18n("app_name")) print[[</th><th>]] print(i18n("num_uses")) print[[</th></tr></thead>
+     <thead><tr><th>]] print('<A HREF="https://github.com/salesforce/ja3" target="_blank">'..i18n("ja3_fingerprint")..'</A>') print[[</th>]]
+  if not isEmptyString(companion_interface_utils.getCurrentCompanion(ifId)) then
+     print[[<th>]] print(i18n("app_name")) print[[</th>]]
+  end
+  print[[<th>]] print(i18n("num_uses")) print[[</th>]]
+  print[[</tr></thead>
      <tbody id="host_details_ja3_tbody">
      </tbody>
      </table>
@@ -1365,8 +1385,8 @@ function update_ja3_table() {
     type: 'GET',
     url: ']]
   print(ntop.getHttpPrefix())
-  print [[/lua/get_ja3_data.lua',
-    data: { ifid: "]] print(ifId.."") print ("\" , ") print(hostinfo2json(host_info))
+  print [[/lua/get_fingerprint_data.lua',
+    data: { fingerprint_type: 'ja3', ifid: "]] print(ifId.."") print ("\" , ") print(hostinfo2json(host_info))
 
     print [[ },
     success: function(content) {
@@ -1383,7 +1403,45 @@ setInterval(update_ja3_table, 5000);
 ]]
 
 
-   print("<b>"..i18n("notes").."</b><ul><li>"..i18n("ja3_fingerprint_note").."</li></ul>")
+   print("<b>"..i18n("notes").."</b><ul><li>"..i18n("fingerprint_note").."</li></ul>")
+
+elseif(page == "ssh") then
+  print [[
+     <table id="myTable" class="table table-bordered table-striped tablesorter">
+     <thead><tr><th>]] print('<A HREF="https://engineering.salesforce.com/open-sourcing-hassh-abed3ae5044c" target="_blank">'..i18n("hassh_fingerprint")..'</A>') print[[</th>]]
+  if not isEmptyString(companion_interface_utils.getCurrentCompanion(ifId)) then
+     print[[<th>]] print(i18n("app_name")) print[[</th>]]
+  end
+  print[[<th>]] print(i18n("num_uses")) print[[</th></tr></thead>
+     <tbody id="host_details_hassh_tbody">
+     </tbody>
+     </table>
+
+<script>
+function update_hassh_table() {
+  $.ajax({
+    type: 'GET',
+    url: ']]
+  print(ntop.getHttpPrefix())
+  print [[/lua/get_fingerprint_data.lua',
+    data: { fingerprint_type: 'hassh', ifid: "]] print(ifId.."") print ("\" , ") print(hostinfo2json(host_info))
+
+    print [[ },
+    success: function(content) {
+      $('#host_details_hassh_tbody').html(content);
+      $('#myTable').trigger("update");
+    }
+  });
+}
+
+update_hassh_table();
+setInterval(update_hassh_table, 5000);
+
+</script>
+]]
+
+
+   print("<b>"..i18n("notes").."</b><ul><li>"..i18n("fingerprint_note").."</li></ul>")
 
 elseif(page == "http") then
       if(http ~= nil) then
@@ -1913,9 +1971,7 @@ elseif (page == "config") then
          </td>
       </tr>]]
 
-   if not ifstats.isView then
-      printPoolChangeDropdown(ifId, host_pool_id, have_nedge)
-   end
+   printPoolChangeDropdown(ifId, host_pool_id, have_nedge)
 
    local top_hidden_checked = ternary(is_top_hidden, "checked", "")
 
@@ -2010,6 +2066,8 @@ drawGraphs(ifId, schema, tags, _GET["zoom"], url, selected_epoch, {
       {schema="host:unreachable_flows",      label=i18n("graphs.total_unreachable_flows")},
       {schema="host:contacts",               label=i18n("graphs.active_host_contacts")},
       {schema="host:total_alerts",           label=i18n("details.alerts")},
+      {schema="host:engaged_alerts",         label=i18n("show_alerts.engaged_alerts")},
+      {schema="host:total_flow_alerts",      label=i18n("show_alerts.flow_alerts")},
       {schema="host:host_unreachable_flows", label=i18n("graphs.host_unreachable_flows")},
       {schema="host:dns_qry_sent_rsp_rcvd",  label=i18n("graphs.dns_qry_sent_rsp_rcvd")},
       {schema="host:dns_qry_rcvd_rsp_sent",  label=i18n("graphs.dns_qry_rcvd_rsp_sent")},
@@ -2053,6 +2111,7 @@ if(not only_historical) and (host ~= nil) then
    print("var last_pkts_sent = " .. host["packets.sent"] .. ";\n")
    print("var last_pkts_rcvd = " .. host["packets.rcvd"] .. ";\n")
    print("var last_num_alerts = " .. host["num_alerts"] .. ";\n")
+   print("var last_num_flow_alerts = " .. host["num_flow_alerts"] .. ";\n")
    print("var last_active_flows_as_server = " .. host["active_flows.as_server"] .. ";\n")
    print("var last_active_flows_as_client = " .. host["active_flows.as_client"] .. ";\n")
    print("var last_flows_as_server = " .. host["flows.as_server"] .. ";\n")
@@ -2139,6 +2198,7 @@ if(not only_historical) and (host ~= nil) then
    			   $('#name').html(host["name"]);
    			}
    			$('#num_alerts').html(host["num_alerts"]);
+   			$('#num_flow_alerts').html(host["num_flow_alerts"]);
    			$('#active_flows_as_client').html(addCommas(host["active_flows.as_client"]));
    			$('#active_flows_as_server').html(addCommas(host["active_flows.as_server"]));
    			$('#active_peers_as_client').html(addCommas(host["contacts.as_client"]));
@@ -2279,6 +2339,7 @@ print [[
 			$('#trend_unreachable_flows_as_client').html(drawTrend(host["unreachable_flows.as_client"], last_unreachable_flows_as_client, " style=\"color: #B94A48;\""));
 
 			$('#alerts_trend').html(drawTrend(host["num_alerts"], last_num_alerts, " style=\"color: #B94A48;\""));
+      $('#flow_alerts_trend').html(drawTrend(host["num_flow_alerts"], last_num_flow_alerts, " style=\"color: #B94A48;\""));
 			$('#sent_trend').html(drawTrend(host["packets.sent"], last_pkts_sent, ""));
 			$('#rcvd_trend').html(drawTrend(host["packets.rcvd"], last_pkts_rcvd, ""));
 
@@ -2293,6 +2354,7 @@ print [[
  		        $('#pkt_keep_alive_rcvd_trend').html(drawTrend(host["tcpPacketStats.rcvd"]["keep_alive"], last_rcvd_tcp_keep_alive, ""));
 
    			last_num_alerts = host["num_alerts"];
+   			last_num_flow_alerts = host["num_flow_alerts"];
    			last_pkts_sent = host["packets.sent"];
    			last_pkts_rcvd = host["packets.rcvd"];
    			last_active_flows_as_client = host["active_flows.as_client"];

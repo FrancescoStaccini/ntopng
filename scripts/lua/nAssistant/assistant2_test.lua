@@ -7,9 +7,9 @@ if((dirs.scriptdir ~= nil) and (dirs.scriptdir ~= "")) then package.path = dirs.
 ignore_post_payload_parse = 1
 
 require "lua_utils"
-local dialogflow = require "dialogflow_APIv2"
-local net_state = require "network_state"
-local df_utils = require "dialogflow_utils" --NOTE: poi andranno nelle utils
+local dialogflow = require "nAssistant/dialogflow_APIv2"
+local net_state = require "nAssistant/network_state"
+local df_utils = require "nAssistant/dialogflow_utils" --NOTE: poi andranno nelle utils
 
 local response, request
 
@@ -49,6 +49,7 @@ local limit_num_chart_top_categories  = 6
 --      - come ottengo il nome alias? con getHostAltName(ip,mac) ma ip può essere un mac e mac può essere nil
 --      - (dalla docs dei reprompt) Reprompts aren't supported on all Actions on Google surfaces. We recommend you handle no-input errors but keep in mind that they may not appear on all user devices.
 --      - Maximum num of suggestion chips is 8, and the maximum text length is 20 characters each.
+--      - Mai visto fin'ora: per gestire il fallback a modo: quando accade controllo seè una richiesta nota fatta fuori dall'intent apposito, oppure, contiene frasinote, allora avanzo suggerimenti ad hoc
 
 --+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 --####################################- nAssistant - UTILS -###############################################
@@ -155,7 +156,7 @@ local function are_app_and_hosts_good()
     bl_num_txt = blacklisted_host_num .. " unwanted hosts.\n"
   end
 
-  text = bl_num_txt .. " The communication "..safe_text
+  text = bl_num_txt .. " The communications "..safe_text
 
   if danger then text = text .. ". \nBut be careful! Dangerous traffic has been detected! " end
 
@@ -301,14 +302,6 @@ local function find_device_name_and_addresses(query)
         --quindi l'utente presumibilmente vuole info a riguardo, deve poter continuare la ricerca di info. QUINDI:
         --TOLGO IL CONTROLLO IN CACHE
 
-  -- Also look at the DHCP cache
-  -- local mac_to_name = ntop.getHashAllCache(getDhcpNamesKey(getInterfaceId(ifname))) or {}
-  -- for mac, name in pairs(mac_to_name) do
-  --   if string.contains(string.lower(name), string.lower(query)) then
-  --       res[mac] = hostVisualization(mac, name)
-  --   end
-  -- end
-
   local ips = {}
   local info_host_by_mac = nil
   local num_items = 0
@@ -367,7 +360,7 @@ end
 --TODO: -METTI UN LIMITE TEMPORALE SE CI SONO MOLTI IP NELLA IP_TABLE
 --      -astrai di più! fai una funzione per iterare tra gli host di un mac, che accetti una callback per elaborare le info
 --      -studia le varie "duration" in getMacInfo / getHostInfo / categories / app ecc.... (guarda le viste di dettaglio dei mac/host)
---      -ANCHE "total_activity_time" in getHsotInfo
+--      -ANCHE "total_activity_time" in getHostInfo
 
 --return info about a device and it's hosts
 local function merge_hosts_info(ip_table)
@@ -389,8 +382,9 @@ local function merge_hosts_info(ip_table)
       res = host_info 
       local mac_info = interface.getMacInfo(host_info.mac)
 
+      local discover = require "discover_utils"
       if host_info.devtype and host_info.devtype ~= 0 then 
-        local discover = require "discover_utils" 
+         
         res["devtype_name"] = discover.devtype2string(host_info.devtype) 
       else 
         res["devtype_name"]  = "Unknown"
@@ -399,7 +393,7 @@ local function merge_hosts_info(ip_table)
       res["num_childSafe_host"] = ternary( host_info.childSafe, 1, 0 )
       res["manufacturer"] = ternary( mac_info and mac_info.manufacturer, mac_info.manufacturer, "Unknown"  )
       res["model"] = ternary( mac_info and mac_info.model, mac_info.model, "Unknown"  )
-      res["operatingSystem"] = ternary( mac_info and mac_info.operatingSystem ~= 0, getOperatingSystemName(mac_info.operatingSystem), "Unknown"  )
+      res["operatingSystem"] = ternary( mac_info and mac_info.operatingSystem ~= 0, discover.getOsName(mac_info.operatingSystem), "Unknown"  ) --Test in progress
       --TODO: first_seen/last_seen guardalo da mac_details (ed il First Observed On??)
 
     else --qui faccio i merge
@@ -597,11 +591,12 @@ function handler_if_active_flow_top_categories()
       url,
       "Top Categories Chart"
   )
-  --local speech_text = df_utils.create_top_categories_speech_text(top_cat) 
-  local display_text = "Here is the chart"
+  tprint(top_cat)
+  local speech_text = df_utils.create_top_categories_speech_text(top_cat) 
+  --local display_text = "Here is the chart"
 
-  --dialogflow.send(speech_text, display_text, nil, nil, card)
-  dialogflow.send(display_text, nil, nil, nil, card)
+  dialogflow.send(speech_text, display_text, nil, nil, card)
+  --dialogflow.send(display_text, nil, nil, nil, card)
 end
 
 --#########################################################################################################
@@ -609,24 +604,32 @@ end
 --todo: (migliora la performance, faccio una marea di iterazioni sugli host/devices)
 function handler_who_is_categories()
   local category = request.parameters.ndpi_category
-  local tmp, res, byte_tot = {}, {}, 0
+  local tmp, res, sugg, byte_tot = {}, {}, {}, 0
 
   ----------------------------------------------------
-  local function get_stats_callback(mac, stats)
-    if stats["ndpi_categories"] and stats["ndpi_categories"][category] and stats["ndpi_categories"][category]["bytes"]then 
+  local function get_stats_callback(ip, stats)
+    
+    local h_stats = interface.getHostInfo(stats.ip)
+
+    if h_stats["ndpi_categories"] and h_stats["ndpi_categories"][category] and h_stats["ndpi_categories"][category]["bytes"]then 
         table.insert(tmp, {
-          bytes = stats["ndpi_categories"][category]["bytes"],
-          manufacturer = stats.manufacturer,
+          bytes = h_stats["ndpi_categories"][category]["bytes"],
+          --manufacturer = stats.manufacturer,
           --name = find_name(mac)
-          name = getHostAltName( mac )
+          name = getHostAltName( ip )
       })
-      byte_tot = byte_tot + stats["ndpi_categories"][category]["bytes"]
+      --tprint(mac)
+      byte_tot = byte_tot + h_stats["ndpi_categories"][category]["bytes"]
     end
+
+    return true
   end
   -----------------------------------------------------
-  net_state.get_stats("devices", nil, nil, nil, get_stats_callback)
+  net_state.get_stats("localhost", nil, nil, nil, get_stats_callback)
   
   table.sort(tmp, function (a,b) return a.bytes > b.bytes end )
+
+  tprint(tmp)
 
   local labels, values, datasets = {},{},{}
   local legend_label = "Traffic Volume (percentage)"
@@ -638,29 +641,35 @@ function handler_who_is_categories()
       bkg_color = "white"
   }
   for i,v in ipairs(tmp) do
-      table.insert(data.labels,  v.name)
+      if string.len(v.name) > 12 then 
+        table.insert(data.labels,  string.sub(v.name,1,12) .. "..." )
+      else 
+        table.insert(data.labels,  v.name)
+      end
+
+      table.insert(sugg, v.name)
       table.insert(data.values, math.floor(( v.bytes / byte_tot ) * 100)  ) 
       if i >= limit_num_devices_category_chart then break end    
   end
 
   local url = df_utils.create_chart_url(data, options)
   local card = dialogflow.create_card(
-      "Top ".. category.." Device Chart",
+      "Top ".. category.." Local Hosts Chart",
       url,
-      "Top ".. category.." Device Chart"
+      "Top ".. category.." Local Hosts Chart"
   )
   --local speech_text = df_utils.create_top_categories_speech_text(top_cat)
   local display_text = "Here is the chart"
 
   --dialogflow.send(speech_text, display_text, nil, nil, card)
-  dialogflow.send(display_text, nil, nil, data.labels, card)
+  dialogflow.send(display_text, nil, nil, sugg, card)
 end
 
 --#########################################################################################################
 
 function handler_who_is_protocols()
   local protocol = request.parameters.ndpi_protocol
-  local tmp, res, byte_tot = {}, {}, 0
+  local tmp, res, sugg, byte_tot = {}, {}, {}, 0
 
   ----------------------------------------------------
   local function get_stats_callback(ip)
@@ -695,22 +704,28 @@ function handler_who_is_protocols()
       bkg_color = "white"
   }
   for i,v in ipairs(tmp) do
-      table.insert(data.labels, v.name)
-      table.insert(data.values, math.floor(( v.bytes / byte_tot ) * 100)  ) 
-      if i >= limit_num_devices_protocol_chart  then break end    
+    if string.len(v.name) > 12 then 
+      table.insert(data.labels,  string.sub(v.name,1,12) .. "..." )
+    else 
+      table.insert(data.labels,  v.name)
+    end
+
+    table.insert(sugg, v.name)
+    table.insert(data.values, math.floor(( v.bytes / byte_tot ) * 100)  ) 
+    if i >= limit_num_devices_protocol_chart  then break end    
   end
 
   local url = df_utils.create_chart_url(data, options)
   local card = dialogflow.create_card(
-      "Top ".. protocol.." Device Chart",
+      "Top ".. protocol.." Local Hosts Chart",
       url,
-      "Top ".. protocol.." Device Chart"
+      "Top ".. protocol.." Local Hosts Chart"
   )
   --local speech_text = df_utils.create_top_categories_speech_text(top_cat)
   local display_text = "Here is the chart"
 
   --dialogflow.send(speech_text, display_text, nil, nil, card)
-  dialogflow.send(display_text, nil, nil, data.labels, card)
+  dialogflow.send(display_text, nil, nil, sugg, card)
 end
 
 --#########################################################################################################
@@ -759,9 +774,12 @@ function handler_ask_for_single_device_info() --in realtà è la fallback dell'i
       alias = " [".. getHostAltName(mac) .." ]"
     end
   
+
+    local discover = require "discover_utils"
+
     text = "\tName: ".. d_info.name ..alias.."\nType: "..d_info.devtype_name.."\nManufacturer: ".. d_info.manufacturer
     if d_info.model then text = text .."\nModel: "..d_info.model end
-    if d_info.operatingSystem then text = text .."\nOS: "..getOperatingSystemName(d_info.operatingSystem) end
+    if d_info.operatingSystem then text = text .."\nOS: "..discover.getOsName(d_info.operatingSystem) end
     if d_info.ndpi then text = text .. "\nMost used app: "..d_info.ndpi[1].name end
     if d_info.ndpi_categories then text = text .. "\nMost traffic belong to category: "..d_info.ndpi_categories[1].name end
 
@@ -941,10 +959,12 @@ function handler_get_single_device_info_from_who_is()
 
   elseif macs_table_len == 1 then 
     d_info = merge_hosts_info(macs_table[mac].ip)
+
+    local discover = require "discover_utils"
   
     text = "\tName: ".. d_info.name .. "\nType: "..d_info.devtype_name.."\nManufacturer: ".. d_info.manufacturer
     if d_info.model then text = text .."\nModel: "..d_info.model end
-    if d_info.operatingSystem then text = text .."\nOS: "..getOperatingSystemName(d_info.operatingSystem) end
+    if d_info.operatingSystem then text = text .."\nOS: "..getOsName(d_info.operatingSystem) end
     if d_info.ndpi then text = text .. "\nMost used app: "..d_info.ndpi[1].name end
     if d_info.ndpi_categories then text = text .. "\nMost traffic belong to category: "..d_info.ndpi_categories[1].name end
 

@@ -12,7 +12,7 @@ sendHTTPContentTypeHeader('Application/json')
 
 local arp_matrix_utils =    require "arp_matrix_utils" 
 local discover =            require "discover_utils" 
-local net_state = require "network_state"
+local net_state = require "nAssistant/network_state"
 local json = require("dkjson")
 
 --local matrix = interface.getArpStatsMatrixInfo()
@@ -139,101 +139,101 @@ local function createStats(matrix)
 end
 
 --FIND HOSTS:
--- Limits
-    local max_group_items = 10
-    local max_total_items = 20
+-- -- Limits
+--     local max_group_items = 10
+--     local max_total_items = 20
 
-    local cur_results
-    local already_printed = {}
+--     local cur_results
+--     local already_printed = {}
 
-    local results = {}
-    local query = "a"
-    local hosts_only = true
-    if(query == nil) then query = "" end
+--     local results = {}
+--     local query = "a"
+--     local hosts_only = true
+--     if(query == nil) then query = "" end
 
-    interface.select(ifname)
+--     interface.select(ifname)
 
-    -- Hosts
-    local res = interface.findHost(query)
-    tprint(res)
+--     -- Hosts
+--     local res = interface.findHost(query)
+--     tprint(res)
 
-    -- Also look at the custom names
-    local ip_to_name = ntop.getHashAllCache(getHostAltNamesKey()) or {}
-    for ip,name in pairs(ip_to_name) do
-    if string.contains(string.lower(name), string.lower(query)) then
-        res[ip] = hostVisualization(ip, name)
-        --tprint(res[ip])
-    end
-    end
+--     -- Also look at the custom names
+--     local ip_to_name = ntop.getHashAllCache(getHostAltNamesKey()) or {}
+--     for ip,name in pairs(ip_to_name) do
+--     if string.contains(string.lower(name), string.lower(query)) then
+--         res[ip] = hostVisualization(ip, name)
+--         --tprint(res[ip])
+--     end
+--     end
 
-    -- Also look at the DHCP cache
-    -- local mac_to_name = ntop.getHashAllCache(getDhcpNamesKey(getInterfaceId(ifname))) or {}
-    -- for mac, name in pairs(mac_to_name) do
-    --     if string.contains(string.lower(name), string.lower(query)) then
-    --         res[mac] = hostVisualization(mac, name)
-    --         --tprint(res[mac])
-    --     end
-    -- end
+--     -- Also look at the DHCP cache
+--     -- local mac_to_name = ntop.getHashAllCache(getDhcpNamesKey(getInterfaceId(ifname))) or {}
+--     -- for mac, name in pairs(mac_to_name) do
+--     --     if string.contains(string.lower(name), string.lower(query)) then
+--     --         res[mac] = hostVisualization(mac, name)
+--     --         --tprint(res[mac])
+--     --     end
+--     -- end
 
-    cur_results = 0
+--     cur_results = 0
 
-    local ips = {}
-    local info_host_by_mac = nil
-    for k, v in pairs(res) do
-      if((cur_results >= max_group_items) or (#results >= max_total_items)) then
-          break
-      end
+--     local ips = {}
+--     local info_host_by_mac = nil
+--     for k, v in pairs(res) do
+--       if((cur_results >= max_group_items) or (#results >= max_total_items)) then
+--           break
+--       end
   
-      --note: non so se lasciarlo [IPv6], vediamo, se non da noia lascialo
-      if isIPv6(v) and (not string.contains(v, "%[IPv6%]")) then
-        v = v.." [IPv6]"
-      end
+--       --note: non so se lasciarlo [IPv6], vediamo, se non da noia lascialo
+--       if isIPv6(v) and (not string.contains(v, "%[IPv6%]")) then
+--         v = v.." [IPv6]"
+--       end
   
-      if((v ~= "") and (already_printed[v] == nil)) then
-        ips = {}
-        if isMacAddress(v) then         --caso in cui il mac è anche il nome --> v = k
+--       if((v ~= "") and (already_printed[v] == nil)) then
+--         ips = {}
+--         if isMacAddress(v) then         --caso in cui il mac è anche il nome --> v = k
   
-          info_host_by_mac = interface.findHostByMac(v)
-          for _,vv in pairs(info_host_by_mac) do
-            table.insert(ips,vv)
-          end
+--           info_host_by_mac = interface.findHostByMac(v)
+--           for _,vv in pairs(info_host_by_mac) do
+--             table.insert(ips,vv)
+--           end
   
-          results[#results + 1] = {name = v, mac = v, type = "mac", ip = ips}
+--           results[#results + 1] = {name = v, mac = v, type = "mac", ip = ips}
   
-        elseif isMacAddress(k) then     --caso in cui la chiave è il mac
-            tprint("AAAAAAAAAAAAAAAAAAAa\nAAAAAAAAAAAAAAAAAa\nAAAAAAAAAAAAAAAAAa\nAAAAAAAAAAAAAAAAAa")
+--         elseif isMacAddress(k) then     --caso in cui la chiave è il mac
+--             tprint("AAAAAAAAAAAAAAAAAAAa\nAAAAAAAAAAAAAAAAAa\nAAAAAAAAAAAAAAAAAa\nAAAAAAAAAAAAAAAAAa")
 
-          info_host_by_mac = interface.findHostByMac(k)
-          for _,vv in pairs(info_host_by_mac) do
-            table.insert(ips,vv)
-          end
+--           info_host_by_mac = interface.findHostByMac(k)
+--           for _,vv in pairs(info_host_by_mac) do
+--             table.insert(ips,vv)
+--           end
   
-          results[#results + 1] = {name = v, mac = k, type = "mac", ip = ips}
+--           results[#results + 1] = {name = v, mac = k, type = "mac", ip = ips}
   
-        else                            --caso in cui ne k ne v sono mac --> k è ip, v è nome
+--         else                            --caso in cui ne k ne v sono mac --> k è ip, v è nome
 
-          local h_info = interface.getHostInfo(k)
-          if h_info then
+--           local h_info = interface.getHostInfo(k)
+--           if h_info then
 
-            info_host_by_mac = interface.findHostByMac(h_info["mac"])
+--             info_host_by_mac = interface.findHostByMac(h_info["mac"])
 
-            for _,vv in pairs(info_host_by_mac) do
-              table.insert(ips,vv)
-            end
+--             for _,vv in pairs(info_host_by_mac) do
+--               table.insert(ips,vv)
+--             end
 
-            results[#results + 1] = {name = v, mac = h_info["mac"], type = "ip", ip = ips}
-          end
+--             results[#results + 1] = {name = v, mac = h_info["mac"], type = "ip", ip = ips}
+--           end
   
-        end
-        already_printed[v] = true
-        cur_results = cur_results + 1
+--         end
+--         already_printed[v] = true
+--         cur_results = cur_results + 1
   
-    end 
-    end--\for
+--     end 
+--     end--\for
 
-    local resp = {interface = ifname, results = results}
+--     local resp = {interface = ifname, results = results}
 
-    print( json.encode(  resp , {indent = true} ) )
+--     print( json.encode(  resp , {indent = true} ) )
 
 
 
@@ -278,8 +278,10 @@ end
 -- net_state.get_stats("devices", nil, nil, nil, mycall)
 -- print(  json.encode( res, {indent = true}) )
 
---print(  json.encode(  interface.getMacInfo("A2:37:B9:7E:EA:F7 " ), {indent = true}) )
---print(  json.encode( interface.getHostInfo("146.48.96.3"), {indent = true}) )
+--print(  json.encode(  interface.getMacInfo(" 30:10:B3:0A:33:AB" ), {indent = true}) )
+--print(  json.encode( interface.getHostInfo("fe80::c004:401e:a787:6f0c"), {indent = true}) )
+local a="a"
+print(  json.encode( string.len("ntopng.prefs.ndpi_flows_rrd_creation"), {indent = true}) )
 
 --print(  json.encode( ntop.getPref("ntopng.prefs.ndpi_flows_rrd_creation"), {indent = true}) )
 

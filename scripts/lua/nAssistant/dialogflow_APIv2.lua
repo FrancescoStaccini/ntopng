@@ -11,7 +11,7 @@ local json = require("dkjson")--CHECK: if i load a module already loaded, i need
 sendHTTPContentTypeHeader('Application/json')
 
 --------------------------------------------------------------------------
-local debug = true
+local debug = false
 ---------------------------------------------------------------------------
 local ga_module = {}
 local request = {}
@@ -162,18 +162,27 @@ end
 --  TRY SOLUZIONE: SE FACCI OL'ALBERO DEL DIALOGO A MODO (USANDO I FOLLOW-UP), È L'AGENTE CHE MI INVIA I PRECEDENTI PARAMETRI
 --                  m idevo disegnare la struttura sotto del dialogo, dei singoli dialoghi e sotto varie viste (contesti, parametri, collegamenti possibili tra contesti) 
 
+
 --[[PARAM
   speech_text, diplay_text: self explanatory
   expect_response: boolean to let the assistant listen
-  suggestion_strings: suggestion displayed on the bottom of the screen (MAX 8)
+  suggestions_strings: suggestions displayed on the bottom of the screen (MAX 8)
   (basic)card: one of the "rich message" response [https://dialogflow.com/docs/intents/rich-messages]
   ]]
 function ga_module.send(speech_text, display_text, expect_response, suggestions_strings, card )
 
+  if suggestions_strings then 
+    for i,v in pairs(suggestions_strings) do 
+      if string.len(v) > 25 then
+        suggestions_strings[i] = string.sub(v,1,25)   --note: Suggestions chip must not be longer than 25 characters.
+      end
+    end
+  end
+
   res = fill_response(speech_text, display_text,expect_response, suggestions_strings, card)
   print(res.."\n")
 
-    if debug then 
+    if --[[ debug ]] true then 
       io.write("\n")
       io.write("NTOPNG RESPONSE\n")
       tprint(res)

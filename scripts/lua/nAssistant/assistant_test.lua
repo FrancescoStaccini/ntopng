@@ -8,8 +8,8 @@ if((dirs.scriptdir ~= nil) and (dirs.scriptdir ~= "")) then package.path = dirs.
 ignore_post_payload_parse = 1
 require "lua_utils"
 
-local google = require "google_assistant_utils"
-local net_state = require "network_state"
+local google = require "nAssistant/google_assistant_utils"
+local net_state = require "nAssistant/network_state"
 
 local response, request
 

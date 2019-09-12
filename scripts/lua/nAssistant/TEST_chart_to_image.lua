@@ -15,23 +15,27 @@
     curl -X GET -H "Content-Type: application/json" -g "https://quickchart.io/chart?width=500&height=300&backgroundColor=white&c={type:%27bar%27,data:{labels:[%27January%27,%27February%27,%27March%27,%27April%27,%20%27May%27],%20datasets:[{label:%27Dogs%27,data:[50,60,70,180,190]},{label:%27Cats%27,data:[100,200,300,400,500]}]}}" -o imggg^
   
     note: ho fatto vari test per riuscuire a passare i dati nel body della GET ma nulla 
-    ora, in teoria mi basta creare la URL a modo, poi la passo a Dialogfow e sarà lui e reperire la foto
+    ora, in teoria mi basta creare la URL a modo, poi la passo a Dialogfow e sarà lui e reperire la foto.
+    edit: si può farema deve essere una POST enon va fattol'encoding
     ]]
 
 dirs = ntop.getDirs()
 package.path = dirs.installdir .. "/scripts/lua/?.lua;" .. package.path
 if((dirs.scriptdir ~= nil) and (dirs.scriptdir ~= "")) then package.path = dirs.scriptdir .. "/lua/modules/?.lua;" .. package.path end
---ignore_post_payload_parse = 1
 require "lua_utils"
-local json = require("dkjson")
-local net_state = require "network_state"
 
 sendHTTPContentTypeHeader('text/html')
+
+
+local json = require("dkjson")
+local net_state = require "nAssistant/network_state"
+local a = require "nAssistant/dialogflow_utils"
+
 
 local test_str = "{type:'bar',data:{labels:['January','February','March','April','May'],datasets:[{label:'Dogs',data:[50,60,70,180,190]},{label:'Cats',data:[100,200,300,400,500]}]}}"
 
 
---print(  url_encode(test_str)    )
+print(  a.url_encode(test_str)    )
 
 --IDEA: fai l'encode in json, poi l'url encode
 

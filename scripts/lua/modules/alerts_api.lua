@@ -141,6 +141,10 @@ end
 -- the other scripts and as a necessity to avoid a deadlock on the
 -- host hash in the host.lua script
 function alerts_api.checkPendingStoreAlerts(deadline)
+  if(not areAlertsEnabled()) then
+    return(false)
+  end
+
   local ifnames = interface.getIfNames()
   ifnames[getSystemInterfaceId()] = getSystemInterfaceName()
 
@@ -199,6 +203,10 @@ function alerts_api.store(entity_info, type_info, when)
   local subtype = type_info.alert_subtype or ""
   when = when or os.time()
 
+  if(not areAlertsEnabled()) then
+    return(false)
+  end
+
   if alerts_api.isEntityAlertDisabled(ifid, entity_info.alert_entity.entity_id, entity_info.alert_entity_val, type_info.alert_type.alert_id) then
     incDisabledAlertsCount(ifid, granularity_id, entity_info.alert_entity.entity_id, entity_info.alert_entity_val, type_info.alert_type.alert_id)
     return(false)
@@ -232,6 +240,14 @@ end
 
 -- ##############################################
 
+function alerts_api.storeFlowAlert(alert_type, alert_severity, flow_info)
+   if flow then
+      -- flow.storeAlert(alert_type.alert_id, alert_severity.severity_id, json.encode(flow_info))
+   end
+end
+
+-- ##############################################
+
 --! @brief Trigger an alert of given type on the entity
 --! @param entity_info data returned by one of the entity_info building functions
 --! @param type_info data returned by one of the type_info building functions
@@ -242,6 +258,10 @@ end
 function alerts_api.trigger(entity_info, type_info, when)
   when = when or os.time()
   local ifid = interface.getId()
+
+  if(not areAlertsEnabled()) then
+    return(false)
+  end
 
   if(type_info.alert_granularity == nil) then
     alertErrorTraceback("Missing mandatory granularity")
@@ -262,11 +282,14 @@ function alerts_api.trigger(entity_info, type_info, when)
     subtype, alert_json, is_disabled
   }
 
-  if((host.storeTriggeredAlert) and (entity_info.alert_entity.entity_id == alertEntity("host"))) then
+  if(entity_info.alert_entity.entity_id == alertEntity("host")) then
+    host.checkContext(entity_info.alert_entity_val)
     triggered = host.storeTriggeredAlert(table.unpack(params))
-  elseif((interface.storeTriggeredAlert) and (entity_info.alert_entity.entity_id == alertEntity("interface"))) then
+  elseif(entity_info.alert_entity.entity_id == alertEntity("interface")) then
+    interface.checkContext(entity_info.alert_entity_val)
     triggered = interface.storeTriggeredAlert(table.unpack(params))
-  elseif((network.storeTriggeredAlert) and (entity_info.alert_entity.entity_id == alertEntity("network"))) then
+  elseif(entity_info.alert_entity.entity_id == alertEntity("network")) then
+    network.checkContext(entity_info.alert_entity_val)
     triggered = network.storeTriggeredAlert(table.unpack(params))
   else
     triggered = interface.triggerExternalAlert(entity_info.alert_entity.entity_id, entity_info.alert_entity_val, table.unpack(params))
@@ -309,11 +332,23 @@ function alerts_api.release(entity_info, type_info, when)
   local params = {alert_key_name, granularity_id, when}
   local released = nil
 
-  if((host.releaseTriggeredAlert) and (entity_info.alert_entity.entity_id == alertEntity("host"))) then
+  if(not areAlertsEnabled()) then
+    return(false)
+  end
+
+  if(type_info.alert_severity == nil) then
+    alertErrorTraceback(string.format("Missing alert_severity [type=%s]", type_info.alert_type and type_info.alert_type.alert_id or ""))
+    return(false)
+  end
+
+  if(entity_info.alert_entity.entity_id == alertEntity("host")) then
+    host.checkContext(entity_info.alert_entity_val)
     released = host.releaseTriggeredAlert(table.unpack(params))
-  elseif((interface.releaseTriggeredAlert) and (entity_info.alert_entity.entity_id == alertEntity("interface"))) then
+  elseif(entity_info.alert_entity.entity_id == alertEntity("interface")) then
+    interface.checkContext(entity_info.alert_entity_val)
     released = interface.releaseTriggeredAlert(table.unpack(params))
-  elseif((network.releaseTriggeredAlert) and (entity_info.alert_entity.entity_id == alertEntity("network"))) then
+  elseif(entity_info.alert_entity.entity_id == alertEntity("network")) then
+    network.checkContext(entity_info.alert_entity_val)
     released = network.releaseTriggeredAlert(table.unpack(params))
   else
     released = interface.releaseExternalAlert(entity_info.alert_entity.entity_id, entity_info.alert_entity_val, table.unpack(params))
@@ -326,11 +361,6 @@ function alerts_api.release(entity_info, type_info, when)
   else
     if(do_trace) then print("[RELEASE alert @ "..granularity_sec.."] "..
         entity_info.alert_entity_val .."@"..type_info.alert_type.i18n_title..":".. subtype .. "\n") end
-  end
-
-  if(type_info.alert_severity == nil) then
-    alertErrorTraceback(string.format("Missing alert_severity [type=%s]", type_info.alert_type and type_info.alert_type.alert_id or ""))
-    return(false)
   end
 
   enqueueStoreAlert(ifid, released)
@@ -887,6 +917,18 @@ end
 
 -- ##############################################
 
+function alerts_api.ghostNetworkType(network, granularity)
+  return({
+    alert_type = alert_consts.alert_types.ghost_network,
+    alert_subtype = network,
+    alert_granularity = alert_consts.alerts_granularities[granularity],
+    alert_severity = alert_consts.alert_severities.warning,
+    alert_type_params = {},
+  })
+end
+
+-- ##############################################
+
 function alerts_api.load_check_modules(subdir, str_granularity)
   local checks_dir = os_utils.fixPath(ALERT_CHECKS_MODULES_BASEDIR .. "/" .. subdir)
   local available_modules = {}
@@ -921,6 +963,110 @@ function alerts_api.load_check_modules(subdir, str_granularity)
   end
 
   return available_modules
+end
+
+-- ##############################################
+
+local function get_flow_check_module_enabled_key(check_module_key)
+   return string.format("ntopng.prefs.flow_check_modules.ifid_%d.%s", interface.getId(), check_module_key)
+end
+
+-- ##############################################
+
+local function refresh_flow_check_module_conf(flow_check_module)
+   if table.len(_POST) > 0 then
+      local conf_hash = get_flow_check_module_enabled_key(flow_check_module.key)
+
+      for k, v in pairs(_POST) do
+	 if k:ends(flow_check_module.key) then
+	    if k == "enabled_"..flow_check_module.key then
+	       if v == "off" then
+		  ntop.setHashCache(conf_hash, "enabled", "false")
+	       elseif v == "on" then
+		  ntop.delHashCache(conf_hash, "enabled")
+	       end
+	    end
+	 end
+      end
+   end
+end
+
+-- ##############################################
+
+local function load_flow_check_module_conf(flow_check_module)
+   if not flow_check_module["conf"] then
+      flow_check_module["conf"] = {}
+   end
+
+   -- if there's a _POST we try and refresh the module conf with possibly new
+   -- submitted values
+   refresh_flow_check_module_conf(flow_check_module)
+
+   local k = get_flow_check_module_enabled_key(flow_check_module.key)
+
+   local enabled = ntop.getHashCache(k, "enabled")
+
+   if enabled ~= "false" then
+      flow_check_module["conf"]["enabled"] = true
+   else
+      flow_check_module["conf"]["enabled"] = false
+   end
+end
+
+-- ##############################################
+
+--
+-- Flow check modules are lua scripts located into the following locations:
+--  - scripts/callbacks/interface/alerts/flow for community scripts
+--  - scripts/callbacks/interface/alerts/flow for pro/enterprise scripts
+--
+-- A script must return a lua table, with the following fields:
+--  - setup(): a function to call once before processing any flow. It must return true
+--    if the module is enabled, false otherwise.
+--  - protocolDetected(info) (optional): a function which will be called once the flow protocol
+--    has been detected or detection has been aborted. This should happen once per flow.
+--  - statusChanged(info) (optional): a function which will be called *after* the protocolDetected()
+--    if the flow status changes.
+--
+function alerts_api.load_flow_check_modules(enabled_only)
+   local available_modules = {protocolDetected = {}, statusChanged = {}, idle = {}, periodicUpdate = {}, all = {}}
+   local check_dirs = {
+      os_utils.fixPath(ALERT_CHECKS_MODULES_BASEDIR .. "/flow"),
+   }
+
+   if ntop.isPro() then
+      check_dirs[#check_dirs + 1] = os_utils.fixPath(dirs.installdir .. "/pro/scripts/callbacks/interface/alerts/flow")
+   end
+
+   for _, checks_dir in pairs(check_dirs) do
+      package.path = checks_dir .. "/?.lua;" .. package.path
+
+      for fname in pairs(ntop.readdir(checks_dir)) do
+	 if ends(fname, ".lua") then
+	    local modname = string.sub(fname, 1, string.len(fname) - 4)
+	    local check_module = require(modname)
+	    load_flow_check_module_conf(check_module)
+
+	    if check_module.setup then
+	       local is_enabled = check_module["conf"]["enabled"]
+
+	       if is_enabled or not enabled_only then
+		  local setup_ok = check_module.setup()
+
+		  if setup_ok then
+		     if check_module.protocolDetected then available_modules["protocolDetected"][modname] = check_module end
+		     if check_module.statusChanged    then available_modules["statusChanged"][modname] = check_module end
+		     if check_module.idle             then available_modules["idle"][modname] = check_module end
+		     if check_module.periodicUpdate   then available_modules["periodicUpdate"][modname] = check_module end
+		     available_modules["all"][modname] = check_module
+		  end
+	       end
+	    end
+	 end
+      end
+   end
+
+   return available_modules
 end
 
 -- ##############################################
@@ -1077,8 +1223,20 @@ end
 
 function alerts_api.checkbox_input_builder(gui_conf, input_id, value)
   return(string.format([[
+  <input type="hidden", value="off", name="%s"/>
   <input type="checkbox" name="%s" %s/>
-  ]], input_id, ternary(value, "checked", "")))
+  ]], input_id, input_id, ternary(value, "checked", "")))
+end
+
+-- ##############################################
+
+function alerts_api.flow_checkbox_input_builder(check_module)
+   local input_id = string.format("enabled_%s", check_module.key)
+
+   return(string.format([[
+  <input type="hidden", value="off", name="%s"/>
+  <input type="checkbox" name="%s" %s/>
+  ]], input_id, input_id, ternary(check_module.conf.enabled, "checked", "")))
 end
 
 -- ##############################################

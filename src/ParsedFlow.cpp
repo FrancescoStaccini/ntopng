@@ -24,11 +24,13 @@
 /* *************************************** */
 
 ParsedFlow::ParsedFlow() : ParsedFlowCore(), ParsedeBPF() {
-  additional_fields = NULL;
+  additional_fields_json = NULL;
+  additional_fields_tlv = NULL;
   http_url = http_site = NULL;
   dns_query = ssl_server_name = NULL;
   ja3c_hash = ja3s_hash = NULL;
   suricata_alert = NULL;
+  suricata_alert_severity = 255;
 
   ssl_cipher = ssl_unsafe_cipher = http_ret_code = 0;
   dns_query_type = dns_ret_code = 0;
@@ -37,13 +39,15 @@ ParsedFlow::ParsedFlow() : ParsedFlowCore(), ParsedeBPF() {
   memset(&custom_app, 0, sizeof(custom_app));
 
   has_parsed_ebpf = false;
-  parsed_flow_free_memory = false;
 }
 
 /* *************************************** */
 
 ParsedFlow::ParsedFlow(const ParsedFlow &pf) : ParsedFlowCore(pf), ParsedeBPF(pf) {
-  additional_fields = NULL; /* Currently we avoid additional fields in the copy constructor */
+
+  /* Currently we avoid additional fields in the copy constructor */
+  additional_fields_json = NULL; 
+  additional_fields_tlv = NULL; 
 
   if(pf.http_url)  http_url = strdup(pf.http_url); else http_url = NULL;
   if(pf.http_site) http_site = strdup(pf.http_site); else http_site = NULL;
@@ -54,28 +58,37 @@ ParsedFlow::ParsedFlow(const ParsedFlow &pf) : ParsedFlowCore(pf), ParsedeBPF(pf
   if(pf.ja3s_hash) ja3s_hash = strdup(pf.ja3s_hash); else ja3s_hash = NULL;
   if(pf.suricata_alert) suricata_alert = strdup(pf.suricata_alert); else suricata_alert = NULL;
 
+  suricata_alert_severity = pf.suricata_alert_severity;
+
+  ssl_cipher = pf.ssl_cipher;
+  ssl_unsafe_cipher = pf.ssl_unsafe_cipher;
+  http_ret_code = pf.http_ret_code;
+  dns_query_type = pf.dns_query_type;
+  dns_ret_code = pf.dns_ret_code;
+
   memcpy(&custom_app, &pf.custom_app, sizeof(custom_app));
   has_parsed_ebpf = pf.has_parsed_ebpf;
-  
-  parsed_flow_free_memory = true;
 }
 
 /* *************************************** */
 
 ParsedFlow::~ParsedFlow() {
-  if(additional_fields)
-    json_object_put(additional_fields);
+  if(additional_fields_json)
+    json_object_put(additional_fields_json);
 
-  if(parsed_flow_free_memory) {
-    if(http_url)  free(http_url);
-    if(http_site) free(http_site);
-    if(dns_query) free(dns_query);
-    if(ssl_server_name) free(ssl_server_name);
-    if(bittorrent_hash) free(bittorrent_hash);
-    if(ja3c_hash) free(ja3c_hash);
-    if(ja3s_hash) free(ja3s_hash);
-    if(suricata_alert) free(suricata_alert);
+  if(additional_fields_tlv) {
+    ndpi_term_serializer(additional_fields_tlv);
+    free(additional_fields_tlv);
   }
+
+  if(http_url)  free(http_url);
+  if(http_site) free(http_site);
+  if(dns_query) free(dns_query);
+  if(ssl_server_name) free(ssl_server_name);
+  if(bittorrent_hash) free(bittorrent_hash);
+  if(ja3c_hash) free(ja3c_hash);
+  if(ja3s_hash) free(ja3s_hash);
+  if(suricata_alert) free(suricata_alert);
 }
 
 /* *************************************** */

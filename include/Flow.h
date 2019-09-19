@@ -38,20 +38,11 @@ typedef struct {
 } TCPSeqNum;
 
 typedef struct {
-  struct timeval lastTime;
-  u_int64_t total_delta_ms;
-  float min_ms, max_ms;
-} InterarrivalStats;
-
-typedef struct {
-  InterarrivalStats pktTime;
-} FlowPacketStats;
-
-typedef struct {
   u_int32_t cli2srv_packets, srv2cli_packets;
   u_int64_t cli2srv_bytes, srv2cli_bytes;
   u_int64_t cli2srv_goodput_bytes, srv2cli_goodput_bytes;
   TCPPacketStats tcp_stats_s2d, tcp_stats_d2s;
+  ndpi_analyze_struct cli2srv_bytes_stats, srv2cli_bytes_stats;
 } FlowTrafficStats;
 
 class Flow : public GenericHashEntry {
@@ -62,6 +53,9 @@ class Flow : public GenericHashEntry {
   u_int16_t cli_port, srv_port, vlanId;
   u_int32_t vrfId;
   u_int8_t protocol, src2dst_tcp_flags, dst2src_tcp_flags;
+  u_int16_t alert_score;
+  FlowStatusMap last_notified_status_map;
+  std::map<FlowLuaCall, struct timeval> performed_lua_calls;
   struct ndpi_flow_struct *ndpiFlow;
 
   /* When the interface isViewed(), the corresponding view needs to acknowledge the purge
@@ -71,10 +65,11 @@ class Flow : public GenericHashEntry {
 
   bool detection_completed, protocol_processed,
     cli2srv_direction, twh_over, twh_ok, dissect_next_http_packet, passVerdict,
-    check_tor, l7_protocol_guessed, flow_alerted, flow_dropped_counts_increased,
+    check_tor, l7_protocol_guessed, flow_dropped_counts_increased,
     good_low_flow_detected, good_ssl_hs, update_flow_port_stats,
-    quota_exceeded;
+    quota_exceeded, has_malicious_signature;
   u_int16_t diff_num_http_requests;
+  int64_t alert_rowid;
 #ifdef NTOPNG_PRO
   bool counted_in_aggregated_flow, status_counted_in_aggregated_flow;
   bool ingress2egress_direction;
@@ -91,13 +86,14 @@ class Flow : public GenericHashEntry {
   custom_app_t custom_app;
   void *cli_id, *srv_id;
   json_object *json_info;
+  ndpi_serializer *tlv_info;
   char *host_server_name, *bt_hash;
-  char *community_id_flow_hash;
 #ifdef HAVE_NEDGE
   u_int32_t last_conntrack_update; 
   u_int32_t marker;
 #endif
-  json_object *suricata_alert;
+  json_object *ids_alert;
+  u_int8_t ids_alert_severity;
  
   union {
     struct {
@@ -172,8 +168,8 @@ class Flow : public GenericHashEntry {
   struct timeval c2sFirstGoodputTime;
   float rttSec, applLatencyMsec;
 
-  FlowPacketStats cli2srvStats, srv2cliStats;
-
+  InterarrivalStats *cli2srvPktTime, *srv2cliPktTime;
+  
   /* Counter values at last host update */
   struct {
     FlowTrafficStats *partial;
@@ -217,7 +213,7 @@ class Flow : public GenericHashEntry {
   bool checkTor(char *hostname);
   void setBittorrentHash(char *hash);
   bool isLowGoodput();
-  void updatePacketStats(InterarrivalStats *stats, const struct timeval *when);
+  static void updatePacketStats(InterarrivalStats *stats, const struct timeval *when);
   void dumpPacketStats(lua_State* vm, bool cli2srv_direction);
   bool isReadyToBeMarkedAsIdle();
   bool isBlacklistedFlow() const;
@@ -238,7 +234,9 @@ class Flow : public GenericHashEntry {
   void updateJA3();
   void updateHASSH(bool as_client);
   const char* cipher_weakness2str(ndpi_cipher_weakness w);
-  bool get_partial_traffic_stats(FlowTrafficStats **dst, FlowTrafficStats *delta, bool *first_partial) const;  
+  bool get_partial_traffic_stats(FlowTrafficStats **dst, FlowTrafficStats *delta, bool *first_partial) const;
+  bool isLuaCallPerformed(FlowLuaCall flow_lua_call, const struct timeval *tv);
+  void performLuaCall(FlowLuaCall flow_lua_call, const struct timeval *tv, AlertCheckLuaEngine **acle);
 
  public:
   Flow(NetworkInterface *_iface,
@@ -249,7 +247,7 @@ class Flow : public GenericHashEntry {
        time_t _first_seen, time_t _last_seen);
   ~Flow();
 
-  FlowStatus getFlowStatus();
+  FlowStatus getFlowStatus(FlowStatusMap *status_map);
   struct site_categories* getFlowCategory(bool force_categorization);
   void freeDPIMemory();
   static const ndpi_protocol ndpiUnknownProtocol;
@@ -294,8 +292,8 @@ class Flow : public GenericHashEntry {
     return (isSSL() && protos.ssl.certificate) ? protos.ssl.certificate : host_server_name;
   }
   inline char* getBitTorrentHash() { return(bt_hash);          };
-  inline void  setBTHash(char *h)  { if(!h) return; if(bt_hash) { free(bt_hash); bt_hash = NULL; }; bt_hash = strdup(h); }
-  inline void  setServerName(char *v)  { if(host_server_name) free(host_server_name);  host_server_name = strdup(v); }
+  inline void  setBTHash(char *h)  { if(!h) return; if(bt_hash) free(bt_hash); bt_hash = h; }
+  inline void  setServerName(char *v)  { if(host_server_name) free(host_server_name);  host_server_name = v; }
   void setTcpFlags(u_int8_t flags, bool src2dst_direction);
   void updateTcpFlags(const struct bpf_timeval *when,
 		      u_int8_t flags, bool src2dst_direction);
@@ -321,6 +319,7 @@ class Flow : public GenericHashEntry {
   };
   u_int16_t getStatsProtocol() const;
   void setJSONInfo(json_object *json);
+  void setTLVInfo(ndpi_serializer *tlv);
 #ifdef NTOPNG_PRO
   inline bool is_status_counted_in_aggregated_flow()    const { return(status_counted_in_aggregated_flow); };
   inline bool is_counted_in_aggregated_flow()           const { return(counted_in_aggregated_flow);        };
@@ -376,6 +375,7 @@ class Flow : public GenericHashEntry {
   inline const IpAddress* get_cli_ip_addr() const { return(cli_ip_addr); };
   inline const IpAddress* get_srv_ip_addr() const { return(srv_ip_addr); };
   inline json_object* get_json_info()	    const  { return(json_info);                       };
+  inline ndpi_serializer* get_tlv_info()	    const  { return(tlv_info);                       };
   inline bool has_long_icmp_payload()    const  { return(protos.icmp.has_long_icmp_payload); };
   inline void set_long_icmp_payload()           { protos.icmp.has_long_icmp_payload = true;  };
   inline ndpi_protocol_breed_t get_protocol_breed() const {
@@ -416,7 +416,7 @@ class Flow : public GenericHashEntry {
   void set_acknowledge_to_purge();
 
   char* print(char *buf, u_int buf_len) const;
-  void update_hosts_stats(struct timeval *tv, bool dump_alert);
+  void update_hosts_stats(bool dump_alert, update_stats_user_data_t *update_flows_stats_user_data);
   u_int32_t key();
   static u_int32_t key(Host *cli, u_int16_t cli_port,
 		       Host *srv, u_int16_t srv_port,
@@ -450,18 +450,20 @@ class Flow : public GenericHashEntry {
     *_icmp_type = protos.icmp.icmp_type, *_icmp_code = protos.icmp.icmp_code, *_icmp_echo_id = protos.icmp.icmp_echo_id;
   }
   inline char* getDNSQuery()        { return(isDNS() ? protos.dns.last_query : (char*)"");  }
-  inline void  setDNSQuery(char *v) { if(isDNS()) { if(protos.dns.last_query) free(protos.dns.last_query);  protos.dns.last_query = strdup(v); } }
+  inline void  setDNSQuery(char *v) { if(isDNS()) { if(protos.dns.last_query) free(protos.dns.last_query);  protos.dns.last_query = v; } }
   inline void  setDNSQueryType(u_int16_t t) { if(isDNS()) { protos.dns.last_query_type = t; } }
   inline void  setDNSRetCode(u_int16_t c) { if(isDNS()) { protos.dns.last_return_code = c; } }
   inline char* getHTTPURL()         { return(isHTTP() ? protos.http.last_url : (char*)"");   }
-  inline void  setHTTPURL(char *v)  { if(isHTTP()) { if(protos.http.last_url) free(protos.http.last_url);  protos.http.last_url = strdup(v); } }
+  inline void  setHTTPURL(char *v)  { if(isHTTP()) { if(protos.http.last_url) free(protos.http.last_url);  protos.http.last_url = v; } }
   inline void  setHTTPRetCode(u_int16_t c) { if(isHTTP()) { protos.http.last_return_code = c; } }
   inline char* getHTTPContentType() { return(isHTTP() ? protos.http.last_content_type : (char*)"");   }
   inline char* getSSLCertificate()  { return(isSSL() ? protos.ssl.certificate : (char*)""); }
   bool isSSLProto();
 
-  inline void setSuricataAlert(json_object *a) { if (suricata_alert) json_object_put(suricata_alert); suricata_alert = a; };
-  inline json_object *getSuricataAlert() { return suricata_alert; };
+  inline void setIDSAlert(json_object *a, u_int8_t severity) { if (ids_alert) json_object_put(ids_alert); ids_alert = a; ids_alert_severity = severity; };
+  inline json_object *getIDSAlert() { return ids_alert; };
+  inline u_int8_t getIDSAlertSeverity() { return ids_alert_severity; };
+  int storeFlowAlert(AlertType alert_type, AlertLevel alert_severity, const char *status_info);
 
 #if defined(NTOPNG_PRO) && !defined(HAVE_NEDGE)
   inline void updateProfile()     { trafficProfile = iface->getFlowProfile(this); }
@@ -471,13 +473,9 @@ class Flow : public GenericHashEntry {
   inline float getCli2SrvMaxThpt() { return(rttSec ? ((float)(cli2srv_window*8)/rttSec) : 0); }
   inline float getSrv2CliMaxThpt() { return(rttSec ? ((float)(srv2cli_window*8)/rttSec) : 0); }
 
-  inline u_int32_t getCli2SrvMinInterArrivalTime()  { return(cli2srvStats.pktTime.min_ms); }
-  inline u_int32_t getCli2SrvMaxInterArrivalTime()  { return(cli2srvStats.pktTime.max_ms); }
-  inline u_int32_t getCli2SrvAvgInterArrivalTime()  { return((stats.cli2srv_packets < 2) ? 0 : cli2srvStats.pktTime.total_delta_ms / (stats.cli2srv_packets-1)); }
-  inline u_int32_t getSrv2CliMinInterArrivalTime()  { return(srv2cliStats.pktTime.min_ms); }
-  inline u_int32_t getSrv2CliMaxInterArrivalTime()  { return(srv2cliStats.pktTime.max_ms); }
-  inline u_int32_t getSrv2CliAvgInterArrivalTime()  { return((stats.srv2cli_packets < 2) ? 0 : srv2cliStats.pktTime.total_delta_ms / (stats.srv2cli_packets-1)); }
-  bool isIdleFlow();
+  inline InterarrivalStats* getCli2SrvIATStats() const { return cli2srvPktTime; }
+  inline InterarrivalStats* getSrv2CliIATStats() const { return srv2cliPktTime; }
+
   inline bool isTCPEstablished() const { return (!isTCPClosed() && !isTCPReset()
 						 && ((src2dst_tcp_flags & (TH_SYN | TH_ACK)) == (TH_SYN | TH_ACK))
 						 && ((dst2src_tcp_flags & (TH_SYN | TH_ACK)) == (TH_SYN | TH_ACK))); }
@@ -487,8 +485,8 @@ class Flow : public GenericHashEntry {
 						 && ((dst2src_tcp_flags & (TH_SYN | TH_ACK | TH_FIN)) == (TH_SYN | TH_ACK | TH_FIN))); }
   inline bool isTCPReset()       const { return (!isTCPClosed()
 						 && ((src2dst_tcp_flags & TH_RST) || (dst2src_tcp_flags & TH_RST))); }
-  inline bool      isFlowAlerted()        { return(flow_alerted);                   }
-  inline void      setFlowAlerted()       { flow_alerted = true;                    }
+  bool isFlowAlerted() const;
+  void setFlowAlerted(int64_t rowid);
   inline void      setVRFid(u_int32_t v)  { vrfId = v;                              }
 
   inline void setFlowNwLatency(const struct timeval * const tv, bool client) {
@@ -518,12 +516,14 @@ class Flow : public GenericHashEntry {
   inline u_int32_t getFlowDeviceIp()       { return flow_device.device_ip; };
   inline u_int16_t getFlowDeviceInIndex()  { return flow_device.in_index;  };
   inline u_int16_t getFlowDeviceOutIndex() { return flow_device.out_index; };
+
+  inline void setScore(u_int16_t score)    { alert_score = score; };
+  inline u_int16_t getScore()              { return(alert_score); };
+
 #ifdef HAVE_NEDGE
   inline void setLastConntrackUpdate(u_int32_t when) { last_conntrack_update = when; }
   bool isNetfilterIdleFlow();
-#endif
-  
-#ifdef HAVE_NEDGE
+
   void setPacketsBytes(time_t now, u_int32_t s2d_pkts, u_int32_t d2s_pkts, u_int64_t s2d_bytes, u_int64_t d2s_bytes);  
   void getFlowShapers(bool src2dst_direction, TrafficShaper **shaper_ingress, TrafficShaper **shaper_egress) {
     if(src2dst_direction) {

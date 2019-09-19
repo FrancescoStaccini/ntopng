@@ -73,7 +73,7 @@ function format_utils.secondsToTime(seconds)
 end
 
 function format_utils.msToTime(ms)
-   if(ms > 1000) then
+   if(ms > 10000) then -- 10 sec+
       return format_utils.secondsToTime(ms/1000)
    else
       if(ms < 1) then
@@ -176,26 +176,6 @@ end
 
 function format_utils.bitsToSize(bits)
    return(bitsToSizeMultiplier(bits, 1000))
-end
-
--- maxRateToString
-function format_utils.maxRateToString(max_rate)
-   if((max_rate == nil) or (max_rate == "")) then max_rate = -1 end
-   max_rate = tonumber(max_rate)
-
-   if(max_rate < 1000) then
-      return(max_rate.." Kbit/s")
-   else
-      local mr
-      mr = round(max_rate / 1000, 2)
-
-      if(mr < 1000) then
-	 return(mr.." Mbit/s")
-      else
-	 gbit = mr /1000
-	 return(gbit.." Gbit/s")
-      end
-   end
 end
 
 function format_utils.formatEpoch(epoch)

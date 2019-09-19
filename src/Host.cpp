@@ -141,6 +141,10 @@ void Host::initialize(Mac *_mac, u_int16_t _vlanId, bool init_all) {
   data_delete_requested = false, stats_reset_requested = false;
   last_stats_reset = ntop->getLastStatsReset(); /* assume fresh stats, may be changed by deserialize */
   os = os_unknown;
+  prefs_loaded = false;
+  mud_pref = mud_recording_disabled;
+
+  anomalous_flows_as_client_status = anomalous_flows_as_server_status = 0;
 
   // readStats(); - Commented as if put here it's too early and the key is not yet set
 
@@ -158,6 +162,7 @@ void Host::initialize(Mac *_mac, u_int16_t _vlanId, bool init_all) {
   num_resolve_attempts = 0, ssdpLocation = NULL;
   low_goodput_client_flows.reset(), low_goodput_server_flows.reset();
   num_active_flows_as_client.reset(), num_active_flows_as_server.reset();
+  alert_score = CONST_NO_SCORE_SET;
 
   flow_alert_counter = NULL;
   good_low_flow_detected = false;
@@ -378,6 +383,7 @@ void Host::lua(lua_State* vm, AddressTree *ptree,
   lua_push_str_table_entry(vm, "tskey", get_tskey(buf_id, sizeof(buf_id)));
   lua_push_bool_table_entry(vm, "localhost", isLocalHost());
   lua_push_uint64_table_entry(vm, "vlan", vlan_id);
+  lua_push_int32_table_entry(vm, "score", alert_score != CONST_NO_SCORE_SET ? alert_score : -1);
 
   lua_push_str_table_entry(vm, "mac", Utils::formatMac(cur_mac ? cur_mac->get_mac() : NULL, buf, sizeof(buf)));
   lua_push_uint64_table_entry(vm, "devtype", isBroadcastDomainHost() && cur_mac ? cur_mac->getDeviceType() : device_unknown);
@@ -396,6 +402,7 @@ void Host::lua(lua_State* vm, AddressTree *ptree,
   lua_settable(vm, -3);
 
   lua_push_uint64_table_entry(vm, "num_alerts", triggerAlerts() ? getNumTriggeredAlerts() : 0);
+  lua_push_uint64_table_entry(vm, "active_alerted_flows", triggerAlerts() ? getNumAlertedFlows() : 0);
 
   lua_push_str_table_entry(vm, "name", get_visual_name(buf, sizeof(buf)));
 
@@ -418,6 +425,8 @@ void Host::lua(lua_State* vm, AddressTree *ptree,
   lua_push_uint64_table_entry(vm, "active_flows.as_server", getNumIncomingFlows());
   lua_push_uint64_table_entry(vm, "anomalous_flows.as_server", getTotalNumAnomalousIncomingFlows());
   lua_push_uint64_table_entry(vm, "anomalous_flows.as_client", getTotalNumAnomalousOutgoingFlows());
+  lua_push_uint64_table_entry(vm, "anomalous_flows_status_map.as_server", getAnomalousIncomingFlowsStatusMap());
+  lua_push_uint64_table_entry(vm, "anomalous_flows_status_map.as_client", getAnomalousOutgoingFlowsStatusMap());
   lua_push_uint64_table_entry(vm, "unreachable_flows.as_server", getTotalNumUnreachableIncomingFlows());
   lua_push_uint64_table_entry(vm, "unreachable_flows.as_client", getTotalNumUnreachableOutgoingFlows());
   lua_push_uint64_table_entry(vm, "host_unreachable_flows.as_server", getTotalNumHostUnreachableIncomingFlows());
@@ -515,7 +524,6 @@ void Host::lua(lua_State* vm, AddressTree *ptree,
 /* ***************************************** */
 
 char* Host::get_name(char *buf, u_int buf_len, bool force_resolution_if_not_found) {
-  Mac *cur_mac = getMac(); /* Cache it as it can change */
   char *addr = NULL, name_buf[96];
   int rc = -1;
   time_t now = time(NULL);
@@ -529,10 +537,13 @@ char* Host::get_name(char *buf, u_int buf_len, bool force_resolution_if_not_foun
 
   num_resolve_attempts++;
 
-  if(cur_mac) {
-    cur_mac->getDHCPName(name_buf, sizeof(name_buf));
-    if(strlen(name_buf))
-      goto out;
+  if(isBroadcastDomainHost()) {
+    Mac *cur_mac = getMac(); /* Cache it as it can change */
+    if (cur_mac) {
+      cur_mac->getDHCPName(name_buf, sizeof(name_buf));
+      if(strlen(name_buf))
+        goto out;
+    }
   }
 
   getMDNSName(name_buf, sizeof(name_buf));
@@ -640,13 +651,14 @@ bool Host::idle() {
 
 /* *************************************** */
 
-void Host::incStats(u_int32_t when, u_int8_t l4_proto, u_int ndpi_proto,
+void Host::incStats(u_int32_t when, u_int8_t l4_proto,
+		    u_int ndpi_proto, ndpi_protocol_category_t ndpi_category,
 		    custom_app_t custom_app,
 		    u_int64_t sent_packets, u_int64_t sent_bytes, u_int64_t sent_goodput_bytes,
 		    u_int64_t rcvd_packets, u_int64_t rcvd_bytes, u_int64_t rcvd_goodput_bytes,
 		    bool peer_is_unicast) {
   if(sent_bytes || rcvd_bytes) {
-    stats->incStats(when, l4_proto, ndpi_proto, custom_app,
+    stats->incStats(when, l4_proto, ndpi_proto, ndpi_category, custom_app,
 		    sent_packets, sent_bytes, sent_goodput_bytes, rcvd_packets,
 		    rcvd_bytes, rcvd_goodput_bytes, peer_is_unicast);
 
@@ -1123,7 +1135,7 @@ bool Host::statsResetRequested() {
 
 /* *************************************** */
 
-void Host::updateStats(update_hosts_stats_user_data_t *update_hosts_stats_user_data) {
+void Host::updateStats(update_stats_user_data_t *update_hosts_stats_user_data) {
   struct timeval *tv = update_hosts_stats_user_data->tv;
   Mac *cur_mac = getMac();
 
@@ -1328,6 +1340,9 @@ void Host::dumpDropbox(lua_State *vm) {
 
 void Host::refreshDisableFlowAlertTypes() {
   char keybuf[128], buf[128], rsp[32];
+
+  if(ntop->getPrefs()->are_alerts_disabled())
+    return;
 
   snprintf(buf, sizeof(buf), CONST_HOST_REFRESH_DISABLED_FLOW_ALERT_TYPES,
     iface->get_id(), get_hostkey(keybuf, sizeof(keybuf), true));

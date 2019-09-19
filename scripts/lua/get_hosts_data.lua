@@ -7,8 +7,11 @@ package.path = dirs.installdir .. "/scripts/lua/modules/?.lua;" .. package.path
 require "lua_utils"
 local discover = require "discover_utils"
 local custom_column_utils = require "custom_column_utils"
+local format_utils = require "format_utils"
 local json = require "dkjson"
 local have_nedge = ntop.isnEdge()
+
+local debug_score = (ntop.getPref("ntopng.prefs.beta_score") == "1")
 
 sendHTTPContentTypeHeader('text/html')
 
@@ -229,6 +232,10 @@ for _key, _value in pairsByKeys(vals, funct) do
       column_ip = column_ip .. " ".. discover.getOsIcon(value.operatingSystem)
    end
 
+   if((value["num_alerts"] ~= nil) and (value["num_alerts"] > 0)) then
+      column_ip = column_ip .. " <i class='fa fa-warning' style='color: #B94A48;'></i>"
+   end
+
    if value["systemhost"]    then column_ip = column_ip .. "&nbsp;<i class='fa fa-flag'></i> " end
    if value["hiddenFromTop"] then column_ip = column_ip .. "&nbsp;<i class='fa fa-eye-slash'></i> " end
    if value["childSafe"]     then column_ip = column_ip .. getSafeChildIcon() end
@@ -254,7 +261,7 @@ for _key, _value in pairsByKeys(vals, funct) do
    end
 
    if((host ~= nil) and (host["is_blacklisted"] == true)) then
-      column_ip = column_ip .. "&nbsp;<span class='label label-danger'>"..i18n("hosts_stats.label_blacklisted_host").."</span>"
+      column_ip = column_ip .. " <i class=\'fa fa-ban fa-sm\' title=\'"..i18n("hosts_stats.blacklisted").."\'></i>"
    end
 
    record["column_ip"] = column_ip
@@ -286,12 +293,14 @@ for _key, _value in pairsByKeys(vals, funct) do
       end
    end
 
-   if((value["num_alerts"] ~= nil) and (value["num_alerts"] > 0)) then
-      column_name = column_name .. " <i class='fa fa-warning fa-lg' style='color: #B94A48;'></i>"
+   if value["has_blocking_quota"] or value["has_blocking_shaper"] then
+      column_name = column_name .. " <i class='fa fa-ban' title='"..i18n("hosts_stats.blocking_traffic_policy_popup_msg").."'></i>"
    end
 
-   if value["has_blocking_quota"] or value["has_blocking_shaper"] then
-      column_name = column_name .. " <i class='fa fa-ban fa-lg' title='"..i18n("hosts_stats.blocking_traffic_policy_popup_msg").."'></i>"
+   if debug_score then
+     if(value["score"] > 0) then
+       column_name = column_name .. string.format(" [<b>score: %u</b>]", value["score"])
+     end
    end
 
    record["column_name"] = column_name
@@ -364,7 +373,7 @@ for _key, _value in pairsByKeys(vals, funct) do
       record["column_location"] = column_location
    end
 
-   record["column_num_flows"] = tostring(value["active_flows.as_client"] + value["active_flows.as_server"])
+   record["column_num_flows"] = format_utils.formatValue(value["active_flows.as_client"] + value["active_flows.as_server"])
 
    -- exists only for bridged interfaces
    if isBridgeInterface(interface.getStats()) then

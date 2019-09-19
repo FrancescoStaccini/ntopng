@@ -24,13 +24,17 @@ local discover = require "discover_utils"
 local ts_utils = require "ts_utils"
 local page_utils = require "page_utils"
 local template = require "template_utils"
+local mud_utils = require "mud_utils"
 local companion_interface_utils = require "companion_interface_utils"
+local flow_consts = require "flow_consts"
 
 local info = ntop.getInfo()
 
 local have_nedge = ntop.isnEdge()
 
 local debug_hosts = false
+local debug_score = (ntop.getPref("ntopng.prefs.beta_score") == "1")
+
 local page        = _GET["page"]
 local protocol_id = _GET["protocol"]
 local application = _GET["application"]
@@ -141,7 +145,7 @@ if(host == nil) and (not only_historical) then
 	 print('";</script>')
       else
 	 dofile(dirs.installdir .. "/scripts/lua/inc/menu.lua")
-	 print('<div class=\"alert alert-danger\"><i class="fa fa-warning fa-lg"></i> '.. i18n("host_details.host_cannot_be_found_message",{host=hostinfo2hostkey(host_info)}) .. " ")
+	 print('<div class=\"alert alert-danger\"><i class="fa fa-warning"></i> '.. i18n("host_details.host_cannot_be_found_message",{host=hostinfo2hostkey(host_info)}) .. " ")
 	 if((json ~= nil) and (json ~= "")) then
 	    print[[<form id="host_restore_form" method="post">]]
 	    print[[<input name="mode" type="hidden" value="restore" />]]
@@ -201,7 +205,7 @@ else
      host["name"] = host["label"]
    end
 
-      print('<div style=\"display:none;\" id=\"host_purged\" class=\"alert alert-danger\"><i class="fa fa-warning fa-lg"></i>&nbsp;'..i18n("details.host_purged")..'</div>')
+      print('<div style=\"display:none;\" id=\"host_purged\" class=\"alert alert-danger\"><i class="fa fa-warning"></i>&nbsp;'..i18n("details.host_purged")..'</div>')
 print [[
 <div class="bs-docs-example">
             <nav class="navbar navbar-default" role="navigation">
@@ -400,11 +404,13 @@ if(not(isLoopback(ifname))) then
       end
    end
 
-   if(page == "geomap") then
-      print("<li class=\"active\"><a href=\"#\"><i class='fa fa-globe fa-lg'></i></a></li>\n")
-   else
-      if(host["ip"] ~= nil) then
-	 print("<li><a href=\""..url.."&page=geomap\"><i class='fa fa-globe fa-lg'></i></a></li>")
+   if not host.privatehost then
+      if(page == "geomap") then
+	 print("<li class=\"active\"><a href=\"#\"><i class='fa fa-globe fa-lg'></i></a></li>\n")
+      else
+	 if(host["ip"] ~= nil) then
+	    print("<li><a href=\""..url.."&page=geomap\"><i class='fa fa-globe fa-lg'></i></a></li>")
+	 end
       end
    end
 end
@@ -537,7 +543,7 @@ if((page == "overview") or (page == nil)) then
       print("</th><td colspan=2><A HREF="..ntop.getHttpPrefix().."/lua/hosts_stats.lua?vlan="..host["vlan"]..">"..host["vlan"].."</A></td></tr>\n")
    end
 
-   if(host["os"] ~= "") then
+   if(host["os"] ~= "" and host["os"] ~= 0) then
       print("<tr>")
       if(host["os"] ~= "") then
         local os_detail = ""
@@ -583,6 +589,10 @@ if((page == "overview") or (page == nil)) then
       -- tprint(host) io.write("\n")
       print(host["name"] .. "</span></A> <i class=\"fa fa-external-link\"></i> ")
 
+      if host["is_blacklisted"] then
+	 print(" <i class=\'fa fa-ban fa-sm\' title=\'"..i18n("hosts_stats.blacklisted").."\'></i>")
+      end
+
       print[[ <a href="]] print(ntop.getHttpPrefix()) print[[/lua/host_details.lua?]] print(hostinfo2url(host)) print[[&page=config&ifid=]] print(tostring(ifId)) print[[">]]
       print[[<i class="fa fa-sm fa-cog" aria-hidden="true" title="Set Host Alias"></i></a></span> ]]
 
@@ -609,11 +619,17 @@ if((page == "overview") or (page == nil)) then
    end
 
 if(host["num_alerts"] > 0) then
-   print("<tr><th><i class=\"fa fa-warning fa-lg\" style='color: #B94A48;'></i>  <A HREF='"..ntop.getHttpPrefix().."/lua/host_details.lua?ifid="..ifId.."&"..hostinfo2url(host_info).."&page=alerts'>"..i18n("show_alerts.engaged_alerts").."</A></th><td colspan=2></li> <span id=num_alerts>"..host["num_alerts"] .. "</span> <span id=alerts_trend></span></td></tr>\n")
+   print("<tr><th><i class=\"fa fa-warning\" style='color: #B94A48;'></i> "..i18n("show_alerts.engaged_alerts").."</th><td colspan=2></li> <A HREF='"..ntop.getHttpPrefix().."/lua/host_details.lua?ifid="..ifId.."&"..hostinfo2url(host_info).."&page=alerts'><span id=num_alerts>"..host["num_alerts"] .. "</span></a> <span id=alerts_trend></span></td></tr>\n")
 end
 
-if(host["num_flow_alerts"] > 0) then
-  print("<tr><th>"..i18n("show_alerts.flow_alerts").."</th><td colspan=2></li> <span id=num_flow_alerts>"..host["num_flow_alerts"] .. "</span> <span id=flow_alerts_trend></span></td></tr>\n")
+if debug_score then
+  if(host["score"] > 0) then
+    print("<tr><th>"..i18n("score").."</th><td colspan=2></li> <span id=score>"..host["score"] .. "</span> <span id=score_trend></span></td></tr>\n")
+  end
+end
+
+if(host["active_alerted_flows"] > 0) then
+  print("<tr><th><i class=\"fa fa-warning\" style='color: #B94A48;'></i> "..i18n("host_details.active_alerted_flows").."</th><td colspan=2></li> <a href='".. ntop.getHttpPrefix() .."/lua/host_details.lua?ifid="..ifId.."&"..hostinfo2url(host_info).."&page=flows&flow_status=alerted'><span id=num_flow_alerts>"..host["active_alerted_flows"] .. "</span></a> <span id=flow_alerts_trend></span></td></tr>\n")
 end
 
    if ntop.isPro() and ifstats.inline and (host["has_blocking_quota"] or host["has_blocking_shaper"]) then
@@ -659,7 +675,7 @@ end
    end
 
    if interfaceHasNindexSupport() then
-      flows_th = flows_th .. ' <a href="?host='..hostinfo2hostkey(host_info)..'&page=historical&detail_view=flows&zoom=1h&flow_status=alerted"><i class="fa fa-search-plus"></i></a>'
+      flows_th = flows_th .. ' <a href="?host='..hostinfo2hostkey(host_info)..'&page=historical&detail_view=flows&zoom=1h&flow_status=misbehaving"><i class="fa fa-search-plus"></i></a>'
    end
 
    print("<tr><th></th><th>"..i18n("details.as_client").."</th><th>"..i18n("details.as_server").."</th></tr>\n")
@@ -680,6 +696,23 @@ end
    print("/ <span id=anomalous_flows_as_server>" .. formatValue(host["anomalous_flows.as_server"]) .. "</span> <span id=trend_anomalous_flows_as_server></span>")
    print(" / <span id=unreachable_flows_as_server>" .. formatValue(host["unreachable_flows.as_server"]) .. "</span> <span id=trend_unreachable_flows_as_server></span>")
    print("</td></tr>")
+
+   if debug_score then
+      print("<tr><th>"..i18n("details.anomalous_flows_reasons").."</th><td nowrap><span id=anomalous_flows_status_map_as_client>")
+      for id, t in ipairs(flow_consts.flow_status_types) do
+         if ntop.bitmapIsSet(host["anomalous_flows_status_map.as_client"], id) then
+            print(getFlowStatus(id).."<br />")
+         end
+      end
+      print("</span></td>\n")
+      print("<td  width='35%'><span id=anomalous_flows_status_map_as_server>")
+      for id, t in ipairs(flow_consts.flow_status_types) do
+         if ntop.bitmapIsSet(host["anomalous_flows_status_map.as_server"], id) then
+            print(getFlowStatus(id).."<br />")
+         end
+      end
+      print("</span></td></tr>\n")
+   end
 
    print("<tr><th>"..i18n("details.peers").."</th>")
    print("<td><span id=active_peers_as_client>" .. formatValue(host["contacts.as_client"]) .. "</span> <span id=peers_trend_as_active_client></span> \n")
@@ -1297,7 +1330,7 @@ setInterval(update_ndpi_categories_table, 5000);
 	 print("<li>"..i18n("ndpi_page.note_historical_per_protocol_traffic",{what=i18n("category"), url=ntop.getHttpPrefix().."/lua/admin/prefs.lua",flask_icon="<i class=\"fa fa-flask\"></i>"}).." ")
       end
 
-      print("<li>"..i18n("ndpi_page.note_possible_probing_alert",{icon="<i class=\"fa fa-warning fa-sm\" style=\"color: orange;\"></i>",url=ntop.getHttpPrefix().."/lua/host_details.lua?ifid="..ifId.."&host=".._GET["host"].."&page=historical"}))
+      print("<li>"..i18n("ndpi_page.note_possible_probing_alert",{icon="<i class=\"fa fa-warning\" style=\"color: orange;\"></i>",url=ntop.getHttpPrefix().."/lua/host_details.lua?ifid="..ifId.."&host=".._GET["host"].."&page=historical"}))
       print("<li>"..i18n("ndpi_page.note_protocol_usage_time"))
       print("</ul>")
 
@@ -1778,7 +1811,7 @@ elseif(page == "dropbox") then
    end
 
    print("</ul>")
-elseif(page == "geomap") then
+elseif not host.privatehost and page == "geomap" then
 print("<center>")
 
 
@@ -1954,7 +1987,21 @@ elseif (page == "config") then
          is_top_hidden = new_top_hidden
          interface.reloadHideFromTop()
       end
+
+      if(_POST["mud_recording"] ~= nil) then
+         mud_utils.setHostMUDRecordingPref(ifId, host_info.host, _POST["mud_recording"])
+         interface.reloadHostPrefs(host_info.host)
+      end
+
+      if(_POST["action"] == "delete_mud") then
+        mud_utils.deleteHostMUD(ifId, host_info.host)
+      end
    end
+
+   print[[<form id="delete-mud-form" method="post">]]
+   print[[<input name="action" type="hidden" value="delete_mud" />]]
+   print[[<input name="csrf" type="hidden" value="]] print(ntop.getRandomCSRFValue()) print[[" />]]
+   print[[</form>]]
 
    print[[
    <form id="host_config" class="form-inline" method="post">
@@ -1983,6 +2030,27 @@ elseif (page == "config") then
                </input>
          </td>
       </tr>]]
+
+   if(host["localhost"] and ((host_vlan == nil) or (host_vlan == 0))) then
+      local mud_recording_pref = mud_utils.getHostMUDRecordingPref(ifId, host_info.host, _POST["mud_recording"])
+
+      print [[<tr>
+         <th>]] print(i18n("host_config.mud_recording")) print[[</th>
+         <td>
+               <select name="mud_recording" class="form-control" style="width:20em;">
+                  <option value="disabled" ]] if mud_recording_pref == "disabled" then print("selected") end print[[>]] print(i18n("traffic_recording.disabled")) print[[</option>
+                  <option value="general_purpose" ]] if mud_recording_pref == "general_purpose" then print("selected") end print[[>]] print(i18n("host_config.mud_general_purpose")) print[[</option>
+                  <option value="special_purpose" ]] if mud_recording_pref == "special_purpose" then print("selected") end print[[>]] print(i18n("host_config.mud_special_purpose")) print[[</option>
+               </select>]]
+
+      if mud_utils.hasRecordedMUD(ifId, host_info.host) then
+         print(" <a style=\"margin-left: 0.5em\" href=\""..ntop.getHttpPrefix().."/lua/rest/get/host/mud.lua?host=".. host_info.host .."\"><i class=\"fa fa-lg fa-download\"></i></a>")
+         print("<a style=\"margin-left: 1em\" href=\"#\" onclick=\"$('#delete-mud-form').submit();\"><i class=\"fa fa-lg fa-trash\"></i></a>")
+      end
+
+      print[[</td>
+      </tr>]]
+   end
 
    if(ifstats.inline and (host.localhost or host.systemhost)) then
       -- Traffic policy
@@ -2111,7 +2179,8 @@ if(not only_historical) and (host ~= nil) then
    print("var last_pkts_sent = " .. host["packets.sent"] .. ";\n")
    print("var last_pkts_rcvd = " .. host["packets.rcvd"] .. ";\n")
    print("var last_num_alerts = " .. host["num_alerts"] .. ";\n")
-   print("var last_num_flow_alerts = " .. host["num_flow_alerts"] .. ";\n")
+   print("var last_score = " .. host["score"] .. ";\n")
+   print("var last_num_flow_alerts = " .. host["active_alerted_flows"] .. ";\n")
    print("var last_active_flows_as_server = " .. host["active_flows.as_server"] .. ";\n")
    print("var last_active_flows_as_client = " .. host["active_flows.as_client"] .. ";\n")
    print("var last_flows_as_server = " .. host["flows.as_server"] .. ";\n")
@@ -2198,7 +2267,8 @@ if(not only_historical) and (host ~= nil) then
    			   $('#name').html(host["name"]);
    			}
    			$('#num_alerts').html(host["num_alerts"]);
-   			$('#num_flow_alerts').html(host["num_flow_alerts"]);
+   			$('#score').html(host["score"]);
+   			$('#num_flow_alerts').html(host["active_alerted_flows"]);
    			$('#active_flows_as_client').html(addCommas(host["active_flows.as_client"]));
    			$('#active_flows_as_server').html(addCommas(host["active_flows.as_server"]));
    			$('#active_peers_as_client').html(addCommas(host["contacts.as_client"]));
@@ -2339,7 +2409,8 @@ print [[
 			$('#trend_unreachable_flows_as_client').html(drawTrend(host["unreachable_flows.as_client"], last_unreachable_flows_as_client, " style=\"color: #B94A48;\""));
 
 			$('#alerts_trend').html(drawTrend(host["num_alerts"], last_num_alerts, " style=\"color: #B94A48;\""));
-      $('#flow_alerts_trend').html(drawTrend(host["num_flow_alerts"], last_num_flow_alerts, " style=\"color: #B94A48;\""));
+			$('#score_trend').html(drawTrend(host["score"], last_score, " style=\"color: #B94A48;\""));
+			$('#flow_alerts_trend').html(drawTrend(host["active_alerted_flows"], last_num_flow_alerts, " style=\"color: #B94A48;\""));
 			$('#sent_trend').html(drawTrend(host["packets.sent"], last_pkts_sent, ""));
 			$('#rcvd_trend').html(drawTrend(host["packets.rcvd"], last_pkts_rcvd, ""));
 
@@ -2354,7 +2425,8 @@ print [[
  		        $('#pkt_keep_alive_rcvd_trend').html(drawTrend(host["tcpPacketStats.rcvd"]["keep_alive"], last_rcvd_tcp_keep_alive, ""));
 
    			last_num_alerts = host["num_alerts"];
-   			last_num_flow_alerts = host["num_flow_alerts"];
+   			last_score = host["score"];
+   			last_num_flow_alerts = host["active_alerted_flows"];
    			last_pkts_sent = host["packets.sent"];
    			last_pkts_rcvd = host["packets.rcvd"];
    			last_active_flows_as_client = host["active_flows.as_client"];

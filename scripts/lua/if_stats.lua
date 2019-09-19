@@ -18,6 +18,7 @@ local host_pools_utils = require "host_pools_utils"
 local template = require "template_utils"
 local os_utils = require "os_utils"
 local format_utils  = require "format_utils"
+local top_talkers_utils = require "top_talkers_utils"
 local page_utils = require("page_utils")
 
 require "lua_utils"
@@ -26,6 +27,7 @@ require "graph_utils"
 require "alert_utils"
 require "db_utils"
 local ts_utils = require "ts_utils"
+local flow_callbacks_utils = require "flow_callbacks_utils"
 local recording_utils = require "recording_utils"
 local companion_interface_utils = require "companion_interface_utils"
 local storage_utils = require "storage_utils"
@@ -112,6 +114,13 @@ if ifstats.stats and ifstats.stats_since_reset then
    -- override stats with the values calculated from the latest user reset
    for k, v in pairs(ifstats.stats_since_reset) do
       ifstats.stats[k] = v
+   end
+end
+
+if ifstats.zmqRecvStats and ifstats.zmqRecvStats_since_reset then
+   -- override stats with the values calculated from the latest user reset
+   for k, v in pairs(ifstats.zmqRecvStats_since_reset) do
+      ifstats.zmqRecvStats[k] = v
    end
 end
 
@@ -204,10 +213,12 @@ else
    print("<li><a href=\""..url.."&page=overview\"><i class=\"fa fa-home fa-lg\"></i></a></li>")
 end
 
-if(page == "networks") then
-   print("<li class=\"active\"><a href=\"#\">" .. i18n("networks") .. "</a></li>\n")
-else
-   print("<li><a href=\""..url.."&page=networks\">" .. i18n("networks") .. "</a></li>")
+if interface.isPacketInterface() then
+   if(page == "networks") then
+      print("<li class=\"active\"><a href=\"#\">" .. i18n("networks") .. "</a></li>\n")
+   else
+      print("<li><a href=\""..url.."&page=networks\">" .. i18n("networks") .. "</a></li>")
+   end
 end
 
 -- Disable Packets and Protocols tab in case of the number of packets is equal to 0
@@ -325,6 +336,11 @@ if(isAdministrator()) then
    elseif not is_pcap_dump then
       print("\n<li><a href=\""..url.."&page=config\"><i class=\"fa fa-cog fa-lg\"></i></a></li>")
    end
+   if(page == "flow_callbacks") then
+      print("\n<li class=\"active\"><a href=\"#\"><i class=\"fa fa-superpowers\"></i></a></li>\n")
+   else
+      print("\n<li><a href=\""..url.."&page=flow_callbacks\"><i class=\"fa fa-superpowers\"></i></a></li>")
+   end
 end
 
 if isAdministrator() then
@@ -378,6 +394,8 @@ print [[
    ]]
 
 if((page == "overview") or (page == nil)) then
+   local tags = {ifid = ifstats.id}
+
    print("<table class=\"table table-striped table-bordered\">\n")
    print("<tr><th width=15%>"..i18n("if_stats_overview.id").."</th><td colspan=6>" .. ifstats.id .. " ")
    if(ifstats.description ~= ifstats.name) then print(" ("..ifstats.description..")") end
@@ -412,7 +430,7 @@ if((page == "overview") or (page == nil)) then
       end
 
       if not isEmptyString(ifstats["probe.public_ip"]) then
-         remote_probe_public_ip = "<b>"..i18n("if_stats_overview.public_probe_ip").."</b>: <A HREF=\"http://"..ifstats["probe.public_ip"].."\">"..ifstats["probe.public_ip"].."</A> <i class='fa fa-external-link'></i></td>\n"
+	 remote_probe_public_ip = "<b>"..i18n("if_stats_overview.public_probe_ip").."</b>: <A HREF=\"http://"..ifstats["probe.public_ip"].."\">"..ifstats["probe.public_ip"].."</A> <i class='fa fa-external-link'></i></td>\n"
       end
 
       if not isEmptyString(ifstats["zmq.num_flow_exports"]) then
@@ -423,7 +441,14 @@ if((page == "overview") or (page == nil)) then
 	 num_remote_flow_exporters = "<b>"..i18n("if_stats_overview.probe_zmq_num_endpoints").."</b>: <span id=if_num_remote_zmq_exporters>"..formatValue(ifstats["zmq.num_exporters"]).."</span>"
       end
 
-      print("<tr><th rowspan=3>"..i18n("if_stats_overview.remote_probe").."</th><td nowrap><b>"..i18n("if_stats_overview.interface_name").."</b>: "..ifstats["remote.name"].." [ ".. maxRateToString(ifstats.speed*1000) .." ]</td>")
+      local remote_ifname = ''
+      if ifstats["remote.name"] == "none" then
+	 remote_ifname = i18n("if_stats_overview.remote_probe_collector_mode")
+      else
+	 remote_ifname = string.format("<b>%s</b>: %s [%s]", i18n("if_stats_overview.interface_name"), ifstats["remote.name"], bitsToSize(ifstats.speed*1000000))
+      end
+
+      print("<tr><th rowspan=3>"..i18n("if_stats_overview.remote_probe").."</th><td nowrap>"..remote_ifname.."</td>")
       print("<td nowrap>"..remote_if_addr.."</td>")
       print("<td nowrap>"..remote_probe_ip.."</td>")
       print("<td nowrap colspan=2>"..remote_probe_public_ip.."</td>\n")
@@ -433,21 +458,22 @@ if((page == "overview") or (page == nil)) then
       local colspan = 4
 
       if ifstats["timeout.lifetime"] > 0 then
-        print("<td nowrap><b>"..i18n("if_stats_overview.probe_timeout_lifetime").."</b>: "..secondsToTime(ifstats["timeout.lifetime"]).."</td>")
+	 print("<td nowrap><b>"..i18n("if_stats_overview.probe_timeout_lifetime").."</b>: "..secondsToTime(ifstats["timeout.lifetime"]).."</td>")
       else
-        colspan = colspan - 1
+	 colspan = colspan - 1
       end
       if ifstats["timeout.idle"] > 0 then
-        print("<td nowrap><b>"..i18n("if_stats_overview.probe_timeout_idle").."</b>: "..secondsToTime(ifstats["timeout.idle"]).."</td>")
+	 print("<td nowrap><b>"..i18n("if_stats_overview.probe_timeout_idle").."</b>: "..secondsToTime(ifstats["timeout.idle"]).."</td>")
       else
-        colspan = colspan - 1
+	 colspan = colspan - 1
       end
 
       print("<td nowrap colspan="..colspan..">"..num_remote_flow_exporters.."</td>")
       print("</tr>")
 
       local has_drops_export_queue_full = (tonumber(ifstats["zmq.drops.export_queue_full"]) and tonumber(ifstats["zmq.drops.export_queue_full"]) > 0)
-      local has_drops_flow_collection_drops = (tonumber(ifstats["zmq.drops.flow_collection_drops"]) and tonumber(ifstats["zmq.drops.flow_collection_drops"]) > 0)
+      local has_drops_flow_collection_drops = (tonumber(ifstats["zmq.drops.flow_collection_drops"]) or 0) > 0
+      local has_drops_flow_collection_udp_socket_drops = (tonumber(ifstats["zmq.drops.flow_collection_udp_socket_drops"]) or 0) > 0
       local has_remote_drops = (has_drops_export_queue_full or has_drops_flow_collection_drops)
 
       if not has_remote_drops then
@@ -455,7 +481,7 @@ if((page == "overview") or (page == nil)) then
       else
 	 print("<tr>")
 	 local export_queue_full, flow_collection_drops
-	 local colspan = 5
+	 local colspan = 6
 
 	 if has_drops_export_queue_full then
 	    local num_full = tonumber(ifstats["zmq.drops.export_queue_full"])
@@ -475,12 +501,25 @@ if((page == "overview") or (page == nil)) then
 	    flow_collection_drops = "<b>"..i18n("if_stats_overview.probe_zmq_drops_flow_collection_drops").." <sup><i class='fa fa-info-circle' title='"..i18n("if_stats_overview.note_probe_zmq_drops_flow_collection_drops").."'></i></sup></b>: <span "..span_class.." id=if_zmq_drops_flow_collection_drops>"..formatValue(ifstats["zmq.drops.flow_collection_drops"]).."</span>"
 	 end
 
+	 if has_drops_flow_collection_udp_socket_drops then
+	    local num_full = tonumber(ifstats["zmq.drops.flow_collection_udp_socket_drops"])
+	    local span_class = ' '
+	    if num_full > 0 then
+	       span_class = 'class="label label-danger"'
+	    end
+	    flow_collection_udp_socket_drops = "<b>"..i18n("if_stats_overview.probe_zmq_drops_flow_collection_udp_socket_drops").." <sup><i class='fa fa-info-circle' title='"..i18n("if_stats_overview.note_probe_zmq_drops_flow_collection_udp_socket_drops").."'></i></sup></b>: <span "..span_class.." id=if_zmq_drops_flow_collection_udp_socket_drops>"..formatValue(ifstats["zmq.drops.flow_collection_udp_socket_drops"]).."</span>"
+	 end
+
 	 if export_queue_full then
 	    print("<td>"..export_queue_full.."</td>")
 	    colspan = colspan - 1
 	 end
 	 if flow_collection_drops then
 	    print("<td>"..flow_collection_drops.."</td>")
+	    colspan = colspan - 1
+	 end
+	 if flow_collection_udp_socket_drops then
+	    print("<td>"..flow_collection_udp_socket_drops.."</td>")
 	    colspan = colspan - 1
 	 end
 	 if colspan then
@@ -504,7 +543,7 @@ if((page == "overview") or (page == nil)) then
    if((isAdministrator()) and (not is_pcap_dump)) then
       s = s .. " <a href=\""..url.."&page=config\"><i class=\"fa fa-cog fa-sm\" title=\"Configure Interface Name\"></i></a>"
    end
-   
+
    print('<tr><th width="250">'..i18n("name")..'</th><td colspan="2">' .. s ..' </td>\n')
 
    print("<th>"..i18n("if_stats_overview.family").."</th><td colspan=2>")
@@ -527,17 +566,19 @@ if((page == "overview") or (page == nil)) then
       if (tonumber(speed) == nil) then
 	 speed = ifstats.speed
       end
-      print("<th width=250>"..i18n("speed").."</th><td colspan=2>" .. maxRateToString(speed*1000) .. "</td>")
+      print("<th width=250>"..i18n("speed").."</th><td colspan=2>" .. bitsToSize(speed * 1000000) .. "</td>")
       print("</tr>")
    end
 
    if((ifstats.num_alerts_engaged > 0) or (ifstats.num_dropped_alerts > 0)) then
       print("<tr>")
       local warning = "<i class='fa fa-warning fa-lg' style='color: #B94A48;'></i> "
+      local engaged_alerts_chart_available = ts_utils.exists("iface:engaged_alerts", tags)
+
       print("<th>".. ternary(ifstats.num_alerts_engaged > 0, warning, "") ..i18n("show_alerts.engaged_alerts")..
-        "</th><td colspan=2  nowrap>".. formatValue(ifstats.num_alerts_engaged) .." <span id=engaged_alerts_trend></span></td>\n")
+	       ternary(engaged_alerts_chart_available, " <A HREF='"..url.."&page=historical&ts_schema=iface:engaged_alerts'><i class='fa fa-area-chart fa-sm'></i></A>", "").."</th><td colspan=2  nowrap><a href='".. ntop.getHttpPrefix() .."/lua/show_alerts.lua?ifid="..ifstats.id.."'>".. formatValue(ifstats.num_alerts_engaged) .."</a> <span id=engaged_alerts_trend></span></td>\n")
       print("<th width=250>".. ternary(ifstats.num_dropped_alerts > 0, warning, "")..i18n("show_alerts.dropped_alerts")..
-        "</th><td colspan=2>" .. formatValue(ifstats.num_dropped_alerts) .. " <span id=dropped_alerts_trend></span></td>\n</td>")
+	       "</th><td colspan=2>" .. formatValue(ifstats.num_dropped_alerts) .. " <span id=dropped_alerts_trend></span></td>\n</td>")
    end
 
    label = i18n("pkts")
@@ -550,42 +591,52 @@ if((page == "overview") or (page == nil)) then
       print [[ <td colspan=5><div class="pie-chart" id="ifaceTrafficBreakdown"></div></td></tr> ]]
    end
 
-print [[
+   print [[
 	<script type='text/javascript'>
 	       window.onload=function() {
 				   do_pie("#ifaceTrafficBreakdown", ']]
-print (ntop.getHttpPrefix())
-print [[/lua/iface_local_stats.lua', { ifid: ]] print(ifstats.id .. " }, \"\", refresh); \n")
+   print (ntop.getHttpPrefix())
+   print [[/lua/iface_local_stats.lua', { ifid: ]] print(ifstats.id .. " }, \"\", refresh); \n")
 
-if(ifstats.type ~= "zmq") then
-print [[				   do_pie("#ifaceTrafficDistribution", ']]
-print (ntop.getHttpPrefix())
-print [[/lua/iface_local_stats.lua', { ifid: ]] print(ifstats.id .. ", iflocalstat_mode: \"distribution\" }, \"\", refresh); \n")
-end
-print [[ }
+   if(ifstats.type ~= "zmq") then
+      print [[				   do_pie("#ifaceTrafficDistribution", ']]
+      print (ntop.getHttpPrefix())
+      print [[/lua/iface_local_stats.lua', { ifid: ]] print(ifstats.id .. ", iflocalstat_mode: \"distribution\" }, \"\", refresh); \n")
+   end
+   print [[ }
 
 ]]
-print("</script>\n")
+   print("</script>\n")
 
-if(ifstats.zmqRecvStats ~= nil) then
-   print("<tr><th colspan=7 nowrap>"..i18n("if_stats_overview.zmq_rx_statistics").."</th></tr>\n")
-   print("<tr><th nowrap>"..i18n("if_stats_overview.collected_flows").."</th><td width=20%><span id=if_zmq_flows>"..formatValue(ifstats.zmqRecvStats.flows).."</span></td>")
-   print("<th nowrap>"..i18n("if_stats_overview.interface_rx_updates").."</th><td width=20%><span id=if_zmq_events>"..formatValue(ifstats.zmqRecvStats.events).."</span></td>")
-   print("<th nowrap>"..i18n("if_stats_overview.sflow_counter_updates").."</th><td width=20%><span id=if_zmq_counters>"..formatValue(ifstats.zmqRecvStats.counters).."</span></td></tr>")
-   print("<tr><th nowrap>"..i18n("if_stats_overview.zmq_message_drops").."</th><td width=20%><span id=if_zmq_msg_drops>"..formatValue(ifstats.zmqRecvStats.zmq_msg_drops).."</span></td>")
-   -- empty placeholder, can be used for future items
-   print("<th nowrap colspan=4></th></tr>")
+   if(ifstats.zmqRecvStats ~= nil) then
+      print("<tr><th colspan=7 nowrap>"..i18n("if_stats_overview.zmq_rx_statistics").."</th></tr>\n")
+
+      local collected_flows_chart_available = ts_utils.exists("iface:zmq_recv_flows", tags)
+      print("<tr><th nowrap>"..i18n("if_stats_overview.collected_flows")..ternary(collected_flows_chart_available, " <A HREF='"..url.."&page=historical&ts_schema=iface:zmq_recv_flows'><i class='fa fa-area-chart fa-sm'></i></A>", "").."</th><td width=20%><span id=if_zmq_flows>"..formatValue(ifstats.zmqRecvStats.flows).."</span></td>")
+
+      print("<th nowrap>"..i18n("if_stats_overview.interface_rx_updates").."</th><td width=20%><span id=if_zmq_events>"..formatValue(ifstats.zmqRecvStats.events).."</span></td>")
+
+      print("<th nowrap>"..i18n("if_stats_overview.sflow_counter_updates").."</th><td width=20%><span id=if_zmq_counters>"..formatValue(ifstats.zmqRecvStats.counters).."</span></td></tr>")
+
+      local collected_msgs_chart_available = ts_utils.exists("iface:zmq_rcvd_msgs", tags)
+      print("<tr><th nowrap>"..i18n("if_stats_overview.zmq_message_rcvd")..ternary(collected_msgs_chart_available, " <A HREF='"..url.."&page=historical&ts_schema=custom:zmq_msg_rcvd_vs_drops'><i class='fa fa-area-chart fa-sm'></i></A>", "").."</th><td width=20%><span id=if_zmq_msg_rcvd>"..formatValue(ifstats.zmqRecvStats.zmq_msg_rcvd).."</span></td>")
+
+      print("<th nowrap> <i class='fa fa-tint' aria-hidden='true'></i> "..i18n("if_stats_overview.zmq_message_drops")..ternary(collected_msgs_chart_available, " <A HREF='"..url.."&page=historical&ts_schema=custom:zmq_msg_rcvd_vs_drops'><i class='fa fa-area-chart fa-sm'></i></A>", "").."</th><td width=20%><span id=if_zmq_msg_drops>"..formatValue(ifstats.zmqRecvStats.zmq_msg_drops).."</span></td>")
+      print("<th nowrap> "..i18n("if_stats_overview.zmq_avg_msg_flows").."</th><td width=20%><span id=if_zmq_avg_msg_flows></span></td></tr>")
    end
 
    print("<tr><th colspan=7 nowrap>"..i18n("if_stats_overview.traffic_statistics").."</th></tr>\n")
-   print("<tr><th nowrap>"..i18n("report.total_traffic").."</th><td width=20%><span id=if_bytes>"..bytesToSize(ifstats.stats.bytes).."</span> [<span id=if_pkts>".. formatValue(ifstats.stats.packets) .. " ".. label .."</span>] ")
+
+   local traffic_chart_available = ts_utils.exists("iface:traffic", tags)
+   print("<tr><th nowrap>"..i18n("report.total_traffic")..ternary(traffic_chart_available, " <A HREF='"..url.."&page=historical&ts_schema=iface:traffic'><i class='fa fa-area-chart fa-sm'></i></A>", "").."</th><td width=20%><span id=if_bytes>"..bytesToSize(ifstats.stats.bytes).."</span> [<span id=if_pkts>".. formatValue(ifstats.stats.packets) .. " ".. label .."</span>] ")
 
    print("<span id=pkts_trend></span></td>")
 
-   if ifstats.isDynamic == false then
+   if not ifstats.isDynamic then
       print("<th width=20%><span id='if_packet_drops_drop'><i class='fa fa-tint' aria-hidden='true'></i></span> ")
 
-      print(i18n("if_stats_overview.dropped_packets").."</th>")
+      local drops_chart_available = ts_utils.exists("iface:drops", tags)
+      print(i18n("if_stats_overview.dropped_packets")..ternary(drops_chart_available, " <A HREF='"..url.."&page=historical&ts_schema=iface:drops'><i class='fa fa-area-chart fa-sm'></i></A>", "").."</th>")
 
       print("<td width=20% colspan=3><span id=if_drops>")
 
@@ -606,19 +657,21 @@ if(ifstats.zmqRecvStats ~= nil) then
       if(ifstats.zmqRecvStats ~= nil) then
 	 print("<p><small> <b>"..i18n("if_stats_overview.note").."</b>:<br>".. i18n("if_stats_overview.note_drops_sflow").."</small>")
       end
-      
+
       print("</td>")
    else
       print("<td width=20% colspan=3>")
       print("<small><b>"..i18n("if_stats_overview.note")..":</b> "..i18n("if_stats_overview.note_drop_ifstats_dynamic").."</small>")
       print("</td>")
-   end      
+   end
 
    print("</tr>")
 
    if(ifstats.has_traffic_directions) then
-      print("<tr><th nowrap>"..i18n("http_page.traffic_sent").."</th><td width=20%><span id=if_out_bytes>"..bytesToSize(ifstats.eth.egress.bytes).."</span> [<span id=if_out_pkts>".. formatValue(ifstats.eth.egress.packets) .. " ".. label .."</span>] <span id=pkts_out_trend></span></td>")
-      print("<th nowrap>"..i18n("http_page.traffic_received").."</th><td width=20%><span id=if_in_bytes>"..bytesToSize(ifstats.eth.ingress.bytes).."</span> [<span id=if_in_pkts>".. formatValue(ifstats.eth.ingress.packets) .. " ".. label .."</span>] <span id=pkts_in_trend></span><td></td></tr>")
+      local txrx_chart_available = ts_utils.exists("iface:traffic_rxtx", tags)
+
+      print("<tr><th nowrap>"..i18n("http_page.traffic_sent")..ternary(txrx_chart_available, " <A HREF='"..url.."&page=historical&ts_schema=iface:traffic_rxtx'><i class='fa fa-area-chart fa-sm'></i></A>", "").."</th><td width=20%><span id=if_out_bytes>"..bytesToSize(ifstats.eth.egress.bytes).."</span> [<span id=if_out_pkts>".. formatValue(ifstats.eth.egress.packets) .. " ".. label .."</span>] <span id=pkts_out_trend></span></td>")
+      print("<th nowrap>"..i18n("http_page.traffic_received")..ternary(txrx_chart_available, " <A HREF='"..url.."&page=historical&ts_schema=iface:traffic_rxtx'><i class='fa fa-area-chart fa-sm'></i></A>", "").."</th><td width=20%><span id=if_in_bytes>"..bytesToSize(ifstats.eth.ingress.bytes).."</span> [<span id=if_in_pkts>".. formatValue(ifstats.eth.ingress.packets) .. " ".. label .."</span>] <span id=pkts_in_trend></span><td></td></tr>")
    end
 
    if(prefs.is_dump_flows_enabled and ifstats.isView == false) then
@@ -637,12 +690,12 @@ if(ifstats.zmqRecvStats ~= nil) then
       local export_rate      = ifstats.stats.flow_export_rate
       local export_drops     = ifstats.stats.flow_export_drops
       local export_drops_pct = 0
-      if export_drops == nill then 
+      if export_drops == nill then
 
       elseif export_drops > 0 and export_count > 0 then
 	 export_drops_pct = export_drops / export_count * 100
       elseif export_drops > 0 then
-         export_drops_pct = 100
+	 export_drops_pct = 100
       end
 
       print("<tr><th colspan=7 nowrap>"..dump_to.." "..i18n("if_stats_overview.flows_export_statistics").."</th></tr>\n")
@@ -651,7 +704,7 @@ if(ifstats.zmqRecvStats ~= nil) then
       print("<th nowrap>"..i18n("if_stats_overview.exported_flows").."</th>")
       print("<td><span id=exported_flows>"..formatValue(export_count).."</span>")
       if export_rate == nil then
-	export_rate = 0
+	 export_rate = 0
       end
       print("&nbsp;[<span id=exported_flows_rate>"..formatValue(round(export_rate, 2)).."</span> Flows/s]</td>")
 
@@ -659,9 +712,9 @@ if(ifstats.zmqRecvStats ~= nil) then
       print(i18n("if_stats_overview.dropped_flows").."</th>")
 
       local span_danger = ""
-      if export_drops == nil then 
+      if export_drops == nil then
 
-     
+
       elseif(export_drops > 0) then
 	 span_danger = ' class="label label-danger"'
       end
@@ -671,65 +724,67 @@ if(ifstats.zmqRecvStats ~= nil) then
       print("<td colspan=3>&nbsp;</td>")
       print("</tr>")
    end
-  
+
    if isAdministrator() and ifstats.isView == false then
-      local storage_info = storage_utils.interfaceStorageInfo(ifid) 
+      local storage_info = storage_utils.interfaceStorageInfo(ifid)
       local storage_items = {}
 
-      if storage_info.rrd ~= nil and storage_info.rrd > 0 then
-        table.insert(storage_items, {
-          title = i18n("if_stats_overview.rrd_timeseries"),
-          value = storage_info.rrd,
-          class = "primary",
-        })
+      if ts_utils.getDriverName() == "rrd" then
+	 if storage_info.rrd ~= nil and storage_info.rrd > 0 then
+	    table.insert(storage_items, {
+			    title = i18n("if_stats_overview.rrd_timeseries"),
+			    value = storage_info.rrd,
+			    class = "primary",
+	    })
+	 end
       end
 
       if storage_info.flows ~= nil and storage_info.flows > 0 then
-        table.insert(storage_items, {
-          title = i18n("flows"),
-          value = storage_info.flows,
-          class = "info",
-        })
+	 table.insert(storage_items, {
+			 title = i18n("flows"),
+			 value = storage_info.flows,
+			 class = "info",
+	 })
       end
 
       if storage_info.pcap ~= nil and storage_info.pcap > 0 then
-        local link = nil
+	 local link = nil
 
-        if recording_utils.isAvailable(ifstats.id) then
-          link = ntop.getHttpPrefix() .. "/lua/if_stats.lua?ifid=" .. ifid .. "&page=traffic_recording"
-        end
+	 if recording_utils.isAvailable(ifstats.id) then
+	    link = ntop.getHttpPrefix() .. "/lua/if_stats.lua?ifid=" .. ifid .. "&page=traffic_recording"
+	 end
 
-        table.insert(storage_items, {
-          title = i18n("traffic_recording.packet_dumps"),
-          value = storage_info.pcap,
-          class = "warning",
-          link = link
-        })
+	 table.insert(storage_items, {
+			 title = i18n("traffic_recording.packet_dumps"),
+			 value = storage_info.pcap,
+			 class = "warning",
+			 link = link
+	 })
       end
 
       if #storage_items > 0 then
-        print("<tr><th>"..i18n("traffic_recording.storage_utilization").."</th><td colspan=5>")
-        print(stackedProgressBars(storage_info.total, storage_items, nil, bytesToSize))
-        print("</td></tr>\n")
+	 print("<tr><th>"..i18n("traffic_recording.storage_utilization").."</th><td colspan=5>")
+	 print(stackedProgressBars(storage_info.total, storage_items, nil, bytesToSize))
+	 print("</td></tr>\n")
       end
    end
- 
-   if (isAdministrator() and ifstats.isView == false and ifstats.isDynamic == false and interface.isPacketInterface()) then
+
+   if isAdministrator() then
       print("<tr><th>"..i18n("download").."&nbsp;<i class=\"fa fa-download fa-lg\"></i></th><td colspan=5>")
 
       local live_traffic_utils = require("live_traffic_utils")
       live_traffic_utils.printLiveTrafficForm(ifId)
 
       print("</td></tr>\n")
-      
+
       print("<tr><th width=250>"..i18n("if_stats_overview.reset_counters").."</th>")
       print("<td colspan=5>")
 
       local tot	= ifstats.stats.bytes + ifstats.stats.packets + ifstats.stats.drops
       if(ifstats.stats.flow_export_count ~= nil) then
-      	tot = tot + ifstats.stats.flow_export_count + ifstats.stats.flow_export_drops
+	 tot = tot + ifstats.stats.flow_export_count + ifstats.stats.flow_export_drops
       end
-      
+
       print('<button id="btn_reset_all" type="button" class="btn btn-default" onclick="resetInterfaceCounters(false);">'..i18n("if_stats_overview.all_counters")..'</button>&nbsp;')
 
       print('<button id="btn_reset_drops" type="button" class="btn btn-default" onclick="resetInterfaceCounters(true);">'..i18n("if_stats_overview.drops_only")..'</button>')
@@ -756,7 +811,7 @@ if(ifstats.zmqRecvStats ~= nil) then
       print("<tr><th nowrap>Conntrack Flow Entries</th><td colspan=5>")
       print("<span id=num_conntrack_entries>"..formatValue(st.nfq.num_conntrack_entries).."</span></td>")
       print("</tr>")
-  end
+   end
 
    print [[
    <tr><td colspan=7> <small> <b>]] print(i18n("if_stats_overview.note").."</b>:<p>"..i18n("if_stats_overview.note_packets")) print[[</small> </td></tr>
@@ -764,7 +819,7 @@ if(ifstats.zmqRecvStats ~= nil) then
 
    print("</table>\n")
 
-elseif((page == "networks")) then
+elseif page == "networks" and interface.isPacketInterface() then
    print("<table class=\"table table-striped table-bordered\">")
 
    if(ifstats.ip_addresses ~= "") then
@@ -797,10 +852,10 @@ elseif((page == "networks")) then
       print("<tr><th width=250>"..i18n("broadcast_domain").."</th><td colspan=5>")
 
       local bcast_domains = {}
-      for bcast_domain, in_interface_range in pairsByKeys(ifstats.bcast_domains) do
+      for bcast_domain, domain_info in pairsByKeys(ifstats.bcast_domains) do
 	 bcast_domain = string.format("<a href='%s/lua/hosts_stats.lua?network_cidr=%s'>%s</a>", ntop.getHttpPrefix(), bcast_domain, bcast_domain)
 
-	 if in_interface_range == 0 and interface.isPacketInterface() and not is_pcap_dump and ntop.getPref(string.format("ntopng.prefs.ifid_%d.is_traffic_mirrored", ifId)) ~= "1" then
+	 if domain_info.ghost_network then
 	    has_ghost_networks = true
 	    bcast_domain = bcast_domain..' '..ghost_icon
 	 end
@@ -1085,12 +1140,14 @@ elseif(page == "historical") then
    }
    url = url.."&page=historical"
 
+   local top_enabled = top_talkers_utils.areTopEnabled(ifid)
+
    drawGraphs(ifstats.id, schema, tags, _GET["zoom"], url, selected_epoch, {
       top_protocols = "top:iface:ndpi",
       top_categories = "top:iface:ndpi_categories",
       top_profiles = "top:profile:traffic",
-      top_senders = "top:local_senders",
-      top_receivers = "top:local_receivers",
+      top_senders = ternary(top_enabled, "top:local_senders", nil),
+      top_receivers = ternary(top_enabled, "top:local_receivers", nil),
       l4_protocols = "iface:l4protos",
       show_historical = not ifstats.isViewed,
       timeseries = {
@@ -1113,7 +1170,9 @@ elseif(page == "historical") then
          {schema="iface:nfq_pct",               label=i18n("graphs.num_nfq_pct"), nedge_only=1},
 
          {schema="iface:zmq_recv_flows",        label=i18n("graphs.zmq_received_flows"), nedge_exclude=1},
-	 {schema="iface:zmq_flow_coll_drops",   label=i18n("graphs.zmq_flow_coll_drops"), nedge_exclude=1},
+	 {schema="custom:zmq_msg_rcvd_vs_drops",label=i18n("graphs.zmq_msg_rcvd_vs_drops"), check={"iface:zmq_rcvd_msgs", "iface:zmq_msg_drops"}, metrics_labels = {i18n("if_stats_overview.zmq_message_rcvd"), i18n("if_stats_overview.zmq_message_drops")}, value_formatter = {"fmsgs", "formatMessages"}},
+	 {schema="iface:zmq_flow_coll_drops",   label=i18n("graphs.zmq_flow_coll_drops"), nedge_exclude=1, value_formatter = {"fflows", "formatFlows"}},
+	 {schema="iface:zmq_flow_coll_udp_drops", label=i18n("graphs.zmq_flow_coll_udp_drops"), nedge_exclude=1, value_formatter = {"fpackets", "formatPackets"}},
          {schema="iface:exported_flows",        label=i18n("if_stats_overview.exported_flows"), nedge_exclude=1},
          {schema="iface:dropped_flows",         label=i18n("if_stats_overview.dropped_flows"), nedge_exclude=1},
          {separator=1, nedge_exclude=1, label=i18n("tcp_stats")},
@@ -1429,6 +1488,31 @@ elseif(page == "config") then
          </td>
       </tr>]]
 
+   -- per-interface Top-Talkers generation
+   local interface_top_talkers_creation = true
+   local interface_top_talkers_creation_checked = "checked"
+
+   if _SERVER["REQUEST_METHOD"] == "POST" then
+      if _POST["interface_top_talkers_creation"] ~= "1" then
+	 interface_top_talkers_creation = false
+	 interface_top_talkers_creation_checked = ""
+	 top_talkers_utils.disableTop(ifId)
+      else
+	 top_talkers_utils.enableTop(ifId)
+      end
+   else
+      if not top_talkers_utils.areTopEnabled(ifId) then
+	 interface_top_talkers_creation_checked = ""
+      end
+   end
+
+   print [[<tr>
+         <th>]] print(i18n("if_stats_config.interface_top_talkers_creation")) print[[</th>
+         <td>
+            <input name="interface_top_talkers_creation" type="checkbox" value="1" ]] print(interface_top_talkers_creation_checked) print[[>
+         </td>
+      </tr>]]
+
    -- Flow dump
    if(prefs.is_dump_flows_enabled and ifstats.isView == false) then
       local interface_flow_dump_checked = ternary(interface_flow_dump, "checked", "")
@@ -1574,6 +1658,13 @@ elseif(page == "config") then
    <script>
       aysHandleForm("#iface_config");
    </script>]]
+
+elseif(page == "flow_callbacks") then
+   if(not isAdministrator()) then
+      return
+   end
+
+   flow_callbacks_utils.print_callbacks_config()
 
 elseif(page == "snmp_bind") then
    if ((not hasSnmpDevices(ifstats.id)) or (not is_packet_interface)) then
@@ -1754,6 +1845,8 @@ if(ifstats.zmqRecvStats ~= nil) then
    print("var last_zmq_events = ".. ifstats.zmqRecvStats.events .. ";\n")
    print("var last_zmq_counters = ".. ifstats.zmqRecvStats.counters .. ";\n")
    print("var last_zmq_msg_drops = ".. ifstats.zmqRecvStats.zmq_msg_drops .. ";\n")
+   print("var last_zmq_msg_rcvd = ".. ifstats.zmqRecvStats.zmq_msg_rcvd .. ";\n")
+   print("var last_zmq_avg_msg_flows = 1;\n")
 
    print("var last_probe_zmq_exported_flows = ".. (ifstats["zmq.num_flow_exports"] or 0) .. ";\n")
 end
@@ -1767,7 +1860,7 @@ var resetInterfaceCounters = function(drops_only) {
     url: ']]
 print (ntop.getHttpPrefix())
 print [[/lua/reset_stats.lua',
-    data: 'resetstats_mode=' + action + "&csrf=]] print(ntop.getRandomCSRFValue()) print[[",
+    data: {ifid: ]] print(ifstats.id) print [[, resetstats_mode:  action, csrf: "]] print(ntop.getRandomCSRFValue()) print[["},
     success: function(rsp) {},
     complete: function() {
       /* reload the page to generate a new CSRF */
@@ -1807,7 +1900,7 @@ print [[/lua/rest/get/interface/data.lua',
 
               if(diff > 0) {
                  rate = ((diff * 1000)/time_diff).toFixed(1);
-                 label = " ["+rate+" Flows/sec] "+get_trend(1,0);
+                 label = " [" + fflows(rate) + "] " + get_trend(1,0);
               } else {
                  label = " "+get_trend(0,0);
               }
@@ -1818,12 +1911,16 @@ print [[/lua/rest/get/interface/data.lua',
            $('#if_zmq_events').html(addCommas(rsp.zmqRecvStats.events)+" "+get_trend(rsp.zmqRecvStats.events, last_zmq_events));
            $('#if_zmq_counters').html(addCommas(rsp.zmqRecvStats.counters)+" "+get_trend(rsp.zmqRecvStats.counters, last_zmq_counters));
            $('#if_zmq_msg_drops').html(addCommas(rsp.zmqRecvStats.zmq_msg_drops)+" "+get_trend(rsp.zmqRecvStats.zmq_msg_drops, last_zmq_msg_drops));
+           $('#if_zmq_msg_rcvd').html(addCommas(rsp.zmqRecvStats.zmq_msg_rcvd)+" "+get_trend(rsp.zmqRecvStats.zmq_msg_rcvd, last_zmq_msg_rcvd));
+           $('#if_zmq_avg_msg_flows').html(addCommas(formatValue(rsp.zmqRecvStats.zmq_avg_msg_flows)));
            $('#if_num_remote_zmq_flow_exports').html(addCommas(rsp["zmq.num_flow_exports"])+" "+get_trend(rsp["zmq.num_flow_exports"], last_probe_zmq_exported_flows));
 
            last_zmq_flows = rsp.zmqRecvStats.flows;
            last_zmq_events = rsp.zmqRecvStats.events;
            last_zmq_counters = rsp.zmqRecvStats.counters;
            last_zmq_msg_drops = rsp.zmqRecvStats.zmq_msg_drops;
+           last_zmq_msg_rcvd = rsp.zmqRecvStats.zmq_msg_rcvd;
+           last_zmq_avg_msg_flows = rsp.zmqRecvStats.zmq_avg_msg_flows;
            last_probe_zmq_exported_flows = rsp["zmq.num_flow_exports"];
            last_zmq_time = now;
         }

@@ -192,11 +192,13 @@ using namespace std;
 #include "Utils.h"
 #include "NtopGlobals.h"
 #include "nDPIStats.h"
+#include "InterarrivalStats.h"
 #include "FlowStats.h"
 #ifdef NTOPNG_PRO
 #include "CustomAppMaps.h"
 #include "CustomAppStats.h"
 #endif
+#include "ThroughputStats.h"
 #include "GenericTrafficElement.h"
 #include "AlertCounter.h"
 #include "NetworkStats.h"
@@ -215,6 +217,8 @@ using namespace std;
 #ifndef HAVE_NEDGE
 #include "FlowProfile.h"
 #include "FlowProfiles.h"
+#include "SubInterface.h"
+#include "SubInterfaces.h"
 #endif
 #include "CounterTrend.h"
 #include "LRUMacIP.h"

@@ -7,6 +7,11 @@ local alert_consts = {}
 local locales_utils = require "locales_utils"
 local format_utils  = require "format_utils"
 
+if(ntop.isPro()) then
+  package.path = dirs.installdir .. "/pro/scripts/lua/modules/?.lua;" .. package.path
+  -- NOTE: import snmp_utils below to avoid import cycles
+end
+
 -- Alerts (see ntop_typedefs.h)
 -- each table entry is an array as:
 -- {"alert html string", "alert C enum value", "plain string", "syslog severity"}
@@ -317,12 +322,13 @@ local function outsideDhcpRangeFormatter(ifid, alert, info)
     client_mac = get_symbolic_mac(info.client_mac, true),
     client_ip = hostkey,
     client_ip_url = getHostUrl(hostinfo["host"], hostinfo["vlan"]),
-    dhcp_url = ntop.getHttpPrefix() .. "/lua/if_stats.lua?ifid="..ifid.."page=dhcp",
+    dhcp_url = ntop.getHttpPrefix() .. "/lua/if_stats.lua?ifid="..ifid.."&page=dhcp",
     sender_url = getMacUrl(info.sender_mac),
     sender_mac = get_symbolic_mac(info.sender_mac, true),
+  }) .. " " .. ternary(router_info["host"] == "0.0.0.0", "", i18n("alert_messages.ip_outside_dhcp_range_router_ip", {
     router_url = getHostUrl(router_info["host"], router_info["vlan"]),
     router_ip = info.router_host,
-  }))
+  })))
 end
 
 -- ##############################################
@@ -527,7 +533,7 @@ local function userActivityFormatter(ifid, alert, info)
         local host = decoded.params[1]
         local hostinfo = hostkey2hostinfo(host)
         local hostname = host2name(hostinfo.host, hostinfo.vlan)
-        local host_url = "<a href=\"".. ntop.getHttpPrefix() .. "/lua/host_details.lua?ifid="..decoded.ifid.."&host="..host.."\">"..hostname .."</a>" 
+        local host_url = "<a href=\"".. ntop.getHttpPrefix() .. "/lua/host_details.lua?ifid="..(decoded.ifid or ifid).."&host="..host.."\">"..hostname .."</a>" 
         return i18n('user_activity.host_json_downloaded', {user=user, host=host_url})
 
       elseif decoded.name == 'live_flows_extraction' and decoded.params[1] ~= nil and decoded.params[2] ~= nil then
@@ -687,6 +693,8 @@ end
 -- ##############################################
 
 local function portStatusChangeFormatter(ifid, alert, info)
+  if ntop.isPro() then require "snmp_utils" end
+
   return(i18n("alerts_dashboard.snmp_port_changed_operational_status",
     {device = info.device,
      port = info.interface_name or info.interface,
@@ -698,6 +706,8 @@ end
 -- ##############################################
 
 local function snmpPortDuplexChangeFormatter(ifid, alert, info)
+  if ntop.isPro() then require "snmp_utils" end
+
   return(i18n("alerts_dashboard.snmp_port_changed_duplex_status",
     {device = info.device,
      port = info.interface_name or info.interface,
@@ -709,6 +719,8 @@ end
 -- ##############################################
 
 local function snmpInterfaceErrorsFormatter(ifid, alert, info)
+  if ntop.isPro() then require "snmp_utils" end
+
   return(i18n("alerts_dashboard.snmp_port_errors_increased",
     {device = info.device,
      port = info.interface_name or info.interface,
@@ -719,6 +731,8 @@ end
 -- ##############################################
 
 local function snmpPortLoadThresholdFormatter(ifid, alert, info)
+  if ntop.isPro() then require "snmp_utils" end
+
   return(i18n("alerts_dashboard.snmp_port_load_threshold_exceeded_message",
     {device = info.device,
      port = info.interface_name or info.interface,
@@ -783,7 +797,18 @@ end
 
 -- ##############################################
 
+local function ghostNetworkFormatter(ifid, alert, info)
+  return(i18n("alerts_dashboard.ghost_network_detected_description", {
+    network = alert.alert_subtype,
+    entity = getInterfaceName(ifid),
+    url = ntop.getHttpPrefix() .. "/lua/if_stats.lua?ifid=".. ifid .."&page=networks",
+  }))
+end
+
+-- ##############################################
+
 -- Keep ID in sync with AlertType
+-- NOTE: flow alerts are formatted based on their status. See flow_consts.flow_status_types.
 alert_consts.alert_types = {
   tcp_syn_flood = {
     alert_id = 0,
@@ -804,9 +829,9 @@ alert_consts.alert_types = {
     alert_id = 3,
     i18n_title = "alerts_dashboard.suspicious_activity",
     icon = "fa-exclamation",
-  }, interface_alerted = {
+  }, alert_connection_issues = {
     alert_id = 4,
-    i18n_title = "alerts_dashboard.interface_alerted",
+    i18n_title = "alerts_dashboard.connection_issues",
     icon = "fa-exclamation",
   }, flow_misbehaviour = {
     alert_id = 5,
@@ -1008,13 +1033,22 @@ alert_consts.alert_types = {
     i18n_title = "alerts_dashboard.misbehaving_flows_ratio",
     i18n_description = misbehavingFlowsRatioFormatter,
     icon = "fa-exclamation",
+  }, ghost_network = {
+    alert_id = 47,
+    i18n_title = "alerts_dashboard.ghost_network_detected",
+    i18n_description = ghostNetworkFormatter,
+    icon = "fa-snapchat-ghost",
+  }, malicious_signature = {
+    alert_id = 48,
+    i18n_title = "alerts_dashboard.malicious_signature_detected",
+    icon = "fa-ban",
   },
 }
 
 -- ##############################################
 
--- See getFlowStatusTypes() in lua_utils for flow alerts
--- See Utils::flowStatus2str to determine the alert_type for flow alerts
+-- See flow_consts.flow_status_types in flow_consts for flow alerts
+-- See Utils::flowStatus2AlertType to determine the alert_type for flow alerts
 
 -- Keep in sync with ntop_typedefs.h:AlertEntity
 alert_consts.alert_entities = {
@@ -1103,6 +1137,14 @@ alert_consts.field_units = {
   syn_sec = "field_units.syn_sec",
   flow_sec = "field_units.flow_sec",
   percentage = "field_units.percentage",
+}
+
+-- ################################################################################
+
+alert_consts.ids_rule_maker = {
+  GPL = "GPL",
+  SURICATA = "Suricata",
+  ET = "Emerging Threats",
 }
 
 -- ################################################################################

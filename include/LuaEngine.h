@@ -55,11 +55,12 @@ class LuaEngine {
    * @brief A Destructor.
    *
    */
-  ~LuaEngine();
+  virtual ~LuaEngine();
 
   /* Set Hosts and Networks into the Lua context */
   void setHost(Host* h);
   void setNetwork(NetworkStats* ns);
+  void setFlow(Flow*f);
 
   inline Host* getHost()     { return(getLuaVMContext(L)->host); }
   inline NetworkInterface* getNetworkInterface() { return(getLuaVMContext(L)->iface); }
@@ -71,13 +72,12 @@ class LuaEngine {
    * 
    * @param script_path Full path of lua script.
    * @param iface Select the specified interface (if not NULL)
+   * @param load_only Load the Lua script but does not execute it
+   *
    * @return 0 if the script has been executed successfully.
    */
-  int run_script(char *script_path, NetworkInterface *iface);
+  int run_script(char *script_path, NetworkInterface *iface, bool load_only = false);
 
-  /* Same as run_script() but the script is just loaded and NOT executed */
-  int load_script(char *script_path, NetworkInterface *iface);
-  
   /**
    * @brief Handling of request info of script.
    * @details Read from the request the parameters and put the GET parameters and the _SESSION parameters into the environment. 

@@ -139,6 +139,7 @@
 #define NDPI_MIN_NUM_PACKETS      12
 #define GTP_U_V1_PORT             2152
 #define TZSP_PORT                 37008
+#define VXLAN_PORT                4789
 #define CAPWAP_DATA_PORT          5247
 #define MAX_NUM_INTERFACE_HOSTS   131072
 #define MAX_NUM_VIEW_INTERFACES   8
@@ -213,6 +214,10 @@
 #define IFACE_DHCP_RANGE_KEY    "ntopng.prefs.ifid_%u.dhcp_ranges"
 #define HOST_SERIALIZED_KEY     "ntopng.serialized_hosts.ifid_%u__%s@%d"
 #define MAC_SERIALIZED_KEY      "ntopng.serialized_macs.ifid_%u__%s"
+#define HOST_PREF_MUD_RECORDING "ntopng.prefs.iface_%d.mud.recording.%s"
+#define MUD_RECORDING_GENERAL_PURPOSE "general_purpose"
+#define MUD_RECORDING_SPECIAL_PURPOSE "special_purpose"
+#define MUD_RECORDING_DISABLED        "disabled"
 #define HOST_BY_MAC_SERIALIZED_KEY "ntopng.serialized_hostsbymac.ifid_%u__%s"
 #define HOST_POOL_SERIALIZED_KEY "ntopng.serialized_host_pools.ifid_%u"
 #define VLAN_SERIALIZED_KEY     "ntopng.serialized_vlan.ifid_%u_vlan_%u"
@@ -264,6 +269,7 @@
 #define CONST_INTERFACE_TYPE_DIVERT    "divert"
 #define CONST_INTERFACE_TYPE_DUMMY     "dummy"
 #define CONST_INTERFACE_TYPE_ZC_FLOW   "ZC-flow"
+#define CONST_INTERFACE_TYPE_CUSTOM    "custom"
 #define CONST_INTERFACE_TYPE_UNKNOWN   "unknown"
 
 #define CONST_DEMO_MODE_DURATION       600 /* 10 min */
@@ -488,6 +494,7 @@
 #define CONST_OLD_DEFAULT_NTOP_USER  "nobody"
 #define CONST_DEFAULT_NTOP_USER      "ntopng"
 #define CONST_TOO_EARLY              "(Too Early)"
+#define CONST_NO_SCORE_SET            ((u_int16_t)(-1))
 
 #define CONST_LUA_OK                  1
 #define CONST_LUA_ERROR               0
@@ -571,6 +578,7 @@
 #define HOST_POOL_MEMBERS_KEY               NTOPNG_PREFS_PREFIX".%u.host_pools.members.%s"
 #define HOST_POOL_SHAPERS_KEY               NTOPNG_PREFS_PREFIX".%u.l7_policies.%s"
 #define HOST_POOL_DETAILS_KEY               NTOPNG_PREFS_PREFIX".%u.host_pools.details.%u"
+#define CONST_SUBINTERFACES_PREFS           NTOPNG_PREFS_PREFIX".subinterfaces"
 
 #define CONST_PREFS_CLIENT_X509_AUTH        NTOPNG_PREFS_PREFIX".is_client_x509_auth_enabled"
 
@@ -676,6 +684,12 @@
 
 /* SRC/DST selection using port numbers (heuristic) */
 #define CONST_DEFAULT_USE_PORTS_TO_DETERMINE_SRC_AND_DST NTOPNG_PREFS_PREFIX".use_ports_to_determine_src_and_dst"
+
+/* Flow Lua Calls */
+#define FLOW_LUA_CALL_PROTOCOL_DETECTED_FN_NAME  "protocolDetected"
+#define FLOW_LUA_CALL_FLOW_STATUS_CHANGE_FN_NAME "statusChanged"
+#define FLOW_LUA_CALL_PERIODIC_UPDATE_FN_NAME    "periodicUpdate"
+#define FLOW_LUA_CALL_IDLE_FN_NAME               "idle"
 
 /* Tiny Flows */
 #define CONST_DEFAULT_IS_TINY_FLOW_EXPORT_ENABLED        true  /* disabled by default */
@@ -860,7 +874,6 @@
 
 #define ALERTS_MANAGER_NOTIFICATION_QUEUE_NAME "ntopng.alerts.notifications_queue"
 #define ALERTS_MANAGER_EXTERNAL_NOTIFICATIONS_ENABLED NTOPNG_PREFS_PREFIX".alerts.external_notifications_enabled"
-#define ALERTS_DUMP_DURING_IFACE_ALERTED       NTOPNG_PREFS_PREFIX".alerts.dump_alerts_when_iface_is_alerted"
 
 #define CONST_MAX_NUM_THREADED_ACTIVITIES 64
 #define STARTUP_SCRIPT_PATH        "startup.lua"
@@ -1035,7 +1048,7 @@ extern struct ntopngLuaContext* getUserdata(struct lua_State *vm);
 #endif
 
 #define MIN_TIME_SPAWN_THREAD_POOL        10 /* sec */
-#define DONT_NOT_EXPIRE_BEFORE_SEC        30 /* sec */
+#define DONT_NOT_EXPIRE_BEFORE_SEC        15 /* sec */
 #define MAX_NDPI_IDLE_TIME_BEFORE_GUESS   5 /* sec */
 #define MAX_NUM_PCAP_CAPTURES             4
 #define MAX_NUM_COMPANION_INTERFACES      4
@@ -1050,14 +1063,16 @@ extern struct ntopngLuaContext* getUserdata(struct lua_State *vm);
 #define PROFILING_DECLARE(n) \
         ticks __profiling_sect_start[n]; \
         const char *__profiling_sect_label[n]; \
-        ticks __profiling_sect_tot[n]
-#define PROFILING_INIT() memset(__profiling_sect_tot, 0, sizeof(__profiling_sect_tot)), memset(__profiling_sect_label, 0, sizeof(__profiling_sect_label))
-#define PROFILING_SECTION_ENTER(l,i) __profiling_sect_start[i] = Utils::getticks(), __profiling_sect_label[i] = l
+        ticks __profiling_sect_tot[n]; \
+	u_int64_t __profiling_sect_counter[n];
+#define PROFILING_INIT() memset(__profiling_sect_tot, 0, sizeof(__profiling_sect_tot)), memset(__profiling_sect_label, 0, sizeof(__profiling_sect_label)), memset(__profiling_sect_counter, 0, sizeof(__profiling_sect_counter))
+#define PROFILING_SECTION_ENTER(l,i) __profiling_sect_start[i] = Utils::getticks(), __profiling_sect_label[i] = l, __profiling_sect_counter[i]++
 #define PROFILING_SECTION_EXIT(i)    __profiling_sect_tot[i] += Utils::getticks() - __profiling_sect_start[i]
 #define PROFILING_SUB_SECTION_ENTER(f, l, i) f->profiling_section_enter(l, i)
 #define PROFILING_SUB_SECTION_EXIT(f, i)     f->profiling_section_exit(i)
 #define PROFILING_NUM_SECTIONS (sizeof(__profiling_sect_tot)/sizeof(ticks))
-#define PROFILING_SECTION_AVG(i,n) (__profiling_sect_tot[i] / n)
+#define PROFILING_SECTION_AVG(i,n) (__profiling_sect_tot[i] / (n + 1))
+#define PROFILING_SECTION_TICKS(i) (__profiling_sect_tot[i] / (__profiling_sect_counter[i] + 1))
 #define PROFILING_SECTION_LABEL(i) __profiling_sect_label[i]
 #else
 #define PROFILING_DECLARE(n)

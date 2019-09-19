@@ -62,31 +62,57 @@ end
 function ts_utils.getSchema(name)
   local schema = loaded_schemas[name]
 
+  if schema then
+    -- insertion_step: this corresponds to the interval of data writes
+    -- step: used for visualization
+    schema.options.insertion_step = schema.options.step
+  end
+
   if schema and ts_utils.hasHighResolutionTs() then
     if((schema.options.step == 300) and (schema.options.is_system_schema ~= true)) then
       schema.options.insertion_step = 60
       schema.options.step = 60
 
       if starts(name, "host:") then
-        local write_steps = tonumber(ntop.getPref("ntopng.prefs.ts_write_steps"))
+	local write_steps = tonumber(ntop.getPref("ntopng.prefs.ts_write_steps"))
 
-        if write_steps > 0 then
-          schema.options.step = 5 * write_steps
-        end
+	if write_steps > 0 then
+	  schema.options.step = 5 * write_steps
+	end
       end
     elseif schema.options.step == 60 then
       if starts(name, "iface:") then
-        local write_steps = tonumber(ntop.getPref("ntopng.prefs.ts_write_steps"))
+	local write_steps = tonumber(ntop.getPref("ntopng.prefs.ts_write_steps"))
 
-        if write_steps > 0 then
-          schema.options.step = 5 * write_steps
-        end
+	if write_steps > 0 then
+	  schema.options.step = 5 * write_steps
+	end
       end
     end
   end
 
   if schema and (name == "iface:traffic") and ntop.isnEdge() then
     schema.options.step = 4
+  end
+
+  if schema then
+    if not interface.isPacketInterface() then
+      -- For non-packet interfaces it is necessary to adjust the
+      -- step used when READING to make sure no timeseries will
+      -- be read at a resolution higher than the interface.getStatsUpdateFreq.
+      -- The rationale is that if a ZMQ sends you flows with a timeout of 2 minutes
+      -- it is pointless to look at a resolution lower than these 2 minutes.
+      -- For packet interfaces the story is different. In this case ntopng sees
+      -- the traffic on a packet-by-packet basis so we can leave the step untouched
+      -- and go at the highest po
+      local update_freq = interface.getStatsUpdateFreq()
+
+      if update_freq then
+	 if schema.options.step < update_freq then
+	  schema.options.step = update_freq
+	 end
+      end
+    end
   end
 
   return schema
@@ -549,14 +575,8 @@ end
 
 -- ##############################################
 
-local function list_series(schema_name, tags_filter, start_time, batched)
-  local schema = ts_utils.getSchema(schema_name)
+local function getWildcardTags(schema, tags_filter)
   tags_filter = tags_filter or {}
-
-  if not schema then
-    traceError(TRACE_ERROR, TRACE_CONSOLE, "Schema not found: " .. schema_name)
-    return nil
-  end
 
   local wildcard_tags = {}
   local filter_tags = {}
@@ -574,19 +594,7 @@ local function list_series(schema_name, tags_filter, start_time, batched)
     end
   end
 
-  if not batched then
-    local driver = ts_utils.getQueryDriver()
-
-    if not driver then
-      return nil
-    end
-
-    ts_common.clearLastError()
-
-    return driver:listSeries(schema, filter_tags, wildcard_tags, start_time)
-  else
-    return schema, filter_tags, wildcard_tags
-  end
+  return filter_tags, wildcard_tags
 end
 
 -- ##############################################
@@ -597,7 +605,21 @@ end
 --! @param start_time time filter. Only timeseries updated after start_time will be returned.
 --! @return a (possibly empty) list of tags values for the matching timeseries on success, nil on error.
 function ts_utils.listSeries(schema_name, tags_filter, start_time)
-  return list_series(schema_name, tags_filter, start_time, false --[[ not batched ]])
+  local schema = ts_utils.getSchema(schema_name)
+  local driver = ts_utils.getQueryDriver()
+
+  if(not schema) then
+    traceError(TRACE_ERROR, TRACE_CONSOLE, "Schema not found: " .. schema_name)
+    return nil
+  end
+
+  if(not driver) then
+    return nil
+  end
+
+  local filter_tags, wildcard_tags = getWildcardTags(schema, tags_filter)
+
+  return driver:listSeries(schema, filter_tags, wildcard_tags, start_time)
 end
 
 -- ##############################################
@@ -611,11 +633,14 @@ local pending_listseries_batch = {}
 --! @return nil on error, otherwise a number is returned, indicating the item id into the batch
 --! @note Call ts_utils.getBatchedListSeriesResult() to get the batch responses
 function ts_utils.batchListSeries(schema_name, tags_filter, start_time)
-  local schema, filter_tags, wildcard_tags = list_series(schema_name, tags_filter, start_time, true --[[ batched ]])
+  local schema = ts_utils.getSchema(schema_name)
 
-  if not schema then
+  if(not schema) then
+    traceError(TRACE_ERROR, TRACE_CONSOLE, "Schema not found: " .. schema_name)
     return nil
   end
+
+  local filter_tags, wildcard_tags = getWildcardTags(schema, tags_filter)
 
   pending_listseries_batch[#pending_listseries_batch + 1] = {
     schema = schema,
@@ -661,12 +686,31 @@ end
 
 -- ##############################################
 
---! @brief A shortcut for ts_utils.listSeries to verify timeseries existance.
+--! @brief Verify timeseries existance.
 --! @param schema_name the schema identifier.
 --! @param tags_filter a list of filter tags. Tags which are not specified are considered wildcard.
 --! @return true if the specified series exist, false otherwise.
 function ts_utils.exists(schema_name, tags_filter)
-  return not table.empty(ts_utils.listSeries(schema_name, tags_filter, 0))
+  local driver = ts_utils.getQueryDriver()
+
+  if not driver then
+    return nil
+  end
+
+  if(driver.exists == nil) then
+    -- No "exists" implementation found, use listSeries fallback
+    return not table.empty(ts_utils.listSeries(schema_name, tags_filter, 0))
+  end
+
+  local schema = ts_utils.getSchema(schema_name)
+
+  if(not schema) then
+    traceError(TRACE_ERROR, TRACE_CONSOLE, "Schema not found: " .. schema_name)
+    return nil
+  end
+
+  local filter_tags, wildcard_tags = getWildcardTags(schema, tags_filter)
+  return driver:exists(schema, filter_tags, wildcard_tags)
 end
 
 -- ##############################################

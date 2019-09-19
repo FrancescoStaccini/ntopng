@@ -53,7 +53,7 @@ Prefs::Prefs(Ntop *_ntop) {
     enable_elephant_flows_alerts = false, enable_longlived_flows_alerts = true,
     enable_arp_matrix_generation = false, enable_exfiltration_alerts = true,
     enable_informative_captive_portal = false,
-    external_notifications_enabled = false, dump_flow_alerts_when_iface_alerted = false,
+    external_notifications_enabled = false,
     override_dst_with_post_nat_dst = false, override_src_with_post_nat_src = false,
     use_ports_to_determine_src_and_dst = false;
     hostMask = no_host_mask;
@@ -543,7 +543,7 @@ void Prefs::reloadPrefsFromRedis() {
     local_host_cache_duration = getDefaultPrefsValue(CONST_LOCAL_HOST_CACHE_DURATION_PREFS, LOCAL_HOSTS_CACHE_DURATION),
     local_host_max_idle       = getDefaultPrefsValue(CONST_LOCAL_HOST_IDLE_PREFS, MAX_LOCAL_HOST_IDLE),
     non_local_host_max_idle   = getDefaultPrefsValue(CONST_REMOTE_HOST_IDLE_PREFS, MAX_REMOTE_HOST_IDLE),
-    flow_max_idle             = getDefaultPrefsValue(CONST_FLOW_MAX_IDLE_PREFS, MAX_FLOW_IDLE),
+    pkt_ifaces_flow_max_idle  = getDefaultPrefsValue(CONST_FLOW_MAX_IDLE_PREFS, MAX_FLOW_IDLE),
     active_local_hosts_cache_interval = getDefaultPrefsValue(CONST_RUNTIME_ACTIVE_LOCAL_HOSTS_CACHE_INTERVAL, CONST_DEFAULT_ACTIVE_LOCAL_HOSTS_CACHE_INTERVAL),
 
     log_to_file         = getDefaultBoolPrefsValue(CONST_RUNTIME_PREFS_LOG_TO_FILE, false);
@@ -597,7 +597,6 @@ void Prefs::reloadPrefsFromRedis() {
     enabled_malware_alerts = getDefaultBoolPrefsValue(CONST_RUNTIME_PREFS_MALWARE_ALERTS, CONST_DEFAULT_MALWARE_ALERTS_ENABLED),
     enabled_ids_alerts = getDefaultBoolPrefsValue(CONST_RUNTIME_PREFS_IDS_ALERTS, CONST_DEFAULT_IDS_ALERTS_ENABLED),
     external_notifications_enabled         = getDefaultBoolPrefsValue(ALERTS_MANAGER_EXTERNAL_NOTIFICATIONS_ENABLED, false),
-    dump_flow_alerts_when_iface_alerted = getDefaultBoolPrefsValue(ALERTS_DUMP_DURING_IFACE_ALERTED, false),
 
     enable_arp_matrix_generation = getDefaultBoolPrefsValue(CONST_DEFAULT_ARP_MATRIX_GENERATION, false),
 
@@ -1692,7 +1691,7 @@ void Prefs::lua(lua_State* vm) {
   lua_push_uint64_table_entry(vm, "local_host_cache_duration", local_host_cache_duration);
   lua_push_uint64_table_entry(vm, "local_host_max_idle", local_host_max_idle);
   lua_push_uint64_table_entry(vm, "non_local_host_max_idle", non_local_host_max_idle);
-  lua_push_uint64_table_entry(vm, "flow_max_idle", flow_max_idle);
+  lua_push_uint64_table_entry(vm, "flow_max_idle", pkt_ifaces_flow_max_idle);
   if(enable_active_local_hosts_cache)
     lua_push_uint64_table_entry(vm, "active_local_hosts_cache_interval", active_local_hosts_cache_interval);
 

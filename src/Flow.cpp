@@ -45,8 +45,11 @@ Flow::Flow(NetworkInterface *_iface,
     srv2cli_last_packets = 0, srv2cli_last_bytes = 0,
     cli_host = srv_host = NULL, good_low_flow_detected = false,
     srv2cli_last_goodput_bytes = cli2srv_last_goodput_bytes = 0, good_ssl_hs = true,
-    flow_alerted = flow_dropped_counts_increased = false, vrfId = 0;
-  
+    flow_dropped_counts_increased = false, vrfId = 0;
+    alert_score = CONST_NO_SCORE_SET;
+
+  alert_rowid = -1;
+  last_notified_status_map = Utils::bitmapSet(0, status_normal);
   purge_acknowledged_mark = detection_completed = update_flow_port_stats = false;
   ndpiDetectedProtocol = ndpiUnknownProtocol;
   doNotExpireBefore = iface->getTimeLastPktRcvd() + DONT_NOT_EXPIRE_BEFORE_SEC;
@@ -58,14 +61,12 @@ Flow::Flow(NetworkInterface *_iface,
 
   icmp_info = _icmp_info ? new (std::nothrow) ICMPinfo(*_icmp_info) : NULL;
 
-  memset(&cli2srvStats, 0, sizeof(cli2srvStats)), memset(&srv2cliStats, 0, sizeof(srv2cliStats));
-
   ndpiFlow = NULL, cli_id = srv_id = NULL;
   cli_ebpf = srv_ebpf = NULL;
-  json_info = NULL, cli2srv_direction = true, twh_over = twh_ok = false,
+  json_info = NULL, tlv_info = NULL, cli2srv_direction = true, twh_over = twh_ok = false,
     dissect_next_http_packet = false,
     check_tor = false, host_server_name = NULL, diff_num_http_requests = 0,
-    bt_hash = NULL, community_id_flow_hash = NULL;
+    bt_hash = NULL;
 
   src2dst_tcp_flags = 0, dst2src_tcp_flags = 0, last_update_time.tv_sec = 0, last_update_time.tv_usec = 0,
     bytes_thpt = 0, goodput_bytes_thpt = 0, top_bytes_thpt = 0, top_pkts_thpt = 0;
@@ -76,7 +77,11 @@ Flow::Flow(NetworkInterface *_iface,
   cli2srv_last_packets = 0, prev_cli2srv_last_packets = 0, srv2cli_last_packets = 0, prev_srv2cli_last_packets = 0;
   top_bytes_thpt = 0, top_goodput_bytes_thpt = 0, applLatencyMsec = 0;
 
-  suricata_alert = NULL;
+  ndpi_init_data_analysis(&stats.cli2srv_bytes_stats, 0),
+    ndpi_init_data_analysis(&stats.srv2cli_bytes_stats, 0);
+  
+  ids_alert = NULL;
+  ids_alert_severity = 255;
 
   memset(&last_db_dump, 0, sizeof(last_db_dump));
   memset(&protos, 0, sizeof(protos));
@@ -131,6 +136,7 @@ Flow::Flow(NetworkInterface *_iface,
 #endif
 
   passVerdict = true, quota_exceeded = false;
+  has_malicious_signature = false;
   if(_first_seen > _last_seen) _first_seen = _last_seen;
   first_seen = _first_seen, last_seen = _last_seen;
   bytes_thpt_trend = trend_unknown, pkts_thpt_trend = trend_unknown;
@@ -148,6 +154,15 @@ Flow::Flow(NetworkInterface *_iface,
 
   if(!iface->isPacketInterface())
     last_update_time.tv_sec = (long)first_seen;
+
+  if(iface->isPacketInterface() && !iface->isSampledTraffic()) {
+    cli2srvPktTime = new (std::nothrow) InterarrivalStats();
+    srv2cliPktTime = new (std::nothrow) InterarrivalStats();
+  } else {
+    cli2srvPktTime = NULL;
+    srv2cliPktTime = NULL;
+  }
+    
 
 #ifdef NTOPNG_PRO
 #ifndef HAVE_NEDGE
@@ -226,10 +241,17 @@ Flow::~Flow() {
   if(last_partial)         free(last_partial);
   if(last_db_dump.partial) free(last_db_dump.partial);
   if(json_info)            json_object_put(json_info);
+  if(tlv_info) {
+    ndpi_term_serializer(tlv_info);
+    free(tlv_info);
+  }
   if(host_server_name)     free(host_server_name);
 
   if(cli_ebpf) delete cli_ebpf;
   if(srv_ebpf) delete srv_ebpf;
+
+  if(cli2srvPktTime) delete cli2srvPktTime;
+  if(srv2cliPktTime) delete srv2cliPktTime;
 
   if(isHTTP()) {
     if(protos.http.last_method) free(protos.http.last_method);
@@ -250,11 +272,21 @@ Flow::~Flow() {
   }
 
   if(bt_hash)                free(bt_hash);
-  if(community_id_flow_hash) free(community_id_flow_hash);
 
   freeDPIMemory();
-  if(icmp_info)        delete(icmp_info);
-  if(suricata_alert) json_object_put(suricata_alert);
+  if(icmp_info) delete(icmp_info);
+  if(ids_alert) json_object_put(ids_alert);
+}
+
+/* *************************************** */
+
+int Flow::storeFlowAlert(AlertType alert_type, AlertLevel alert_severity, const char *status_info) {
+  AlertsManager *am = iface->getAlertsManager();
+
+  if(am)
+    return am->storeFlowAlert(this, alert_type, alert_severity, status_info);
+
+  return -1;
 }
 
 /* *************************************** */
@@ -269,9 +301,9 @@ bool Flow::triggerAlerts() const {
   bool cli_trigger_alerts, srv_trigger_alerts;
 
   /* client is either remote, or has alerts enabled... */
-  cli_trigger_alerts = cli_host && (!cli_host->isLocalHost() || cli_host->triggerAlerts());
+  cli_trigger_alerts = !cli_host || !cli_host->isLocalHost() || cli_host->triggerAlerts();
   /* server is either remote, or has alerts enabled.. */
-  srv_trigger_alerts = srv_host && (!srv_host->isLocalHost() || srv_host->triggerAlerts());
+  srv_trigger_alerts = !srv_host || !srv_host->isLocalHost() || srv_host->triggerAlerts();
 
   return cli_trigger_alerts && srv_trigger_alerts;
 }
@@ -281,104 +313,15 @@ bool Flow::triggerAlerts() const {
 void Flow::dumpFlowAlert() {
   time_t when;
   FlowStatus status;
+  FlowStatusMap status_map;
 
   if(!triggerAlerts())
     return;
 
-  status = getFlowStatus();
+  status = getFlowStatus(&status_map);
 
   if(!isFlowAlerted()) {
-    bool do_dump = true;
-
-    switch(status) {
-    case status_normal:
-      do_dump = false;
-      break;
-
-    case status_not_purged:
-      do_dump = true;
-      break;
-
-    case status_web_mining_detected:
-      do_dump = ntop->getPrefs()->are_mining_alerts_enabled();
-      break;
-
-    case status_blacklisted:
-      do_dump = ntop->getPrefs()->are_malware_alerts_enabled();
-      break;
-
-    case status_slow_tcp_connection: /* 1 */
-    case status_slow_application_header: /* 2 */
-    case status_slow_data_exchange: /* 3 */
-    case status_low_goodput: /* 4 */
-    case status_tcp_connection_issues: /* 6 - i.e. too many retransmission ooo... or similar */
-    case status_tcp_severe_connection_issues: /* 22 */
-      /* Don't log them for the time being otherwise we'll have too many flows */
-      do_dump = false;
-      break;
-
-    case status_suspicious_tcp_syn_probing: /* 5 */
-    case status_suspicious_tcp_probing:     /* 7 */
-    case status_tcp_connection_refused: /* 9 */
-      do_dump = ntop->getPrefs()->are_probing_alerts_enabled();
-      break;
-
-    case status_flow_when_interface_alerted /* 8 */:
-#if 0
-      do_dump = ntop->getPrefs()->do_dump_flow_alerts_when_iface_alerted();
-#endif
-      break;
-
-    case status_ssl_certificate_mismatch: /* 10 */
-    case status_ssl_unsafe_ciphers:       /* 23 */
-    case status_ssl_old_protocol_version: /* 24 */
-      do_dump = ntop->getPrefs()->are_ssl_alerts_enabled();
-      break;
-
-    case status_dns_invalid_query:
-      do_dump = ntop->getPrefs()->are_dns_alerts_enabled();
-      break;
-
-    case status_remote_to_remote:
-      do_dump = ntop->getPrefs()->are_remote_to_remote_alerts_enabled();
-      break;
-
-    case status_blocked:
-#ifdef HAVE_NEDGE
-      do_dump = ntop->getPrefs()->are_dropped_flows_alerts_enabled();
-#else
-      do_dump = false;
-#endif
-      break;
-
-    case status_device_protocol_not_allowed:
-      do_dump = ntop->getPrefs()->are_device_protocols_alerts_enabled();
-      break;
-
-    case status_potentially_dangerous:
-      do_dump = ntop->getPrefs()->are_potentially_dangerous_protocols_alerts_enabled();
-      break;
-
-    case status_elephant_local_to_remote:
-    case status_elephant_remote_to_local:
-      do_dump = ntop->getPrefs()->are_elephant_flows_alerts_enabled();
-      break;
-
-    case status_longlived:
-      do_dump = ntop->getPrefs()->are_longlived_flows_alerts_enabled();
-      break;
-
-    case status_data_exfiltration:
-      do_dump = ntop->getPrefs()->are_exfiltration_alerts_enabled();
-      break;
-
-    case status_ids_alert:
-      do_dump = ntop->getPrefs()->are_ids_alerts_enabled();
-      break;
-
-    case num_flow_status: /* nothing to do here */
-      break;
-    }
+    bool do_dump = Utils::dumpFlowStatus(status);
 
 #ifdef HAVE_NEDGE
     /* NOTE: this must be explicitly re-checked as a more specific alert
@@ -396,18 +339,26 @@ void Flow::dumpFlowAlert() {
     when = time(0);
 
     if(cli_host && srv_host) {
+      bool cli_thresh, srv_thresh;
+
       if(cli_host->isDisabledFlowAlertType(status) || srv_host->isDisabledFlowAlertType(status)) {
 	/* TODO: eventually increment a counter of untriggered alerts */
 	return;
       }
 
       /* Check per-host thresholds */
-      if(cli_host->incFlowAlertHits(when) || srv_host->incFlowAlertHits(when))
+      cli_thresh = cli_host->incFlowAlertHits(when);
+      srv_thresh = srv_host->incFlowAlertHits(when);
+      if((cli_thresh || srv_thresh) && !getInterface()->read_from_pcap_dump())
 	do_dump = false;
     }
 
-    if(do_dump)
+    if(do_dump) {
       iface->getAlertsManager()->storeFlowAlert(this);
+
+      if(cli_host) cli_host->incNumAlertedFlows();
+      if(srv_host) srv_host->incNumAlertedFlows();
+    }
   }
 }
 
@@ -583,7 +534,6 @@ void Flow::processDetectedProtocol() {
     if((protos.ssl.ja3.server_hash == NULL) && (ndpiFlow->protos.stun_ssl.ssl.ja3_server[0] != '\0')) {
       protos.ssl.ja3.server_hash = strdup(ndpiFlow->protos.stun_ssl.ssl.ja3_server);
       protos.ssl.ja3.server_unsafe_cipher = ndpiFlow->protos.stun_ssl.ssl.server_unsafe_cipher;
-      if(protos.ssl.ja3.server_unsafe_cipher != ndpi_cipher_safe) setFlowAlerted();
       protos.ssl.ja3.server_cipher = ndpiFlow->protos.stun_ssl.ssl.server_cipher;
     }
 
@@ -724,6 +674,19 @@ void Flow::setJSONInfo(json_object *json) {
     json_object_put(json_info);
 
   json_info = json_object_get(json);
+}
+
+/* *************************************** */
+
+void Flow::setTLVInfo(ndpi_serializer *tlv) {
+  if(tlv == NULL) return;
+
+  if(tlv_info != NULL) { 
+    ndpi_term_serializer(tlv_info);
+    free(tlv_info);
+  }
+
+  tlv_info = tlv;
 }
 
 /* *************************************** */
@@ -1051,7 +1014,8 @@ void Flow::incFlowDroppedCounters() {
 
 /* *************************************** */
 
-void Flow::update_hosts_stats(struct timeval *tv, bool dump_alert) {
+void Flow::update_hosts_stats(bool dump_alert, update_stats_user_data_t *update_flows_stats_user_data) {
+  struct timeval *tv = update_flows_stats_user_data->tv;
   u_int64_t sent_packets, sent_bytes, sent_goodput_bytes, rcvd_packets, rcvd_bytes, rcvd_goodput_bytes;
   u_int64_t diff_sent_packets, diff_sent_bytes, diff_sent_goodput_bytes,
     diff_rcvd_packets, diff_rcvd_bytes, diff_rcvd_goodput_bytes;
@@ -1115,7 +1079,12 @@ void Flow::update_hosts_stats(struct timeval *tv, bool dump_alert) {
 
     update_flow_port_stats = false;
   }
-  
+
+  if(isDetectionCompleted())
+    performLuaCall(flow_lua_call_protocol_detected, tv, &update_flows_stats_user_data->acle);
+
+  performLuaCall(flow_lua_call_flow_status_changed, tv, &update_flows_stats_user_data->acle);
+
   if(get_state() == hash_entry_state_idle) {
     if(iface->isViewed()) {
       /* Must acknowledge so the overlying 'view' interface can actually set 
@@ -1130,6 +1099,9 @@ void Flow::update_hosts_stats(struct timeval *tv, bool dump_alert) {
     }
 
     postFlowSetIdle(tv->tv_sec);
+    performLuaCall(flow_lua_call_idle, tv, &update_flows_stats_user_data->acle);
+  } else {
+    performLuaCall(flow_lua_call_periodic_update, tv, &update_flows_stats_user_data->acle);
   }
 
   if(check_tor && (ndpiDetectedProtocol.app_protocol == NDPI_PROTOCOL_TLS)) {
@@ -1184,7 +1156,7 @@ void Flow::update_hosts_stats(struct timeval *tv, bool dump_alert) {
 #endif
 
         if(ntop->getPrefs()->areMacNdpiStatsEnabled()) {
-	  srv_host->getMac()->incnDPIStats(tv->tv_sec, stats_protocol,
+	  srv_host->getMac()->incnDPIStats(tv->tv_sec, get_protocol_category(),
 					   diff_rcvd_packets, diff_rcvd_bytes, diff_rcvd_goodput_bytes,
 					   diff_sent_packets, diff_sent_bytes, diff_sent_goodput_bytes);
 
@@ -1198,7 +1170,7 @@ void Flow::update_hosts_stats(struct timeval *tv, bool dump_alert) {
 #endif
 
         if(ntop->getPrefs()->areMacNdpiStatsEnabled()) {
-          cli_host->getMac()->incnDPIStats(tv->tv_sec, stats_protocol,
+          cli_host->getMac()->incnDPIStats(tv->tv_sec, get_protocol_category(),
 					   diff_sent_packets, diff_sent_bytes, diff_sent_goodput_bytes,
 					   diff_rcvd_packets, diff_rcvd_bytes, diff_rcvd_goodput_bytes);
         }
@@ -1229,7 +1201,8 @@ void Flow::update_hosts_stats(struct timeval *tv, bool dump_alert) {
 
       // Update network stats
       cli_network_stats = cli_host->getNetworkStats(cli_network_id);
-      cli_host->incStats(tv->tv_sec, protocol, stats_protocol, custom_app,
+      cli_host->incStats(tv->tv_sec, protocol,
+			 stats_protocol, get_protocol_category(), custom_app,
 			 diff_sent_packets, diff_sent_bytes, diff_sent_goodput_bytes,
 			 diff_rcvd_packets, diff_rcvd_bytes, diff_rcvd_goodput_bytes,
 			 get_srv_ip_addr()->isNonEmptyUnicastAddress());
@@ -1252,7 +1225,8 @@ void Flow::update_hosts_stats(struct timeval *tv, bool dump_alert) {
       NetworkStats *srv_network_stats;
 
       srv_network_stats = srv_host->getNetworkStats(srv_network_id);
-      srv_host->incStats(tv->tv_sec, protocol, stats_protocol, custom_app,
+      srv_host->incStats(tv->tv_sec, protocol,
+			 stats_protocol, get_protocol_category(), custom_app,
 			 diff_rcvd_packets, diff_rcvd_bytes, diff_rcvd_goodput_bytes,
 			 diff_sent_packets, diff_sent_bytes, diff_sent_goodput_bytes,
 			 get_cli_ip_addr()->isNonEmptyUnicastAddress());
@@ -1696,6 +1670,8 @@ void Flow::lua(lua_State* vm, AddressTree * ptree,
   const IpAddress *src_ip = get_cli_ip_addr(), *dst_ip = get_srv_ip_addr();
   bool src_match = true, dst_match = true;
   bool mask_cli_host = true, mask_dst_host = true, mask_flow;
+  bool has_json_info = false;
+  FlowStatusMap status_map;
 
   if(ptree) {
     if(src_ip) src_match = src_ip->match(ptree);
@@ -1821,8 +1797,19 @@ void Flow::lua(lua_State* vm, AddressTree * ptree,
     lua_push_uint64_table_entry(vm, "cli2srv.packets", stats.cli2srv_packets);
     lua_push_uint64_table_entry(vm, "srv2cli.packets", stats.srv2cli_packets);
 
+    /* Packet lenght stats */
+    lua_push_uint64_table_entry(vm, "cli2srv.pkt_len.min", ndpi_data_min(&stats.cli2srv_bytes_stats));
+    lua_push_uint64_table_entry(vm, "cli2srv.pkt_len.max", ndpi_data_max(&stats.cli2srv_bytes_stats));
+    lua_push_uint64_table_entry(vm, "cli2srv.pkt_len.avg", ndpi_data_average(&stats.cli2srv_bytes_stats));
+    lua_push_uint64_table_entry(vm, "cli2srv.pkt_len.stddev", ndpi_data_stddev(&stats.cli2srv_bytes_stats));
+    lua_push_uint64_table_entry(vm, "srv2cli.pkt_len.min", ndpi_data_min(&stats.srv2cli_bytes_stats));
+    lua_push_uint64_table_entry(vm, "srv2cli.pkt_len.max", ndpi_data_max(&stats.srv2cli_bytes_stats));
+    lua_push_uint64_table_entry(vm, "srv2cli.pkt_len.avg", ndpi_data_average(&stats.srv2cli_bytes_stats));
+    lua_push_uint64_table_entry(vm, "srv2cli.pkt_len.stddev", ndpi_data_stddev(&stats.srv2cli_bytes_stats));
+
     lua_push_uint64_table_entry(vm, "cli2srv.fragments", ip_stats_s2d.pktFrag);
     lua_push_uint64_table_entry(vm, "srv2cli.fragments", ip_stats_d2s.pktFrag);
+    lua_push_int32_table_entry(vm, "score", alert_score != CONST_NO_SCORE_SET ? alert_score : -1);
 
     if(isICMP()) {
       lua_newtable(vm);
@@ -1959,7 +1946,28 @@ void Flow::lua(lua_State* vm, AddressTree * ptree,
       }
     }
 
-    lua_push_str_table_entry(vm, "moreinfo.json", get_json_info() ? json_object_to_json_string(get_json_info()) : "{}");
+    if (get_json_info()) {
+      lua_push_str_table_entry(vm, "moreinfo.json", json_object_to_json_string(get_json_info()));
+      has_json_info = true;
+    } else if (get_tlv_info()) {
+      ndpi_deserializer deserializer;
+      if (ndpi_init_deserializer(&deserializer, get_tlv_info()) == 0) {
+        ndpi_serializer serializer;
+        if (ndpi_init_serializer(&serializer, ndpi_serialization_format_json) >= 0) {
+          char *buffer;
+          u_int32_t buffer_len;
+          ndpi_deserialize_clone_all(&deserializer, &serializer);
+          buffer = ndpi_serializer_get_buffer(&serializer, &buffer_len);
+          if (buffer) {
+            lua_push_str_table_entry(vm, "moreinfo.json", buffer);
+            has_json_info = true;
+          }
+          ndpi_term_serializer(&serializer);
+        }
+      }
+    }
+    if (!has_json_info)
+      lua_push_str_table_entry(vm, "moreinfo.json", "{}");
 
     if(cli_ebpf) processLua(vm, cli_ebpf, true);
     if(srv_ebpf) processLua(vm, srv_ebpf, false);
@@ -1984,6 +1992,7 @@ void Flow::lua(lua_State* vm, AddressTree * ptree,
     lua_push_uint64_table_entry(vm, "srv2cli.last", get_current_bytes_srv2cli());
 
     /* ********************* */
+
     dumpPacketStats(vm, true);
     dumpPacketStats(vm, false);
 
@@ -2023,7 +2032,14 @@ void Flow::lua(lua_State* vm, AddressTree * ptree,
   }
 
   lua_push_bool_table_entry(vm, "flow.idle", idle());
-  lua_push_uint64_table_entry(vm, "flow.status", getFlowStatus());
+  lua_push_uint64_table_entry(vm, "flow.status", getFlowStatus(&status_map));
+
+  if(isFlowAlerted()) {
+    lua_push_bool_table_entry(vm, "flow.alerted", isFlowAlerted());
+    lua_push_uint64_table_entry(vm, "flow.alert_rowid", alert_rowid);
+  }
+
+  lua_push_uint64_table_entry(vm, "status_map", status_map);
 
   // this is used to dynamicall update entries in the GUI
   lua_push_uint64_table_entry(vm, "ntopng.key", key()); // Key
@@ -2109,7 +2125,9 @@ bool Flow::idle() {
        TWH from staying in memory for too long. */
     if((tcp_flags & TH_FIN
 	|| tcp_flags & TH_RST
-	|| (iface->isPacketInterface() && !isThreeWayHandshakeOK()))
+	|| ((iface->isPacketInterface()
+	     || tcp_flags /* If not a packet interfaces, we expect flags to be set to be sure they've been exported */)
+	    && !isThreeWayHandshakeOK()))
        /* Flows won't expire if less than DONT_NOT_EXPIRE_BEFORE_SEC old */
        && iface->getTimeLastPktRcvd() > doNotExpireBefore
        && isIdle(MAX_TCP_FLOW_IDLE)) {
@@ -2118,13 +2136,14 @@ bool Flow::idle() {
     }
   }
 
-  return(isIdle(ntop->getPrefs()->get_flow_max_idle()));
+  return(isIdle(iface->getFlowMaxIdle()));
 }
 
 /* *************************************** */
 
 void Flow::sumStats(nDPIStats *ndpi_stats, FlowStats *status_stats) {
-  FlowStatus status = getFlowStatus();
+  FlowStatusMap status_map;
+  FlowStatus status = getFlowStatus(&status_map);
 
   ndpi_stats->incStats(0, ndpiDetectedProtocol.app_protocol,
 		       stats.cli2srv_packets, stats.cli2srv_bytes,
@@ -2167,11 +2186,15 @@ char* Flow::serialize(bool es_json) {
 /* *************************************** */
 
 /* Returns a stripped-down JSON specifically used for providing more alert information */
+/* TODO: this method will be thrown away once the migration to the lua flows alerts generation is completed */
 json_object* Flow::flow2statusinfojson() {
-  char buf[128];
-  json_object *obj = json_object_new_object();
-  if(!obj) return NULL;
+  FlowStatusMap status_map;
   DeviceProtoStatus proto_status = device_proto_allowed;
+  json_object *obj;
+  char buf[128];
+
+  obj = json_object_new_object();
+  if(!obj) return NULL;
 
   json_object_object_add(obj, "cli.devtype", json_object_new_int((cli_host && cli_host->getMac()) ? cli_host->getMac()->getDeviceType() : device_unknown));
   json_object_object_add(obj, "srv.devtype", json_object_new_int((srv_host && srv_host->getMac()) ? srv_host->getMac()->getDeviceType() : device_unknown));
@@ -2187,31 +2210,44 @@ json_object* Flow::flow2statusinfojson() {
       (proto_status == device_proto_forbidden_app) ? ndpiDetectedProtocol.app_protocol : ndpiDetectedProtocol.master_protocol));
   }
 
-  FlowStatus fs = getFlowStatus();
-  if(fs == status_ids_alert) {
-    json_object *json_alert = getSuricataAlert();
-    if (json_alert)
-      json_object_object_add(obj, "ids_alert", json_object_get(json_alert));
-  } else if(fs == status_blacklisted) {
+  getFlowStatus(&status_map);
+
+  if (Utils::bitmapIsSet(status_map, status_ids_alert)) {
+    json_object *obj_ids_alert = getIDSAlert();
+    if (obj_ids_alert)
+      json_object_object_add(obj, "ids_alert", json_object_get(obj_ids_alert));
+  }
+
+  if (Utils::bitmapIsSet(status_map, status_blacklisted)) {
     if(cli_host && cli_host->isBlacklisted())
       json_object_object_add(obj, "blacklisted.cli", json_object_new_boolean(true));
     if(srv_host && srv_host->isBlacklisted())
       json_object_object_add(obj, "blacklisted.srv", json_object_new_boolean(true));
     if(get_protocol_category() == CUSTOM_CATEGORY_MALWARE)
       json_object_object_add(obj, "blacklisted.cat", json_object_new_boolean(true));
-  } else if(fs == status_ssl_certificate_mismatch) {
+  }
+
+  if (Utils::bitmapIsSet(status_map, status_ssl_certificate_mismatch)) {
     if(protos.ssl.certificate && protos.ssl.certificate[0] != '\0')
       json_object_object_add(obj, "ssl_crt.cli", json_object_new_string(protos.ssl.certificate));
     if(protos.ssl.server_certificate && protos.ssl.server_certificate[0] != '\0')
       json_object_object_add(obj, "ssl_crt.srv", json_object_new_string(protos.ssl.server_certificate));
-  } else if(fs == status_elephant_local_to_remote)
+  }
+
+  if(Utils::bitmapIsSet(status_map, status_elephant_local_to_remote))
     json_object_object_add(obj, "elephant.l2r_threshold",
 			   json_object_new_int64(ntop->getPrefs()->get_elephant_flow_local_to_remote_bytes()));
-  else if(fs == status_elephant_remote_to_local)
+
+  if(Utils::bitmapIsSet(status_map, status_elephant_remote_to_local))
     json_object_object_add(obj, "elephant.r2l_threshold",
 			   json_object_new_int64(ntop->getPrefs()->get_elephant_flow_remote_to_local_bytes()));
 
-  if(isICMP()) {
+  if(Utils::bitmapIsSet(status_map, status_malicious_signature)) {
+    if(isSSL() && protos.ssl.ja3.client_hash)
+      json_object_object_add(obj, "ja3_signature", json_object_new_string(protos.ssl.ja3.client_hash));
+  }
+
+  if(isICMP()) { /* TODO: throw this block away once the lua alerts migration is completed */ 
     json_object_object_add(obj, "icmp.icmp_type", json_object_new_int(protos.icmp.icmp_type)),
       json_object_object_add(obj, "icmp.icmp_code", json_object_new_int(protos.icmp.icmp_code));
 
@@ -2418,6 +2454,24 @@ json_object* Flow::flow2json() {
 
 /* *************************************** */
 
+bool Flow::isFlowAlerted() const {
+  return alert_rowid >= 0;
+}
+
+/* *************************************** */
+
+void Flow::setFlowAlerted(int64_t rowid) {
+  if(rowid < 0)
+    return;
+
+  if(!isFlowAlerted())
+    iface->incNumAlertedFlows();
+
+  alert_rowid = rowid;
+}
+
+/* *************************************** */
+
 #ifdef HAVE_NEDGE
 
 bool Flow::isNetfilterIdleFlow() {
@@ -2449,7 +2503,7 @@ bool Flow::isNetfilterIdleFlow() {
   } else {
     /* if an conntrack update hasn't been seen for this flow
        we use the standard idleness check */
-    return(isIdle(ntop->getPrefs()->get_flow_max_idle()));
+    return(isIdle(iface->getFlowMaxIdle()));
   }
 }
 #endif
@@ -2545,45 +2599,37 @@ bool Flow::update_partial_traffic_stats_db_dump() {
 /* *************************************** */
 
 void Flow::updatePacketStats(InterarrivalStats *stats, const struct timeval *when) {
-  if(stats->lastTime.tv_sec != 0) {
-    float deltaMS = (float)(Utils::timeval2usec((struct timeval*)when) - Utils::timeval2usec(&stats->lastTime))/(float)1000;
-
-    if(deltaMS > 0) {
-      if(stats->max_ms == 0)
-	stats->min_ms = stats->max_ms = deltaMS;
-      else {
-	if(deltaMS > stats->max_ms) stats->max_ms = deltaMS;
-	if(deltaMS < stats->min_ms) stats->min_ms = deltaMS;
-      }
-
-      stats->total_delta_ms += deltaMS;
-    }
-  }
-
-  memcpy(&stats->lastTime, when, sizeof(struct timeval));
+  if(stats)
+    stats->updatePacketStats((struct timeval*)when);
 }
 
 /* *************************************** */
 
 void Flow::dumpPacketStats(lua_State* vm, bool cli2srv_direction) {
-  lua_newtable(vm);
+  InterarrivalStats *s = cli2srv_direction ? getCli2SrvIATStats() : getSrv2CliIATStats();
 
-  lua_push_float_table_entry(vm, "min", cli2srv_direction ? getCli2SrvMinInterArrivalTime() : getSrv2CliMinInterArrivalTime());
-  lua_push_float_table_entry(vm, "max", cli2srv_direction ? getCli2SrvMaxInterArrivalTime() : getSrv2CliMaxInterArrivalTime());
-  lua_push_float_table_entry(vm, "avg", cli2srv_direction ? getCli2SrvAvgInterArrivalTime() : getSrv2CliAvgInterArrivalTime());
+  if(s) {
+    lua_newtable(vm);
+  
+    lua_push_uint64_table_entry(vm, "min",   s->getMin());
+    lua_push_uint64_table_entry(vm, "max",   s->getMax());
+    lua_push_float_table_entry(vm, "avg",    s->getAvg());
+    lua_push_float_table_entry(vm, "stddev", s->getStdDev());
 
-  lua_pushstring(vm, cli2srv_direction ? "interarrival.cli2srv" : "interarrival.srv2cli");
-  lua_insert(vm, -2);
-  lua_settable(vm, -3);
+    // ntop->getTrace()->traceEvent(TRACE_NORMAL, "%u / %.1f / %u", s->getMin(), s->getAvg(), s->getMax());
+			       
+    lua_pushstring(vm, cli2srv_direction ? "interarrival.cli2srv" : "interarrival.srv2cli");
+    lua_insert(vm, -2);
+    lua_settable(vm, -3);
+  }
 }
 
 /* *************************************** */
 
 bool Flow::isBlacklistedFlow() const {
-  bool res = (cli_host && srv_host
-	      && (cli_host->isBlacklisted()
-		  || srv_host->isBlacklisted()
-		  || (get_protocol_category() == CUSTOM_CATEGORY_MALWARE)));
+  bool res = ((cli_host && cli_host->isBlacklisted())
+	      || (srv_host && srv_host->isBlacklisted())
+	      || (get_protocol_category() == CUSTOM_CATEGORY_MALWARE));
 
 #ifdef BLACKLISTED_FLOWS_DEBUG
   if(res) {
@@ -2619,14 +2665,16 @@ void Flow::incStats(bool cli2srv_direction, u_int pkt_len,
   payload_len *= iface->getScalingFactor();
 
   updateSeen();
-  updatePacketStats(cli2srv_direction ? &cli2srvStats.pktTime : &srv2cliStats.pktTime, when);
+  updatePacketStats(cli2srv_direction ? getCli2SrvIATStats() : getSrv2CliIATStats(), when);
 
   if(cli2srv_direction) {
     stats.cli2srv_packets++, stats.cli2srv_bytes += pkt_len, stats.cli2srv_goodput_bytes += payload_len, ip_stats_s2d.pktFrag += is_fragment;
+    ndpi_data_add_value(&stats.cli2srv_bytes_stats, pkt_len);
     if(cli_host) cli_host->incSentStats(pkt_len);
     if(srv_host) srv_host->incRecvStats(pkt_len);
   } else {
     stats.srv2cli_packets++, stats.srv2cli_bytes += pkt_len, stats.srv2cli_goodput_bytes += payload_len, ip_stats_d2s.pktFrag += is_fragment;
+    ndpi_data_add_value(&stats.srv2cli_bytes_stats, pkt_len);
     if(cli_host) cli_host->incRecvStats(pkt_len);
     if(srv_host) srv_host->incSentStats(pkt_len);
   }
@@ -2646,7 +2694,7 @@ void Flow::incStats(bool cli2srv_direction, u_int pkt_len,
 
 void Flow::updateInterfaceLocalStats(bool src2dst_direction, u_int num_pkts, u_int pkt_len) {
   Host *from = src2dst_direction ? cli_host : srv_host;
-  Host *to = src2dst_direction ? srv_host : cli_host;
+  Host *to   = src2dst_direction ? srv_host : cli_host;
 
   iface->incLocalStats(num_pkts, pkt_len,
 		       from ? from->isLocalHost() : false,
@@ -3730,126 +3778,38 @@ bool Flow::isLowGoodput() {
 
 /* ***************************************************** */
 
-FlowStatus Flow::getFlowStatus() {
+FlowStatus Flow::getFlowStatus(FlowStatusMap *status_map) {
+  FlowStatus status = status_normal;
 #ifndef HAVE_NEDGE
   u_int32_t issues_count;
 #endif
   u_int16_t l7proto = ndpi_get_lower_proto(ndpiDetectedProtocol);
 
-  /* NOTE: evaluation order is important here! */
+  *status_map = 0;
 
   if(iface->isPacketInterface() && iface->is_purge_idle_interface()
-     && !idle() && isIdle(10 * ntop->getPrefs()->get_flow_max_idle())) {
+     && !idle() && isIdle(10 * iface->getFlowMaxIdle())) {
     /* Should've already been marked as idle and purged */
-    return status_not_purged;
+    *status_map = Utils::bitmapSet(*status_map, status = status_not_purged);
+    return status;
   }
 
-  if(isBlacklistedFlow())
-    return status_blacklisted;
+  /* NOTE: evaluation order is important here! (reverse order: last one is the most important) */
 
-  if(get_protocol_breed() == NDPI_PROTOCOL_DANGEROUS)
-    return status_potentially_dangerous;
+  if(isSSL() && protos.ssl.ssl_version && (protos.ssl.ssl_version < 0x303 /* TLSv1.2 */))
+    *status_map = Utils::bitmapSet(*status_map, status = status_ssl_old_protocol_version);
 
-  if(!isDeviceAllowedProtocol())
-    return status_device_protocol_not_allowed;
+  if(protos.ssl.ja3.server_unsafe_cipher != ndpi_cipher_safe)
+    *status_map = Utils::bitmapSet(*status_map, status = status_ssl_unsafe_ciphers);
 
-  //if(get_protocol_category() == CUSTOM_CATEGORY_MINING)
-  if(ndpiDetectedProtocol.category == CUSTOM_CATEGORY_MINING)
-    return status_web_mining_detected;
-
-  if(getSuricataAlert())
-    return status_ids_alert;
-
-#ifndef HAVE_NEDGE
-  /* All flows */
-  issues_count = stats.tcp_stats_s2d.pktRetr + stats.tcp_stats_s2d.pktOOO + stats.tcp_stats_s2d.pktLost;
-  if(issues_count > CONST_TCP_CHECK_ISSUES_THRESHOLD) {
-    if(issues_count > (stats.cli2srv_packets / CONST_TCP_CHECK_SEVERE_ISSUES_RATIO))
-      return status_tcp_severe_connection_issues;
-    else if(issues_count > (stats.cli2srv_packets / CONST_TCP_CHECK_ISSUES_RATIO))
-      return status_tcp_connection_issues;
-  }
-
-  issues_count = stats.tcp_stats_d2s.pktRetr + stats.tcp_stats_d2s.pktOOO + stats.tcp_stats_d2s.pktLost;
-  if(issues_count > CONST_TCP_CHECK_ISSUES_THRESHOLD) {
-    if(issues_count > (stats.srv2cli_packets / CONST_TCP_CHECK_SEVERE_ISSUES_RATIO))
-      return status_tcp_severe_connection_issues;
-    else if(issues_count > (stats.srv2cli_packets / CONST_TCP_CHECK_ISSUES_RATIO))
-      return status_tcp_connection_issues;
-  }
+#ifdef HAVE_NEDGE
+  /* Leave this at the end. A more specific status should be returned above if avaialble. */
+  if(!isPassVerdict())
+    *status_map = Utils::bitmapSet(*status_map, status = status_blocked);
 #endif
 
-  if(iface->getIfType() == interface_type_ZMQ) {
-    /* ZMQ flows */
-  } else {
-    /* Packet flows */
-    bool isIdle = idle();
-
-#ifndef HAVE_NEDGE
-    bool lowGoodput = isLowGoodput();
-#endif
-
-    if(protocol == IPPROTO_TCP) {
-      if((stats.srv2cli_packets == 0) && ((time(NULL)-last_seen) > CONST_ALERT_PROBING_TIME))
-	return status_suspicious_tcp_probing;
-
-      if(!twh_over) {
-	if(isIdle)
-	  return status_suspicious_tcp_syn_probing;
-	else
-	  return status_normal;
-      } else {
-	/* 3WH is over */
-	switch(l7proto) {
-	case NDPI_PROTOCOL_TLS:
-	  /*
-	    CNs are NOT case sensitive as per RFC 5280
-	    so we use ...case... functions to do the comparisions
-	  */
-	  if(protos.ssl.certificate
-	     && protos.ssl.server_certificate
-	     && !protos.ssl.subject_alt_name_match) {
-	    if(protos.ssl.server_certificate[0] == '*') {
-	      if(!strcasestr(protos.ssl.certificate, &protos.ssl.server_certificate[1]))
-		return status_ssl_certificate_mismatch;
-	    } else if(strcasecmp(protos.ssl.certificate, protos.ssl.server_certificate))
-	      return status_ssl_certificate_mismatch;
-	  }
-	  break;
-	}
-
-#ifndef HAVE_NEDGE
-	if(isIdle  && lowGoodput)  return status_slow_data_exchange;
-
-	if(!isIdle && lowGoodput) {
-	  if(isTCPReset())
-	    return status_tcp_connection_refused;
-	  else
-	    return status_low_goodput;
-	}
-#endif
-      }
-    }
-
-    /* If here is either UDP or TCP */
-    switch(l7proto) {
-    case NDPI_PROTOCOL_DNS:
-      if(protos.dns.invalid_query)
-	return status_dns_invalid_query;
-    }
-  }
-
-  if(cli_host && srv_host
-     && get_cli_ip_addr()->isNonEmptyUnicastAddress()
-     && get_srv_ip_addr()->isNonEmptyUnicastAddress()) {
-
-    if(! cli_host->isLocalHost() &&
-       ! srv_host->isLocalHost())
-      return status_remote_to_remote;
-  }
-
-  if(isLongLived())
-    return status_longlived;
+  if(isICMP() && has_long_icmp_payload())
+    *status_map = Utils::bitmapSet(*status_map, status = status_data_exfiltration);
 
   if(cli_host && srv_host
      /* Assumes elephant flows are normal when the category is data transfer */
@@ -3864,32 +3824,127 @@ FlowStatus Flow::getFlowStatus() {
       remote_to_local_bytes = get_bytes_cli2srv();
     }
 
-    if(local_to_remote_bytes > ntop->getPrefs()->get_elephant_flow_local_to_remote_bytes())
-      return status_elephant_local_to_remote;
     if(remote_to_local_bytes > ntop->getPrefs()->get_elephant_flow_remote_to_local_bytes())
-      return status_elephant_remote_to_local;
+      *status_map = Utils::bitmapSet(*status_map, status = status_elephant_remote_to_local);
+
+    if(local_to_remote_bytes > ntop->getPrefs()->get_elephant_flow_local_to_remote_bytes())
+      *status_map = Utils::bitmapSet(*status_map, status = status_elephant_local_to_remote);
   }
 
-  if(isICMP() && has_long_icmp_payload())
-    return status_data_exfiltration;
+  if(isLongLived())
+    *status_map = Utils::bitmapSet(*status_map, status = status_longlived);
 
-#ifdef HAVE_NEDGE
-  /* Leave this at the end. A more specific status should be returned above if avaialble. */
-  if(!isPassVerdict())
-    return status_blocked;
+  if(cli_host && srv_host
+     && get_cli_ip_addr()->isNonEmptyUnicastAddress()
+     && get_srv_ip_addr()->isNonEmptyUnicastAddress()) {
+
+    if(! cli_host->isLocalHost() &&
+       ! srv_host->isLocalHost())
+      *status_map = Utils::bitmapSet(*status_map, status = status_remote_to_remote);
+  }
+
+  if(iface->getIfType() == interface_type_ZMQ) {
+    /* ZMQ flows */
+  } else {
+    /* Packet flows */
+    bool isIdle = idle();
+
+#ifndef HAVE_NEDGE
+    bool lowGoodput = isLowGoodput();
 #endif
 
-#if 0
-  if(iface->hasAlerts())
-   return(status_flow_when_interface_alerted);
+    if(protocol == IPPROTO_TCP) {
+      if((stats.srv2cli_packets == 0) && ((time(NULL)-last_seen) > CONST_ALERT_PROBING_TIME))
+	*status_map = Utils::bitmapSet(*status_map, status = status_suspicious_tcp_probing);
+
+      if(!twh_over) {
+	if(isIdle)
+	  *status_map = Utils::bitmapSet(*status_map, status = status_suspicious_tcp_syn_probing);
+	else
+	  *status_map = Utils::bitmapSet(*status_map, status = status_normal);
+      } else {
+	/* 3WH is over */
+	switch(l7proto) {
+	case NDPI_PROTOCOL_TLS:
+	  /*
+	    CNs are NOT case sensitive as per RFC 5280
+	    so we use ...case... functions to do the comparisions
+	  */
+	  if(protos.ssl.certificate
+	     && protos.ssl.server_certificate
+	     && !protos.ssl.subject_alt_name_match) {
+	    if(protos.ssl.server_certificate[0] == '*') {
+	      if(!strcasestr(protos.ssl.certificate, &protos.ssl.server_certificate[1]))
+		*status_map = Utils::bitmapSet(*status_map, status = status_ssl_certificate_mismatch);
+	    } else if(strcasecmp(protos.ssl.certificate, protos.ssl.server_certificate))
+	      *status_map = Utils::bitmapSet(*status_map, status = status_ssl_certificate_mismatch);
+	  }
+	  break;
+	}
+
+#ifndef HAVE_NEDGE
+	if(isIdle && lowGoodput)  *status_map = Utils::bitmapSet(*status_map, status = status_slow_data_exchange);
+
+	if(!isIdle && lowGoodput) {
+	  if(isTCPReset())
+	    *status_map = Utils::bitmapSet(*status_map, status = status_tcp_connection_refused);
+	  else
+	    *status_map = Utils::bitmapSet(*status_map, status = status_low_goodput);
+	}
+#endif
+      }
+    }
+
+    /* If here is either UDP or TCP */
+    switch(l7proto) {
+    case NDPI_PROTOCOL_DNS:
+      if(protos.dns.invalid_query)
+	*status_map = Utils::bitmapSet(*status_map, status = status_dns_invalid_query);
+    }
+  }
+
+#ifndef HAVE_NEDGE
+  /* All flows */
+  issues_count = stats.tcp_stats_s2d.pktRetr + stats.tcp_stats_s2d.pktOOO + stats.tcp_stats_s2d.pktLost;
+  if(issues_count > CONST_TCP_CHECK_ISSUES_THRESHOLD) {
+    if(issues_count > (stats.cli2srv_packets / CONST_TCP_CHECK_SEVERE_ISSUES_RATIO))
+      *status_map = Utils::bitmapSet(*status_map, status = status_tcp_severe_connection_issues);
+    else if(issues_count > (stats.cli2srv_packets / CONST_TCP_CHECK_ISSUES_RATIO))
+      *status_map = Utils::bitmapSet(*status_map, status = status_tcp_connection_issues);
+  }
+
+  issues_count = stats.tcp_stats_d2s.pktRetr + stats.tcp_stats_d2s.pktOOO + stats.tcp_stats_d2s.pktLost;
+  if(issues_count > CONST_TCP_CHECK_ISSUES_THRESHOLD) {
+    if(issues_count > (stats.srv2cli_packets / CONST_TCP_CHECK_SEVERE_ISSUES_RATIO))
+      *status_map = Utils::bitmapSet(*status_map, status = status_tcp_severe_connection_issues);
+    else if(issues_count > (stats.srv2cli_packets / CONST_TCP_CHECK_ISSUES_RATIO))
+      *status_map = Utils::bitmapSet(*status_map, status = status_tcp_connection_issues);
+  }
 #endif
 
-  if(isSSL() && protos.ssl.ssl_version && (protos.ssl.ssl_version < 0x303 /* TLSv1.2 */))
-    return(status_ssl_old_protocol_version);
-  else if(protos.ssl.ja3.server_unsafe_cipher != ndpi_cipher_safe)
-    return(status_ssl_unsafe_ciphers);
+  if(getIDSAlert())
+    *status_map = Utils::bitmapSet(*status_map, status = status_ids_alert);
 
-  return(status_normal);
+  //if(get_protocol_category() == CUSTOM_CATEGORY_MINING)
+  if(ndpiDetectedProtocol.category == CUSTOM_CATEGORY_MINING)
+    *status_map = Utils::bitmapSet(*status_map, status = status_web_mining_detected);
+
+  if(has_malicious_signature)
+    *status_map = Utils::bitmapSet(*status_map, status = status_malicious_signature);
+
+  if(!isDeviceAllowedProtocol())
+    *status_map = Utils::bitmapSet(*status_map, status = status_device_protocol_not_allowed);
+
+  if(get_protocol_breed() == NDPI_PROTOCOL_DANGEROUS)
+    *status_map = Utils::bitmapSet(*status_map, status = status_potentially_dangerous);
+
+  if(isBlacklistedFlow())
+    *status_map = Utils::bitmapSet(*status_map, status = status_blacklisted);
+
+  if(status == status_normal)
+    *status_map = Utils::bitmapSet(*status_map, status_normal);
+
+  return(status);
 }
 
 /* ***************************************************** */
@@ -3940,15 +3995,19 @@ void Flow::setPacketsBytes(time_t now, u_int32_t s2d_pkts, u_int32_t d2s_pkts,
   */
   last_conntrack_update = now;
 
-  iface->_incStats(isIngress2EgressDirection(), now, eth_proto, ndpiDetectedProtocol.app_protocol, protocol,
+  iface->_incStats(isIngress2EgressDirection(), now, eth_proto,
+		   getStatsProtocol(), get_protocol_category(),
+		   protocol,
 		   nf_existing_flow ? s2d_bytes - stats.cli2srv_bytes : s2d_bytes,
 		   nf_existing_flow ? s2d_pkts - stats.cli2srv_packets : s2d_pkts,
 		   overhead);
 
-  iface->_incStats(!isIngress2EgressDirection(), now, eth_proto, ndpiDetectedProtocol.app_protocol, protocol,
-		  nf_existing_flow ? d2s_bytes - stats.srv2cli_bytes : d2s_bytes,
-		  nf_existing_flow ? d2s_pkts - stats.srv2cli_packets : d2s_pkts,
-		  overhead);
+  iface->_incStats(!isIngress2EgressDirection(), now, eth_proto,
+		   getStatsProtocol(), get_protocol_category(),
+		   protocol,
+		   nf_existing_flow ? d2s_bytes - stats.srv2cli_bytes : d2s_bytes,
+		   nf_existing_flow ? d2s_pkts - stats.srv2cli_packets : d2s_pkts,
+		   overhead);
 
   if(nf_existing_flow) {
     stats.cli2srv_packets = s2d_pkts, stats.cli2srv_bytes = s2d_bytes,
@@ -4023,9 +4082,12 @@ void Flow::setParsedeBPFInfo(const ParsedeBPF * const ebpf, bool src2dst_directi
 /* ***************************************************** */
 
 void Flow::updateJA3() {
-  if(cli_host && isSSL() && protos.ssl.ja3.client_hash)
+  if(cli_host && isSSL() && protos.ssl.ja3.client_hash) {
     cli_host->getJA3Fingerprint()->update(protos.ssl.ja3.client_hash,
 					  cli_ebpf ? cli_ebpf->process_info.process_name : NULL);
+
+    has_malicious_signature |= ntop->isMaliciousJA3Hash(protos.ssl.ja3.client_hash);
+  }
 }
 
 /* ***************************************************** */
@@ -4047,6 +4109,8 @@ void Flow::updateHASSH(bool as_client) {
 
 /* Called when a flow is set_idle */
 void Flow::postFlowSetIdle(time_t t) {
+  FlowStatusMap status_map;
+
   /* not called from the datapath for flows, so it is only
      safe to touch low goodput uses */
   if(good_low_flow_detected) {
@@ -4054,16 +4118,22 @@ void Flow::postFlowSetIdle(time_t t) {
     if(srv_host) srv_host->decLowGoodputFlows(t, false);
   }
 
-  FlowStatus status = getFlowStatus();
+  FlowStatus status = getFlowStatus(&status_map);
 
   if(status != status_normal) {
 #if 0
-  char buf[256];
-  printf("%s status=%d\n", print(buf, sizeof(buf)), status);
+    char buf[256];
+    printf("%s status=%d\n", print(buf, sizeof(buf)), status);
 #endif
 
     if(cli_host) cli_host->incNumAnomalousFlows(true);
     if(srv_host) srv_host->incNumAnomalousFlows(false);
+  }
+
+  if(isFlowAlerted()) {
+    if(cli_host) cli_host->decNumAlertedFlows();
+    if(srv_host) srv_host->decNumAlertedFlows();
+    iface->decNumAlertedFlows();
   }
 }
 
@@ -4190,5 +4260,90 @@ void Flow::dissectSSL(char *payload, u_int16_t payload_len) {
     }
 
     free(_payload);
+  }
+}
+
+/* ***************************************************** */
+
+bool Flow::isLuaCallPerformed(FlowLuaCall flow_lua_call, const struct timeval *tv) {
+  FlowStatusMap status_map;
+  std::map<FlowLuaCall, struct timeval>::const_iterator it = performed_lua_calls.find(flow_lua_call);
+  bool found = it != performed_lua_calls.end();
+  u_int32_t periodic_update_freq;
+
+  switch(flow_lua_call) {
+  case flow_lua_call_flow_status_changed:
+    getFlowStatus(&status_map);
+
+    if(status_map != last_notified_status_map) {
+      last_notified_status_map = status_map;
+      /* Update the hosts status */
+      if(cli_host) cli_host->setAnomalousFlowsStatusMap(status_map, true);
+      if(srv_host) srv_host->setAnomalousFlowsStatusMap(status_map, false);
+      return false;
+    }
+
+    return true;
+  case flow_lua_call_periodic_update:
+    periodic_update_freq = iface->getFlowMaxIdle() * 5; /* 5 times the max flow idleness */
+
+    if(found)
+      /* Don't re-call it before the maximum flow lifetime */
+      return it->second.tv_sec + periodic_update_freq > tv->tv_sec;
+    else
+      /* Call the first time only after getFlowMaxIdle() seconds have elapsed */
+      return get_duration() < periodic_update_freq;
+  default:
+    break;
+  }
+
+  return found;
+}
+
+/* ***************************************************** */
+
+void Flow::performLuaCall(FlowLuaCall flow_lua_call, const struct timeval *tv, AlertCheckLuaEngine **acle) {
+  const char *lua_call_fn_name = NULL;
+  std::map<FlowLuaCall, struct timeval>::iterator it;
+
+  if(isLuaCallPerformed(flow_lua_call, tv)) {
+    return;
+  }
+
+  if(!*acle
+     && !(*acle = new (std::nothrow) AlertCheckLuaEngine(alert_entity_flow, minute_script /* doesn't matter */, iface)))
+    return;
+
+  lua_State *L = (*acle)->getState();
+  (*acle)->setFlow(this);
+
+  switch(flow_lua_call) {
+  case flow_lua_call_protocol_detected:
+    lua_call_fn_name = FLOW_LUA_CALL_PROTOCOL_DETECTED_FN_NAME;
+    break;
+  case flow_lua_call_flow_status_changed:
+    lua_call_fn_name = FLOW_LUA_CALL_FLOW_STATUS_CHANGE_FN_NAME;
+    break;
+  case flow_lua_call_periodic_update:
+    lua_call_fn_name = FLOW_LUA_CALL_PERIODIC_UPDATE_FN_NAME;
+    break;
+  case flow_lua_call_idle:
+    lua_call_fn_name = FLOW_LUA_CALL_IDLE_FN_NAME;
+    break;
+  default:
+    lua_call_fn_name = NULL;
+    break;
+  }
+
+  if(lua_call_fn_name) {
+    /* Call the function */
+    lua_getglobal(L, lua_call_fn_name); /* Called function */
+    (*acle)->pcall(0 /* 0 arguments */, 0 /* 0 results */);
+
+    /* Mark it as called */
+    if((it = performed_lua_calls.find(flow_lua_call)) != performed_lua_calls.end())
+      it->second = *tv;
+    else
+      performed_lua_calls.insert(make_pair(flow_lua_call, *tv));
   }
 }

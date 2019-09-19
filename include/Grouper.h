@@ -36,7 +36,6 @@ struct groupStats{
   u_int32_t num_alerts;
   float throughput_bps;
   float throughput_pps;
-  float throughput_trend_bps_diff;
   char country[3];
 };
 

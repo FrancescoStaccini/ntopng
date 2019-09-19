@@ -232,6 +232,54 @@ void Redis::checkDumpable(const char * const key) {
 
 /* **************************************** */
 
+int Redis::info(char *rsp, u_int rsp_len) {
+  int rc;
+  redisReply *reply;
+
+  l->lock(__FILE__, __LINE__);
+  num_requests++;
+  reply = (redisReply*)redisCommand(redis, "INFO");
+  if(!reply) reconnectRedis(true);
+  if(reply && (reply->type == REDIS_REPLY_ERROR))
+    ntop->getTrace()->traceEvent(TRACE_ERROR, "%s", reply->str ? reply->str : "???");
+
+  if(reply && reply->str) {
+    snprintf(rsp, rsp_len, "%s", reply->str), rc = 0;
+  } else
+    rsp[0] = 0, rc = -1;
+  if(reply) freeReplyObject(reply);
+  l->unlock(__FILE__, __LINE__);
+
+  return(rc);
+}
+
+/* **************************************** */
+
+u_int Redis::dbsize() {
+  redisReply *reply;
+  u_int num = 0;
+
+  l->lock(__FILE__, __LINE__);
+
+  num_requests++;
+  reply = (redisReply*)redisCommand(redis, "DBSIZE");
+
+  if(!reply) reconnectRedis(true);
+  if(reply) {
+    if(reply->type == REDIS_REPLY_ERROR)
+      ntop->getTrace()->traceEvent(TRACE_ERROR, "%s", reply->str ? reply->str : "???");
+    else
+      num = (u_int)reply->integer;
+  }
+
+  l->unlock(__FILE__, __LINE__);
+  if(reply) freeReplyObject(reply);
+
+  return(num);
+}
+
+/* **************************************** */
+
 /* NOTE: We assume that the addToCache() caller locks this instance */
 void Redis::addToCache(const char * const key, const char * const value, u_int expire_secs) {
   std::map<std::string, StringCache>::iterator it;
@@ -338,6 +386,7 @@ int Redis::get(char *key, char *rsp, u_int rsp_len, bool cache_it) {
 
   return(rc);
 }
+
 /* **************************************** */
 
 int Redis::del(char *key){
@@ -977,7 +1026,6 @@ u_int Redis::len(const char * const key) {
   if(reply) freeReplyObject(reply);
 
   return(num);
-
 }
 
 /* **************************************** */

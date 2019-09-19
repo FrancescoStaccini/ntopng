@@ -205,9 +205,9 @@ local function getConsolidationFunction(schema)
 end
 
 local function create_rrd(schema, path)
-  local heartbeat = schema.options.rrd_heartbeat or (schema.options.step * 2)
+  local heartbeat = schema.options.rrd_heartbeat or (schema.options.insertion_step * 2)
   local rrd_type = type_to_rrdtype[schema.options.metrics_type]
-  local params = {path, schema.options.step}
+  local params = {path, schema.options.insertion_step}
   local cf = getConsolidationFunction(schema)
 
   local metrics_map = map_metrics_to_rrd_columns(#schema._metrics)
@@ -277,7 +277,7 @@ local function add_missing_ds(schema, rrdfile, cur_ds)
   traceError(TRACE_INFO, TRACE_CONSOLE, "RRD format changed [schema=".. schema.name .."], trying to fix " .. rrdfile)
 
   local params = {rrdfile, }
-  local heartbeat = schema.options.rrd_heartbeat or (schema.options.step * 2)
+  local heartbeat = schema.options.rrd_heartbeat or (schema.options.insertion_step * 2)
   local rrd_type = type_to_rrdtype[schema.options.metrics_type]
 
   for idx, metric in ipairs(schema._metrics) do
@@ -603,7 +603,8 @@ end
 -- tags_filter is expected to contain all the tags of the schema except the last
 -- one. For such tag, a list of available values will be returned.
 local function _listSeries(schema, tags_filter, wildcard_tags, start_time)
-  if #wildcard_tags > 1 then
+   if #wildcard_tags > 1 then
+      tprint({schema_name = schema.name, wildcards=wildcard_tags})
     traceError(TRACE_ERROR, TRACE_CONSOLE, "RRD driver does not support listSeries on multiple tags")
     return nil
   end

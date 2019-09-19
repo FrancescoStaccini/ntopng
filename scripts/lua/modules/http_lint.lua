@@ -358,7 +358,7 @@ local function validateFlowStatusNumber(status)
 end
 
 local function validateFlowStatus(mode)
-   local modes = {"normal", "alerted", "filtered"}
+   local modes = {"normal", "alerted", "filtered", "misbehaving"}
 
    if validateFlowStatusNumber(mode) then
       return true
@@ -1101,7 +1101,9 @@ local known_parameters = {
    ["profile"]                 = http_lint.validateTrafficProfile,        -- Traffic Profile name
    ["delete_profile"]          = http_lint.validateTrafficProfile,        -- A Traffic Profile to delete
    ["alert_type"]              = validateNumber,                -- An alert type enum
+   ["alert_subtype"]           = validateSingleWord,            -- An alert subtype string
    ["alert_severity"]          = validateNumber,                -- An alert severity enum
+   ["alert_granularity"]       = validateNumber,                -- An alert granularity
    ["entity"]                  = validateNumber,                -- An alert entity type
    ["entity_excludes"]         = validateListOfTypeInline(validateNumber),
    ["asn"]                     = validateNumber,                -- An ASN number
@@ -1147,6 +1149,7 @@ local known_parameters = {
 -- PREFERENCES - see prefs.lua for details
    -- Toggle Buttons
    ["interface_rrd_creation"]                      = validateBool,
+   ["interface_top_talkers_creation"]              = validateBool,
    ["interface_flow_dump"]                         = validateBool,
    ["is_mirrored_traffic"]                         = validateBool,
    ["interface_network_discovery"]                 = validateBool,
@@ -1312,6 +1315,7 @@ local known_parameters = {
    ["send_test_slack"]                             = validateEmpty,
    ["send_test_webhook"]                           = validateEmpty,
    ["network_discovery_interval"]                  = validateNumber,
+   ["mud_recording"]                               = validateChoiceInline({"disabled", "general_purpose", "special_purpose"}),
    ["captive_portal_id_method"]                    = validateChoiceInline({"mac", "ip"}),
 --
 
@@ -1533,6 +1537,7 @@ local special_parameters = {   --[[Suffix validator]]     --[[Value Validator]]
    ["op_"]                     = { validateAlertDescriptor,   validateOperator },    -- key: an alert descriptor, value: alert operator
    ["value_"]                  = { validateAlertDescriptor,   validateAlertValue },  -- key: an alert descriptor, value: alert value
    ["slack_ch_"]               = { validateNumber, validateSingleWord },             -- slack channel name
+   ["enabled_"]                  = { validateAlertDescriptor,   validateAlertValue },  -- key: a check module key, value: alert value
 
 -- Protocol to categories match
    ["proto_"]                  = { validateProtocolId, validateCategory },

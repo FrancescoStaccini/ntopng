@@ -38,6 +38,9 @@ AlertCheckLuaEngine::AlertCheckLuaEngine(AlertEntity alert_entity, ScriptPeriodi
   case alert_entity_interface:
     lua_file = "interface.lua";
     break;
+  case alert_entity_flow:
+    lua_file = "flow.lua";
+    break;
   default:
     /* Example: lua_file = "generic.lua" to handle a generic entity */
     break;
@@ -50,7 +53,8 @@ AlertCheckLuaEngine::AlertCheckLuaEngine(AlertEntity alert_entity, ScriptPeriodi
 	     lua_file);
     ntop->fixPath(script_path);
 
-    load_script(script_path, iface);
+    if(run_script(script_path, iface, true /* Load only */) < 0)
+      return;
 
     lua_getglobal(L, "setup");         /* Called function   */
     lua_pushstring(L, Utils::periodicityToScriptName(p)); /* push 1st argument */
@@ -59,7 +63,18 @@ AlertCheckLuaEngine::AlertCheckLuaEngine(AlertEntity alert_entity, ScriptPeriodi
       return;
   } else {
     /* Possibly handle a generic entity */
-    script_path[0] = '0';
+    script_path[0] = '\0';
+  }
+}
+
+/* ****************************************** */
+
+AlertCheckLuaEngine::~AlertCheckLuaEngine() {
+  if(script_path[0] != '\0') {
+    lua_getglobal(L, "teardown"); /* Called function */
+
+    if(lua_isfunction(L, -1))
+      pcall(0 /* 1 argument */, 0);
   }
 }
 

@@ -38,8 +38,11 @@ class Host : public GenericHashEntry, public AlertableEntity {
   HostStats *stats, *stats_shadow;
   OperatingSystem os;
   time_t last_stats_reset;
+  u_int16_t alert_score;
+  u_int32_t active_alerted_flows;
   u_int32_t disabled_flow_status;
-  
+  FlowStatusMap anomalous_flows_as_client_status, anomalous_flows_as_server_status;
+ 
   /* Host data: update Host::deleteHostData when adding new fields */
   struct {
     char * mdns, * mdns_txt;
@@ -49,6 +52,8 @@ class Host : public GenericHashEntry, public AlertableEntity {
   char *mdns_info;
   char *ssdpLocation;
   bool host_label_set;
+  bool prefs_loaded;
+  MudRecording mud_pref;
   /* END Host data: */
 
   AlertCounter *syn_flood_attacker_alert, *syn_flood_victim_alert;
@@ -100,6 +105,7 @@ class Host : public GenericHashEntry, public AlertableEntity {
   virtual bool isLocalHost()  const = 0;
   virtual bool isSystemHost() const = 0;
   inline  bool isBroadcastDomainHost() const { return(is_in_broadcast_domain); };
+  inline bool serializeByMac() const { return(isBroadcastDomainHost() && isDhcpHost() && getMac() && iface->serializeLbdHostsAsMacs()); }
   inline  bool isDhcpHost()            const { return(is_dhcp_host); };
   inline void setBroadcastDomainHost()       { is_in_broadcast_domain = true;  };
   inline void setSystemHost()                { /* TODO: remove */              };
@@ -123,10 +129,14 @@ class Host : public GenericHashEntry, public AlertableEntity {
   };
 
   virtual HostStats* allocateStats()                { return(new HostStats(this)); };
-  void updateStats(update_hosts_stats_user_data_t *update_hosts_stats_user_data);
+  void updateStats(update_stats_user_data_t *update_hosts_stats_user_data);
   void incLowGoodputFlows(time_t t, bool asClient);
   void decLowGoodputFlows(time_t t, bool asClient);
-  inline void incNumAnomalousFlows(bool asClient)   { return(stats->incNumAnomalousFlows(asClient)); };
+  inline void incNumAnomalousFlows(bool asClient)   { stats->incNumAnomalousFlows(asClient); };
+  inline void setAnomalousFlowsStatusMap(FlowStatusMap status, bool asClient)  { 
+    if (asClient) anomalous_flows_as_client_status = Utils::bitmapOr(anomalous_flows_as_client_status, status); 
+    else anomalous_flows_as_server_status = Utils::bitmapOr(anomalous_flows_as_server_status, status); 
+  };
   inline u_int16_t get_host_pool()         { return(host_pool_id);   };
   inline u_int16_t get_vlan_id()           { return(vlan_id);        };
   char* get_name(char *buf, u_int buf_len, bool force_resolution_if_not_found);
@@ -153,7 +163,9 @@ class Host : public GenericHashEntry, public AlertableEntity {
   inline void set_ipv4(u_int32_t _ipv4)             { ip.set(_ipv4);                 };
   inline void set_ipv6(struct ndpi_in6_addr *_ipv6) { ip.set(_ipv6);                 };
   inline u_int32_t key()                            { return(ip.key());              };
-  inline IpAddress* get_ip()                 { return(&ip);              }
+  inline IpAddress* get_ip()                        { return(&ip);                   };
+  inline bool isIPv4()                        const { return ip.isIPv4();            };
+  inline bool isIPv6()                        const { return ip.isIPv6();            };
   void set_mac(Mac  *m);
   inline bool isBlacklisted()                  { return(blacklisted_host);  };
   void reloadHostBlacklist();
@@ -188,7 +200,6 @@ class Host : public GenericHashEntry, public AlertableEntity {
   inline u_int64_t getNumBytesRcvd()           { return(stats->getNumBytesRcvd());   }
   inline u_int64_t getNumDroppedFlows()        { return(stats->getNumDroppedFlows());}
   inline u_int64_t getNumBytes()               { return(stats->getNumBytes());}
-  inline float getThptTrendDiff()              { return(stats->getThptTrendDiff());  }
   inline float getBytesThpt()                  { return(stats->getBytesThpt());      }
   inline float getPacketsThpt()                { return(stats->getPacketsThpt());    }
   inline void incNumDroppedFlows()             { stats->incNumDroppedFlows();        }
@@ -213,7 +224,8 @@ class Host : public GenericHashEntry, public AlertableEntity {
   inline bool is_label_set() { return(host_label_set); };
   inline int compare(Host *h) { return(ip.compare(&h->ip)); };
   inline bool equal(IpAddress *_ip)  { return(_ip && ip.equal(_ip)); };
-  void incStats(u_int32_t when, u_int8_t l4_proto, u_int ndpi_proto,
+  void incStats(u_int32_t when, u_int8_t l4_proto,
+		u_int ndpi_proto, ndpi_protocol_category_t ndpi_category,
 		custom_app_t custom_app,
 		u_int64_t sent_packets, u_int64_t sent_bytes, u_int64_t sent_goodput_bytes,
 		u_int64_t rcvd_packets, u_int64_t rcvd_bytes, u_int64_t rcvd_goodput_bytes,
@@ -230,6 +242,9 @@ class Host : public GenericHashEntry, public AlertableEntity {
 
   void incNumFlows(time_t t, bool as_client, Host *peer);
   void decNumFlows(time_t t, bool as_client, Host *peer);
+  inline void incNumAlertedFlows()        { active_alerted_flows++; }
+  inline void decNumAlertedFlows()        { active_alerted_flows--; }
+  inline u_int32_t getNumAlertedFlows()   { return(active_alerted_flows); }
   inline void incNumUnreachableFlows(bool as_server) { if(stats) stats->incNumUnreachableFlows(as_server); }
   inline void incNumHostUnreachableFlows(bool as_server) { if(stats) stats->incNumHostUnreachableFlows(as_server); };
   inline void incnDPIFlows(u_int16_t l7_protocol)    { if(stats) stats->incnDPIFlows(l7_protocol); }
@@ -266,6 +281,8 @@ class Host : public GenericHashEntry, public AlertableEntity {
   inline u_int32_t getTotalNumFlowsAsServer() const { return(stats->getTotalNumFlowsAsServer());  };
   inline u_int32_t getTotalNumAnomalousOutgoingFlows() const { return stats->getTotalAnomalousNumFlowsAsClient(); };
   inline u_int32_t getTotalNumAnomalousIncomingFlows() const { return stats->getTotalAnomalousNumFlowsAsServer(); };
+  inline FlowStatusMap getAnomalousOutgoingFlowsStatusMap() const { return anomalous_flows_as_client_status; };
+  inline FlowStatusMap getAnomalousIncomingFlowsStatusMap() const { return anomalous_flows_as_server_status; };
   inline u_int32_t getTotalNumUnreachableOutgoingFlows() const { return stats->getTotalUnreachableNumFlowsAsClient(); };
   inline u_int32_t getTotalNumUnreachableIncomingFlows() const { return stats->getTotalUnreachableNumFlowsAsServer(); };
   inline u_int32_t getTotalNumHostUnreachableOutgoingFlows() const { return stats->getTotalHostUnreachableNumFlowsAsClient(); };
@@ -309,6 +326,20 @@ class Host : public GenericHashEntry, public AlertableEntity {
 			   const char *info, time_t when) { ; }
   virtual void luaPortsDump(lua_State* vm) { lua_pushnil(vm); }    
   void refreshDisableFlowAlertTypes();
+
+  void setPrefsChanged()                   { prefs_loaded = false;  }
+  virtual void reloadPrefs()               {}
+  inline void checkReloadPrefs()           {
+    if(!prefs_loaded) {
+      reloadPrefs();
+      prefs_loaded = true;
+    }
+  }
+  inline MudRecording getMUDRecording()    { return(mud_pref); };
+
+  inline void setScore(u_int16_t score)    { alert_score = score; };
+  inline u_int16_t getScore()              { return(alert_score); };
+  inline bool hasScore()                   { return(alert_score != CONST_NO_SCORE_SET); };
   
   inline bool isDisabledFlowAlertType(u_int32_t v) {
     return(Utils::bitmapIsSet(disabled_flow_status, v));

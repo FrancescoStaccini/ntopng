@@ -30,11 +30,8 @@ HostStats::HostStats(Host *_host) : TimeseriesStats(_host) {
   ndpiStats = new nDPIStats();
   //printf("SIZE: %lu, %lu, %lu\n", sizeof(nDPIStats), MAX_NDPI_PROTOS, NDPI_PROTOCOL_NUM_CATEGORIES);
 
-  last_bytes = 0, last_bytes_thpt = bytes_thpt = 0, bytes_thpt_trend = trend_unknown;
-  bytes_thpt_diff = 0, last_epoch_update = 0;
+  last_epoch_update = 0;
   total_activity_time = 0;
-  last_packets = 0, last_pkts_thpt = pkts_thpt = 0, pkts_thpt_trend = trend_unknown;
-  last_update_time.tv_sec = 0, last_update_time.tv_usec = 0;
 
 #ifdef NTOPNG_PRO
   quota_enforcement_stats = quota_enforcement_stats_shadow = NULL;
@@ -137,7 +134,8 @@ void HostStats::lua(lua_State* vm, bool mask_host, DetailsLevel details_level, b
 
 /* *************************************** */
 
-void HostStats::incStats(time_t when, u_int8_t l4_proto, u_int ndpi_proto,
+void HostStats::incStats(time_t when, u_int8_t l4_proto,
+			 u_int ndpi_proto, ndpi_protocol_category_t ndpi_category,
 			 custom_app_t custom_app,
 			 u_int64_t sent_packets, u_int64_t sent_bytes, u_int64_t sent_goodput_bytes,
 			 u_int64_t rcvd_packets, u_int64_t rcvd_bytes, u_int64_t rcvd_goodput_bytes,
@@ -147,9 +145,7 @@ void HostStats::incStats(time_t when, u_int8_t l4_proto, u_int ndpi_proto,
   
   if(ndpiStats) {
     ndpiStats->incStats(when, ndpi_proto, sent_packets, sent_bytes, rcvd_packets, rcvd_bytes),
-      ndpiStats->incCategoryStats(when,
-				  iface->get_ndpi_proto_category(ndpi_proto),
-				  sent_bytes, rcvd_bytes);
+      ndpiStats->incCategoryStats(when, ndpi_category, sent_bytes, rcvd_bytes);
   }
 
 #ifdef NTOPNG_PRO

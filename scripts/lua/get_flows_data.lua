@@ -8,6 +8,7 @@ package.path = dirs.installdir .. "/scripts/lua/modules/?.lua;" .. package.path
 require "lua_utils"
 require "flow_utils"
 local format_utils = require("format_utils")
+local flow_consts = require "flow_consts"
 local json = require "dkjson"
 
 local have_nedge = ntop.isnEdge()
@@ -15,6 +16,7 @@ local have_nedge = ntop.isnEdge()
 sendHTTPContentTypeHeader('text/html')
 local debug = false
 local debug_process = false -- Show flow processed information
+local debug_score = (ntop.getPref("ntopng.prefs.beta_score") == "1")
 
 interface.select(ifname)
 local ifstats = interface.getStats()
@@ -156,7 +158,10 @@ end
 if not isEmptyString(flow_status) then
    if flow_status == "normal" then
       pageinfo["alertedFlows"] = false
+      pageinfo["misbehavingFlows"] = false
       pageinfo["filteredFlows"] = false
+   elseif flow_status == "misbehaving" then
+      pageinfo["misbehavingFlows"] = true
    elseif flow_status == "alerted" then
       pageinfo["alertedFlows"] = true
    elseif flow_status == "filtered" then
@@ -364,14 +369,19 @@ for _key, value in ipairs(flows_stats) do -- pairsByValues(vals, funct) do
    local column_client = src_key
    local info = interface.getHostInfo(value["cli.ip"], value["cli.vlan"])
 
-   if(info ~= nil) then
-      if(info.broadcast_domain_host) then
-	  column_client = column_client.." <i class='fa fa-sitemap' title='"..i18n("hosts_stats.label_broadcast_domain_host").."'></i>"
+   if info then
+      if info.broadcast_domain_host then
+	  column_client = column_client.." <i class='fa fa-sitemap fa-sm' title='"..i18n("hosts_stats.label_broadcast_domain_host").."'></i>"
       end
-      
-      if(info.dhcpHost) then
-	 column_client = column_client.." <i class=\'fa fa-flash fa-lg\' aria-hidden=\'true\' title=\'DHCP Host\'></i>"
+
+      if info.dhcpHost then
+	 column_client = column_client.." <i class=\'fa fa-flash fa-sm\' title=\'DHCP Host\'></i>"
       end
+
+      if info.is_blacklisted then
+	 column_client = column_client.." <i class=\'fa fa-ban fa-sm\' title=\'"..i18n("hosts_stats.blacklisted").."\'></i>"
+      end
+
       column_client = column_client..getFlag(info["country"])
    end
 
@@ -388,13 +398,17 @@ for _key, value in ipairs(flows_stats) do -- pairsByValues(vals, funct) do
    local column_server = dst_key
    info = interface.getHostInfo(value["srv.ip"], value["srv.vlan"])
 
-   if(info ~= nil) then
-      if(info.broadcast_domain_host) then
-	 column_server = column_server.." <i class='fa fa-sitemap' title='"..i18n("hosts_stats.label_broadcast_domain_host").."'></i>"
+   if info then
+      if info.broadcast_domain_host then
+	 column_server = column_server.." <i class='fa fa-sitemap fa-sm' title='"..i18n("hosts_stats.label_broadcast_domain_host").."'></i>"
       end
       
-      if(info.dhcpHost) then
-	 column_server = column_server.." <i class=\'fa fa-flash fa-lg\' aria-hidden=\'true\' title=\'DHCP Host\'></i>"
+      if info.dhcpHost then
+	 column_server = column_server.." <i class=\'fa fa-flash fa-sm\' title=\'DHCP Host\'></i>"
+      end
+
+      if info.is_blacklisted then
+	 column_server = column_server.." <i class=\'fa fa-ban fa-sm\' title=\'"..i18n("hosts_stats.blacklisted").."\'></i>"
       end
 
       column_server = column_server..getFlag(info["country"])
@@ -416,34 +430,27 @@ for _key, value in ipairs(flows_stats) do -- pairsByValues(vals, funct) do
 
    local column_proto_l4 = ''
 
-   if(value["flow.status"] ~= 0) then
-	 column_proto_l4 = "<i class='fa fa-warning' style='color: orange;'"
-	    .." title='"..noHtml(getFlowStatus(value["flow.status"], flow2statusinfo(value)))
-	    .."'></i> "
-   end
+   -- NOTE: an alerted flow *may* have an invalid status set
+   local status_info = getFlowStatus(value["flow.status"], flow2statusinfo(value))
+   if value["flow.alerted"] then
+      column_proto_l4 = "<i class='fa fa-warning' style='color: #B94A48' title='"..noHtml(status_info) .."'></i> "
+   elseif value["status_map"] and value["flow.status"] ~= flow_consts.status_normal then
+      local title = ''
 
-   if value["proto.l4"] == "TCP" or value["proto.l4"] == "UDP" then
-      if value["tcp.seq_problems"] == true then
-	 local tcp_issues = ""
-	 if value["cli2srv.out_of_order"] > 0 or value["srv2cli.out_of_order"] > 0 then
-	    tcp_issues = tcp_issues.." Out-of-order"
+      for id, t in pairs(flow_consts.flow_status_types) do
+	 if ntop.bitmapIsSet(value["status_map"], id) then
+	    if title ~= '' then
+	       title = title..'\n'
+	    end
+	    title = title..getFlowStatus(id, flow2statusinfo(value))
 	 end
-	 if value["cli2srv.retransmissions"] > 0 or value["srv2cli.retransmissions"] > 0 then
-	    tcp_issues = tcp_issues.." Retransmissions"
-	 end
-	 if value["cli2srv.lost"] > 0 or value["srv2cli.lost"] > 0 then
-	    tcp_issues = tcp_issues.." Loss"
-	 end
-
-	 column_proto_l4 = column_proto_l4..'<span title=\'Issues detected:'..tcp_issues..'\'><font color=#B94A48>'..value["proto.l4"].."</font></span>"
-      elseif value["flow_goodput.low"] == true then
-	 column_proto_l4 = column_proto_l4.."<font color=#B94A48><span title='Low Goodput'>"..value["proto.l4"].."</span></font>"
-      else
-	 column_proto_l4 = column_proto_l4..value["proto.l4"]
       end
-   else
-      column_proto_l4 = column_proto_l4..value["proto.l4"]
+
+      column_proto_l4 = "<i class='fa fa-exclamation-circle' style='color: orange;' title='"..noHtml(title) .."'></i> "
    end
+
+   column_proto_l4 = column_proto_l4..value["proto.l4"]
+
    if(value["verdict.pass"] == false) then
      column_proto_l4 = "<strike>"..column_proto_l4.."</strike>"
    end
@@ -485,6 +492,12 @@ for _key, value in ipairs(flows_stats) do -- pairsByValues(vals, funct) do
    record["column_breakdown"] = "<div class='progress'><div class='progress-bar progress-bar-warning' style='width: " .. cli2srv .."%;'>Client</div><div class='progress-bar progress-bar-info' style='width: " .. (100-cli2srv) .. "%;'>Server</div></div>"
 
    local info = value["info"]
+
+   if debug_score then
+     if(value["score"] > 0) then
+       info = info .. string.format(" [<b>score: %u</b>]", value["score"])
+     end
+   end
 
    record["column_info"] = info
 

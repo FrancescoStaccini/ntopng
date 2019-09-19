@@ -65,11 +65,15 @@ function dumpInterfaceStats(ifid)
       res["ifid"]  = ifid
       res["ifname"]  = interface_name
       res["speed"]  = getInterfaceSpeed(ifstats.id)
+      res["periodic_stats_update_frequency_secs"] = ifstats.periodic_stats_update_frequency_secs
       -- network load is used by web pages that are shown to the user
       -- so we must return statistics since the latest (possible) reset
       res["packets"] = ifstats.stats_since_reset.packets
       res["bytes"]   = ifstats.stats_since_reset.bytes
       res["drops"]   = ifstats.stats_since_reset.drops
+
+      res["throughput_bps"] = ifstats.stats.throughput_bps;
+      res["throughput_pps"] = ifstats.stats.throughput_pps;
 
       if prefs.is_dump_flows_enabled == true then
          res["flow_export_drops"]  = ifstats.stats_since_reset.flow_export_drops
@@ -80,6 +84,7 @@ function dumpInterfaceStats(ifid)
       if prefs.are_alerts_enabled == true then
          res["engaged_alerts"]     = ifstats["num_alerts_engaged"] or 0
          res["dropped_alerts"]     = ifstats["num_dropped_alerts"] or 0
+	 res["alerted_flows"]      = ifstats["num_alerted_flows"] or 0
          res["has_alerts"]         = ifstats["has_alerts"]
          res["ts_alerts"] = {}
 
@@ -121,6 +126,19 @@ function dumpInterfaceStats(ifid)
       res["packets_upload"] = ifstats["eth"]["egress"]["packets"]
       res["packets_download"] = ifstats["eth"]["ingress"]["packets"]
 
+      local ingress_thpt = ifstats["eth"]["ingress"]["throughput"]
+      local egress_thpt  = ifstats["eth"]["egress"]["throughput"]
+      res["throughput"] = {
+	 download = {
+	    bps = ingress_thpt["bps"], bps_trend = ingress_thpt["bps_trend"],
+	    pps = ingress_thpt["pps"], pps_trend = ingress_thpt["pps_trend"]
+	 },
+	 upload = {
+	    bps = egress_thpt["bps"], bps_trend = egress_thpt["bps_trend"],
+	    pps = egress_thpt["pps"], pps_trend = egress_thpt["pps_trend"]
+	 },
+      }
+
       if ntop.isnEdge() and ifstats.type == "netfilter" and ifstats.netfilter then
          res["netfilter"] = ifstats.netfilter
       end
@@ -128,11 +146,13 @@ function dumpInterfaceStats(ifid)
       if(ifstats.zmqRecvStats ~= nil) then
          res["zmqRecvStats"] = {}
          res["zmqRecvStats"]["flows"] = ifstats.zmqRecvStats.flows
-         res["zmqRecvStats"]["events"] = ifstats.zmqRecvStats.events
-         res["zmqRecvStats"]["counters"] = ifstats.zmqRecvStats.counters
-         res["zmqRecvStats"]["zmq_msg_drops"] = ifstats.zmqRecvStats.zmq_msg_drops
+	 res["zmqRecvStats"]["events"] = ifstats.zmqRecvStats.events
+	 res["zmqRecvStats"]["counters"] = ifstats.zmqRecvStats.counters
+	 res["zmqRecvStats"]["zmq_msg_rcvd"] = ifstats.zmqRecvStats.zmq_msg_rcvd
+	 res["zmqRecvStats"]["zmq_msg_drops"] = ifstats.zmqRecvStats.zmq_msg_drops
+	 res["zmqRecvStats"]["zmq_avg_msg_flows"] = math.max(1, ifstats.zmqRecvStats.flows / (ifstats.zmqRecvStats.zmq_msg_rcvd + 1)) 
 
-         res["zmq.num_flow_exports"] = ifstats["zmq.num_flow_exports"] or 0
+	 res["zmq.num_flow_exports"] = ifstats["zmq.num_flow_exports"] or 0
          res["zmq.num_exporters"] = ifstats["zmq.num_exporters"] or 0
       end
 

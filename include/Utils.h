@@ -105,7 +105,9 @@ class Utils {
   static u_int32_t timeval2usec(const struct timeval *tv);
   static void xor_encdec(u_char *data, int data_len, u_char *key);
   static bool isPrintableChar(u_char c);
-  static const char* flowStatus2str(FlowStatus s, AlertType *aType, AlertLevel *aLevel);
+  static AlertLevel flowStatus2AlertLevel(FlowStatus s, u_int8_t ext_severity);
+  static AlertType flowStatus2AlertType(FlowStatus s);
+  static bool dumpFlowStatus(FlowStatus s);
   static char* formatMac(const u_int8_t * const mac, char *buf, u_int buf_len);
   static void  parseMac(u_int8_t *mac, const char *symMac);
   static u_int32_t macHash(const u_int8_t * const mac);
@@ -142,6 +144,7 @@ class Utils {
   static patricia_node_t* ptree_match(const patricia_tree_t *tree, int family, const void * const addr, int bits);
   static patricia_node_t* ptree_add_rule(patricia_tree_t *ptree, const char * const line);
   static int ptree_remove_rule(patricia_tree_t *ptree, char *line);
+  static bool ptree_prefix_print(prefix_t *prefix, char *buffer, size_t bufsize);
 
   static inline void update_ewma(u_int32_t sample, u_int32_t *ewma, u_int8_t alpha_percent) {
     if(alpha_percent > 100) alpha_percent = 100;
@@ -180,16 +183,19 @@ class Utils {
   static void init_pcap_header(struct pcap_file_header * const h, NetworkInterface * const iface);
 
   /* Bitmap functions */
-  static inline bool bitmapIsSet(u_int64_t bitmap, u_int64_t v) {
+  static inline bool bitmapIsSet(u_int64_t bitmap, u_int8_t v) {
     return(((bitmap >> v) & 1) ? true : false);
   }
-  static inline u_int64_t bitmapSet(u_int64_t bitmap, u_int64_t v) {
+  static inline u_int64_t bitmapSet(u_int64_t bitmap, u_int8_t v) {
     bitmap |= ((u_int64_t)1) << v;
     return(bitmap);
   }
-  static inline u_int64_t bitmapClear(u_int64_t bitmap, u_int64_t v) {
+  static inline u_int64_t bitmapClear(u_int64_t bitmap, u_int8_t v) {
     bitmap &= ~(((u_int64_t)1) << v);
     return(bitmap);
+  }
+  static inline u_int64_t bitmapOr(u_int64_t bitmap1, u_int64_t bitmap2) {
+    return(bitmap1 | bitmap2);
   }
 
   static OperatingSystem getOSFromFingerprint(const char *fingerprint, const char*manuf, DeviceType devtype);

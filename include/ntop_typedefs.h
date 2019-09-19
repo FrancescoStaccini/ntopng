@@ -53,12 +53,12 @@ typedef enum {
   mask_remote_hosts = 2
 } HostMask;
 
-/* Struct used to pass parameters when walking hosts periodically to update their stats */
+/* Struct used to pass parameters when walking hosts and flows periodically to update their stats */
 class AlertCheckLuaEngine;
 typedef struct {
   AlertCheckLuaEngine *acle;
   struct timeval *tv;
-} update_hosts_stats_user_data_t;
+} update_stats_user_data_t;
 
 /* Keep in sync with alert_consts.alerts_granularities and Utils */
 typedef enum {
@@ -122,7 +122,7 @@ typedef enum {
   alert_flow_flood,
   alert_threshold_exceeded,
   alert_suspicious_activity,
-  alert_interface_alerted,
+  alert_connection_issues,
   alert_flow_misbehaviour,
   alert_remote_to_remote,
   alert_flow_blacklisted,
@@ -140,6 +140,7 @@ typedef enum {
   slow_periodic_activity = 40,
   login_failed = 42,
   alert_potentially_dangerous_protocol = 43,
+  alert_malicious_signature = 48,
   /* 
      IMPORTANT IMPORTANT IMPORTANT
      If # status >= 64 then extend Utils.h and Lua bitmap functions to handle it
@@ -293,7 +294,7 @@ typedef struct zmq_remote_stats {
   u_int32_t remote_ifspeed, remote_time, avg_bps, avg_pps;
   u_int32_t remote_lifetime_timeout, remote_idle_timeout;
   u_int32_t export_queue_full, too_many_flows, elk_flow_drops,
-    sflow_pkt_sample_drops, flow_collection_drops;
+    sflow_pkt_sample_drops, flow_collection_drops, flow_collection_udp_socket_drops;
 } ZMQ_RemoteStats;
 
 typedef struct zmq_template {
@@ -334,8 +335,8 @@ struct string_list {
 
 /*
   Remember to update
-  - Utils.cpp      Utils::flowStatus2str()
-  - lua_utils.lua  getFlowStatus(status)
+  - Utils.cpp        Utils::flowStatus2str()
+  - flow_consts.lua  flow_consts.flow_status_types
  */
 typedef enum {
   status_normal = 0,
@@ -365,12 +366,23 @@ typedef enum {
   status_data_exfiltration /* 24 */,
   status_ssl_old_protocol_version /* 25 */,
   status_potentially_dangerous /* 26 */,
+  status_malicious_signature /* 27 */,
   num_flow_status,
   /* 
      IMPORTANT IMPORTANT IMPORTANT
      If # status >= 32 then change to 64 bit disabled_flow_status in Host.h 
+     If # status >= 64 then change FlowStatusMap
   */
 } FlowStatus;
+
+typedef enum {
+  flow_lua_call_protocol_detected,
+  flow_lua_call_flow_status_changed,
+  flow_lua_call_periodic_update,
+  flow_lua_call_idle,
+} FlowLuaCall;
+
+typedef u_int64_t FlowStatusMap;
 
 typedef enum {
   details_normal = 0,
@@ -602,6 +614,7 @@ class SNMP;
 /* Forward class declarations for the Lua context */
 class NetworkStats;
 class Host;
+class Flow;
 
 struct ntopngLuaContext {
   char *allowed_ifname, *user, *group;
@@ -617,6 +630,7 @@ struct ntopngLuaContext {
 #endif
   Host *host;
   NetworkStats *network;
+  Flow *flow;
   bool localuser;
 
   /* Packet capture */
@@ -737,5 +751,16 @@ typedef struct ts_icmp_stats {
 
 class AlertableEntity;
 typedef void (alertable_callback)(AlertableEntity *alertable, void *user_data);
+
+typedef struct bcast_domain_info {
+  bool is_interface_network;
+  u_int64_t hits;
+} bcast_domain_info;
+
+typedef enum mud_recording {
+  mud_recording_disabled = 0,
+  mud_recording_general_purpose = 1,
+  mud_recording_special_purpose = 2,
+} MudRecording;
 
 #endif /* _NTOP_TYPEDEFS_H_ */

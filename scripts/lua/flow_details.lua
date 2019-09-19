@@ -7,9 +7,13 @@ package.path = dirs.installdir .. "/scripts/lua/modules/?.lua;" .. package.path
 
 local shaper_utils
 require "lua_utils"
+require "alert_utils"
 local format_utils = require "format_utils"
 local have_nedge = ntop.isnEdge()
 local NfConfig = nil
+local flow_consts = require "flow_consts"
+
+local debug_score = (ntop.getPref("ntopng.prefs.beta_score") == "1")
 
 if ntop.isPro() then
    package.path = dirs.installdir .. "/scripts/lua/pro/modules/?.lua;" .. package.path
@@ -582,7 +586,6 @@ print [[
 if(flow == nil) then
    print('<div class=\"alert alert-danger\"><i class="fa fa-warning fa-lg"></i> '..i18n("flow_details.flow_cannot_be_found_message")..' '.. purgedErrorString()..'</div>')
 else
-
    if isAdministrator() then
       if(_POST["drop_flow_policy"] == "true") then
 	 interface.dropFlowTraffic(tonumber(flow_key))
@@ -598,7 +601,7 @@ else
       print("</th><td colspan=2>" .. flow["vlan"].. "</td></tr>\n")
    end
 
-   print("<tr><th width=30%>"..i18n("flow_details.flow_peers_client_server").."</th><td colspan=2>"..getFlowLabel(flow, true, not ifstats.isViewed --[[ don't add hyperlinks, viewed interface don't have hosts --]]).."</td></tr>\n")
+   print("<tr><th width=30%>"..i18n("flow_details.flow_peers_client_server").."</th><td colspan=2>"..getFlowLabel(flow, true, not ifstats.isViewed --[[ don't add hyperlinks, viewed interface don't have hosts --]], nil, nil, true --[[ add flags ]]).."</td></tr>\n")
 
    print("<tr><th width=30%>"..i18n("protocol").." / "..i18n("application").."</th>")
    if((ifstats.inline and flow["verdict.pass"]) or (flow.vrfId ~= nil)) then
@@ -627,7 +630,7 @@ else
 	 print(i18n("flow_details.ssl_old_protocol_version"))
       end
    end
-   
+
    if(ifstats.inline) then
       if(flow["verdict.pass"]) then
 	 print('<form class="form-inline pull-right" style="margin-bottom: 0px;" method="post">')
@@ -789,8 +792,8 @@ else
       print("<tr><th width=30%>"..i18n("flow_details.application_latency").."</th><td colspan=2>"..msToTime(flow["tcp.appl_latency"]).."</td></tr>\n")
    end
 
-    if(not string.starts(ifname, "nf:")) then
-       if((flow["cli2srv.packets"] > 1) and (flow["interarrival.cli2srv"]["max"] > 0)) then
+   if(not string.starts(ifname, "nf:")) then
+      if flow["cli2srv.packets"] > 1 and flow["interarrival.cli2srv"] and flow["interarrival.cli2srv"]["max"] > 0 then
 	  print("<tr><th width=30%")
 	  if(flow["flow.idle"] == true) then print(" rowspan=2") end
 	  print(">"..i18n("flow_details.packet_inter_arrival_time").."</th><td nowrap>"..i18n("client").." <i class=\"fa fa-arrow-right\"></i> "..i18n("server")..": ")
@@ -855,7 +858,7 @@ else
       if(flow["protos.ssl.server_certificate"] ~= nil) then
 	 print(i18n("flow_details.server_certificate")..": <A HREF=\"http://"..flow["protos.ssl.server_certificate"].."\">"..flow["protos.ssl.server_certificate"].."</A>")
 
-	 if(flow["flow.status"] == 10) then
+	 if(flow["flow.status"] == flow_consts.status_ssl_certificate_mismatch) then
 	    print("\n<br><i class=\"fa fa-warning fa-lg\" style=\"color: #f0ad4e;\"></i> <b><font color=\"#f0ad4e\">"..i18n("flow_details.certificates_not_match").."</font></b>")
 	 end
       end
@@ -949,9 +952,43 @@ else
    end
 
    -- ######################################
-   
-   if interface.isPacketInterface() then
-      print("<tr><th width=30%>"..i18n("flow_details.flow_status").."</th><td colspan=2>"..getFlowStatus(flow["flow.status"], flow2statusinfo(flow)).."</td></tr>\n")
+
+   if flow["flow.alerted"] then
+      local message = nil
+
+      print("<tr><th width=30%><i class='fa fa-warning' style='color: #B94A48'></i> "..i18n("flow_details.flow_alerted").."</th><td colspan=2>")
+
+      if(flow["flow.alert_rowid"] ~= nil) then
+         -- Try to fetch the alert
+         local res = performAlertsQuery("SELECT *", "historical-flows", {row_id = flow["flow.alert_rowid"]})
+
+         if((res ~= nil) and (#res == 1)) then
+            message = formatAlertMessage(ifid, res[1], true --[[ skip peers, we are already showing the flow ]])
+         end
+      end
+
+      print(message)
+      print("</td></tr>\n")
+   end
+
+   local status_icon = ""
+
+   if(flow["status_map"] ~= 0) then
+      status_icon = "<i class=\"fa fa-exclamation-circle\" aria-hidden=true style=\"color: orange;\" \"></i> "
+   end
+
+   print("<tr><th width=30%>"..status_icon..i18n("flow_details.flow_status").."</th><td colspan=2>")
+   for id, t in pairs(flow_consts.flow_status_types) do
+      if ntop.bitmapIsSet(flow["status_map"], id) then
+         print(getFlowStatus(id, flow2statusinfo(flow)).."<br />")
+      end
+   end
+   print("</td></tr>\n")
+
+   if debug_score then
+     if(flow["score"] > 0) then
+       print("<tr><th width=30%>"..i18n("flow_details.flow_score").."</th><td colspan=2>"..flow["score"].."</td></tr>\n")
+     end
    end
 
    if((flow.client_process == nil) and (flow.server_process == nil)) then

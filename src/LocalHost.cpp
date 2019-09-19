@@ -108,7 +108,8 @@ void LocalHost::initialize() {
   char *strIP = ip.print(buf, sizeof(buf));
   snprintf(host, sizeof(host), "%s@%u", strIP, vlan_id);
 
-  ntop->getRedis()->getAddress(strIP, rsp, sizeof(rsp), true);
+  if(ntop->getPrefs()->is_dns_resolution_enabled())
+    ntop->getRedis()->getAddress(strIP, rsp, sizeof(rsp), true);
 
   PROFILING_SUB_SECTION_ENTER(iface, "LocalHost::initialize: updateHostTrafficPolicy", 18);
   updateHostTrafficPolicy(host);
@@ -130,8 +131,7 @@ void LocalHost::initialize() {
 char* LocalHost::getSerializationKey(char *redis_key, uint bufsize) {
   Mac *mac = getMac();
 
-  if(isBroadcastDomainHost() && isDhcpHost() && mac &&
-      iface->serializeLbdHostsAsMacs()) {
+  if(mac && serializeByMac()) {
     char mac_buf[128];
 
     get_mac_based_tskey(mac, mac_buf, sizeof(mac_buf));
@@ -182,6 +182,7 @@ void LocalHost::deserialize(json_object *o) {
 /* *************************************** */
 
 void LocalHost::updateHostTrafficPolicy(char *key) {
+#ifdef HAVE_NEDGE
   char buf[64], *host;
 
   if(key)
@@ -197,6 +198,7 @@ void LocalHost::updateHostTrafficPolicy(char *key) {
       drop_all_host_traffic = true;
 
   }
+#endif
 }
 
 /* ***************************************** */
@@ -424,4 +426,32 @@ void LocalHost::setFlowPort(bool as_server, Host *peer, u_int8_t protocol,
       updateFlowPort(&tcp_client_ports, peer, port, l7_proto, info, when);
   }
   m.unlock(__FILE__, __LINE__);
+}
+
+/* *************************************** */
+
+/*
+ * Reload non-critical host prefs. Such prefs are not reloaded inline to
+ * avoid slowing down the packet capture. The default value (set into the
+ * host initializer) will be returned until this delayed method is called. */
+void LocalHost::reloadPrefs() {
+  char keybuf[128], buf[64], rsp[32];
+
+  /* MUD recording */
+  if(vlan_id == 0) {
+    snprintf(keybuf, sizeof(keybuf), HOST_PREF_MUD_RECORDING, iface->get_id(), ip.print(buf, sizeof(buf)));
+
+    if(!ntop->getRedis()->get(keybuf, rsp, sizeof(rsp)) && (rsp[0] != '\0')) {
+      if(!strcmp(rsp, MUD_RECORDING_GENERAL_PURPOSE))
+        mud_pref = mud_recording_general_purpose;
+      else if(!strcmp(rsp, MUD_RECORDING_SPECIAL_PURPOSE))
+        mud_pref = mud_recording_special_purpose;
+      else
+        mud_pref = mud_recording_disabled;
+    } else
+      mud_pref = mud_recording_disabled;
+  } else
+    mud_pref = mud_recording_disabled;
+
+  Host::reloadPrefs();
 }

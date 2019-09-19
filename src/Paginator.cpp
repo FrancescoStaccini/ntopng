@@ -53,6 +53,7 @@ Paginator::Paginator() {
   unicast_traffic = -1;
   unidirectional_traffic = -1;
   alerted_flows = -1;
+  misbehaving_flows = -1;
   filtered_flows = -1;
   pool_filter = ((u_int16_t)-1);
   mac_filter = NULL;
@@ -99,10 +100,6 @@ void Paginator::readOptions(lua_State *L, int index) {
   lua_pushnil(L);
 
   while(lua_next(L, index) != 0) {
-    if(lua_type(L, -1) == LUA_TTABLE) {
-      /* removes 'value'; keeps 'key' for next iteration */
-      Paginator::readOptions(L, index);
-    } else {
       const char *key = lua_tostring(L, -2);
       int t = lua_type(L, -1);
 
@@ -220,6 +217,8 @@ void Paginator::readOptions(lua_State *L, int index) {
 	  unicast_traffic = lua_toboolean(L, -1) ? 1 : 0;
 	else if (!strcmp(key, "unidirectional"))
 	  unidirectional_traffic = lua_toboolean(L, -1) ? 1 : 0;
+	else if (!strcmp(key, "misbehavingFlows"))
+	  misbehaving_flows = lua_toboolean(L, -1) ? 1 : 0;
 	else if (!strcmp(key, "alertedFlows"))
 	  alerted_flows = lua_toboolean(L, -1) ? 1 : 0;
 	else if (!strcmp(key, "filteredFlows"))
@@ -232,7 +231,6 @@ void Paginator::readOptions(lua_State *L, int index) {
 	ntop->getTrace()->traceEvent(TRACE_ERROR, "Internal error: type %d not handled", t);
 	break;
       }
-    }
 
     lua_pop(L, 1);
   }

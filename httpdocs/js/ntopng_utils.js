@@ -175,6 +175,19 @@ function fflows(fps) {
     return Math.round(res[0] * 100) / 100 + ' ' + res[1];
 }
 
+function fmsgs(mps) {
+    if(typeof(mps) === "undefined")
+      return "-";
+
+    var sizes = ['msg/s', 'Kmsg/s', 'Msg/s', 'Gmsg/s', 'Tmsg/s'];
+    if(mps == 0) return '0';
+    if((mps > 0) && (mps < NTOPNG_MIN_VISUAL_VALUE)) return ('< ' + NTOPNG_MIN_VISUAL_VALUE + ' mps');
+    var res = scaleValue(mps, sizes, 1000);
+
+    // Round to two decimal digits
+    return Math.round(res[0] * 100) / 100 + ' ' + res[1];
+}
+
 function falerts(aps) {
   if(typeof(aps) === "undefined")
     return "-";
@@ -362,6 +375,10 @@ function formatPoints(n) {
 
 function formatFlows(n) {
   return(addCommas(n.toFixed(0))+" Flows");
+}
+
+function formatMessages(n) {
+  return(addCommas(n.toFixed(0))+" Messages");
 }
 
 function fmillis(value) {
@@ -618,6 +635,9 @@ function makeFindHostBeforeSubmitCallback(http_prefix) {
     } else if (data.type == "snmp") {
       form.attr("action", http_prefix + "/lua/pro/enterprise/snmp_interface_details.lua");
       _add_find_host_link(form, "snmp_port_idx", data.snmp_port_idx);
+      _add_find_host_link(form, "page", "layer2");
+    } else if (data.type == "snmp_device") {
+      form.attr("action", http_prefix + "/lua/pro/enterprise/snmp_device_details.lua");
     } else if (data.type == "asn") {
       form.attr("action", http_prefix + "/lua/hosts_stats.lua");
       _add_find_host_link(form, "asn", data.asn);

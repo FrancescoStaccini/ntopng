@@ -26,6 +26,7 @@
 
 class ViewInterface : public NetworkInterface {
  private:
+  bool is_packet_interface;
   u_int8_t num_viewed_interfaces;
   NetworkInterface *viewed_interfaces[MAX_NUM_VIEW_INTERFACES];
   void viewedFlowsWalker();
@@ -40,19 +41,24 @@ class ViewInterface : public NetworkInterface {
   virtual InterfaceType getIfType() const { return interface_type_VIEW;           };
   inline const char* get_type()           { return CONST_INTERFACE_TYPE_VIEW;     };
   virtual bool is_ndpi_enabled()    const { return false;                         };
-  virtual bool isPacketInterface()  const { return false;                         };
+  virtual bool isPacketInterface()  const { return is_packet_interface;           };
   void flowPollLoop();
   void startPacketPolling();
   bool set_packet_filter(char *filter)    { return false ;                        };
+
+  AlertsManager *getAlertsManager() const { return alertsManager; };
+  AlertsQueue* getAlertsQueue()     const { return alertsQueue;   };
 
   virtual u_int64_t getNumPackets();
   virtual u_int64_t getNumBytes();
   virtual u_int     getNumPacketDrops();
   virtual u_int     getNumFlows();
+  virtual u_int64_t getNumActiveAlertedFlows() const;
 
   virtual u_int64_t getCheckPointNumPackets();
   virtual u_int64_t getCheckPointNumBytes();
   virtual u_int32_t getCheckPointNumPacketDrops();
+  virtual void checkPointCounters(bool drops_only);
 
   virtual bool hasSeenVlanTaggedPackets() const;
 

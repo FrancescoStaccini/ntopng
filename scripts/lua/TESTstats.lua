@@ -280,8 +280,99 @@ end
 
 --print(  json.encode(  interface.getMacInfo(" 30:10:B3:0A:33:AB" ), {indent = true}) )
 --print(  json.encode( interface.getHostInfo("fe80::c004:401e:a787:6f0c"), {indent = true}) )
-local a="a"
-print(  json.encode( string.len("ntopng.prefs.ndpi_flows_rrd_creation"), {indent = true}) )
+
+
+-- local a="a"
+-- print(  json.encode( string.len("ntopng.prefs.ndpi_flows_rrd_creation"), {indent = true}) )
+
+
+--======================================================================================
+--++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+--======================================================================================
+
+require "alert_utils"
+
+-- local num_engaged_alerts  = hasAlerts("engaged", getTabParameters(_GET, "engaged"))
+-- local num_past_alerts     = hasAlerts("historical", getTabParameters(_GET, "historical"))
+-- local num_flow_alerts     = hasAlerts("historical-flows", getTabParameters(_GET,"historical-flows"))
+
+--I GET ALERT VANNO, MA PRIMAC'È DA FARE IL CHECK CON hasAlert SENNÒ MI DA ERRORE DI PAGINAZIONE
+--  local engaged_alerts      = getAlerts("engaged", getTabParameters(_GET, "engaged"))
+--  local past_alerts         = getAlerts("historical", getTabParameters(_GET, "historical"))
+--  local past_flow_alerts    = getAlerts("historical-flows", getTabParameters(_GET, "historical-flows"))
+
+-- print( json.encode( num_past_alerts, {indent = true}) )
+
+--QUESTA È UTILE
+--print( json.encode( interface.getEngagedAlertsCount(0), {indent = true}) )
+
+
+-- firma: function getAlerts(what, options, with_counters) 
+--      what --> "engaged"/"release"
+--        options -->
+--print( json.encode( getAlerts("release",nil,nil), {indent = true}) )
+
+
+--PER ORA PRENDO LA SEVERITY, MA POTREI VOLERE ALTRI PARAMETRI
+--------------------------------------------------------
+local severity = {} --severity: (none,) info, warning, error
+
+local function severity_cont(alerts, severity_table )
+    local severity_text = ""
+  
+    for i,v in pairs(alerts) do
+      if v.alert_severity then 
+        severity_text = alertSeverityLabel(v.alert_severity, true)
+        severity_table[severity_text] = (severity_table[severity_text] or 0) + 1 
+      end
+    end
+  end
+  --------------------------------------------------------
+
+local engaged_alerts, past_alerts, flow_alerts, alerts_num = nil, nil, nil, 0
+
+if hasAlerts("engaged", getTabParameters(_GET, "engaged")) then 
+    engaged_alerts = getAlerts("engaged", getTabParameters(_GET, "engaged"))
+    alerts_num = alerts_num + #engaged_alerts
+    severity_cont( engaged_alerts, severity)
+end
+
+if hasAlerts("historical", getTabParameters(_GET, "historical")) then 
+    past_alerts = getAlerts("historical", getTabParameters(_GET, "historical"))
+    alerts_num = alerts_num + #past_alerts
+    severity_cont( past_alerts, severity)
+    --print( json.encode( past_alerts, {indent = true}) )
+end
+
+if hasAlerts("historical-flows", getTabParameters(_GET, "historical-flows")) then
+    past_flow_alerts = getAlerts("historical-flows", getTabParameters(_GET, "historical-flows"))
+    alerts_num = alerts_num + #past_flow_alerts
+    severity_cont( past_flow_alerts, severity)
+    --print( json.encode( past_flow_alerts, {indent = true}) )
+end
+
+
+--FUNGE!
+  
+  
+
+
+--return alerts_num, severity
+print( json.encode( table.merge(severity,  {alerts_num = alerts_num} ), {indent = true}) )
+
+
+
+--1 interface.getStats() --> DALLA IF POSSO PRENDERE GLI ENGAGED ALERTS, DROPPED ALERTS, E HAS ALERT
+
+--2 hasAlerts("engaged", getTabParameters(_GET, "engaged"))
+--  hasAlerts("historical", getTabParameters(_GET, "historical"))
+--  hasAlerts("historical-flows", getTabParameters(_GET,"historical-flows"))
+--  loro danno true/false sesono presenti quegli alertdel DB
+--======================================================================================
+--++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+--======================================================================================
+
+
 
 --print(  json.encode( ntop.getPref("ntopng.prefs.ndpi_flows_rrd_creation"), {indent = true}) )
 

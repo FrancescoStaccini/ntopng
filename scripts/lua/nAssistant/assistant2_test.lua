@@ -25,8 +25,6 @@ local limit_num_chart_top_categories  = 6
 --      - GUARDA LA SCHEDA PEERS IN HOST_DETAILS (VEDI CODICE E CAPISCI COME FUNGE, C'È ROBA POTENZIALMENTE UTILE)
 --      -RICH MESSAGE [https://cloud.dialogflow.com/dialogflow/docs/intents-rich-messages ] inoltre esempi json tra i preferiti
 --        idea: nell'URL dell'immagine metto il link al(lo scriptino lua nel) server ntop (o a quanto pare a quickchart.io" ) con alla fine i parametri necessari per fare il grafico
---      -metti altri intent per farsi dare elenchi/vai grafici 
---      -controlla e ragiona sui context lasciati vivi dalle fallback custom!!!! (es: potrei anche deciderli qui, nel back-end)
 --      -CANCELLA I VECCHI FILE: google_assistant_utils.lua ecc.
 --      -sistema (chiedi aiuto per) l'inglese
 --      -AGGIUNGI I SUGGERIMENTI (ovunque ha senso, soprattutto nei grafici)
@@ -34,9 +32,8 @@ local limit_num_chart_top_categories  = 6
 --      -nella creazione delle card per i grafici, controlla/taglia la lunghezza dellle labels per farle entrare nel grafico
 --      -telegram bot: guarda se, a posteriori dell'apertura della chat da parte dell'utente, è possibile prendersi il chatID (e il token come lo piglio? hardcoded? ma è pubblico il codice!)
 --      -sinonimi della entity ndpi_protocols (devono essere "assistant friendly" cioè pensa a come l'assistente comprende le parole). idea: per le lettere maiuscole, "abbassale" programmaticamente
---      -idea: quickchart.io permette di fare anche qr_code: magari si possono usare per linkare roba interessante? pensaci su
+--      -quickchart.io permette di fare anche qr_code: magari si possono usare per linkare roba interessante? pensaci su
 --      -intent (triggerabile da vari intent, magari guardo contesto/parametri) per farsi mandare grafici/elenchi via mail (o telegram ecc.)
---      -Intents Rework. In alcuni casi è utile che l'utente PRIMA esprima l'intenzione di voler fare qualcosa, POI altro intent per prendere il parametro
 --      -fai il repeat per tutti gli intent (che abbia senso)
 --      -Aggiungere dimensione temporale nelle info (tipo traffico/app/categorie ecc.) così d adare un idea del tempo di monitoraggio
 --      -aggiungere la getHostAltName(ip,mac) dove serve ma occhio! mettila solo quando devi esporre i dati!
@@ -46,10 +43,22 @@ local limit_num_chart_top_categories  = 6
 
 --NOTE/IDEE:
 -- !!!  - È possibile salvare dati sul dispositivo dell'utente! [ https://developers.google.com/actions/assistant/save-data ]
---      - come ottengo il nome alias? con getHostAltName(ip,mac) ma ip può essere un mac e mac può essere nil
+--      - come ottengo il nome alias? con getHostAltName(ip,mac) ma ip può essere un mac e mac può essere nil (posso anche settarlo io
 --      - (dalla docs dei reprompt) Reprompts aren't supported on all Actions on Google surfaces. We recommend you handle no-input errors but keep in mind that they may not appear on all user devices.
 --      - Maximum num of suggestion chips is 8, and the maximum text length is 20 characters each.
---      - Mai visto fin'ora: per gestire il fallback a modo: quando accade controllo seè una richiesta nota fatta fuori dall'intent apposito, oppure, contiene frasinote, allora avanzo suggerimenti ad hoc
+--      - Mai visto fin'ora: per gestire il fallback a modo: quando accade controllo seè una richiesta nota fatta fuori dall'intent apposito, oppure, contiene frasinote, allora avanzo suggerimenti ad hoc4
+--      - come per il parsing delle app/categorie, usa il lavoro già svolto perfare un iintent in cui interrogare direttamente l'assistente relativamente alle categorie/app
+--      - retituire mappa con posizione dell'host/device
+--      - notification push & daily notification
+--      - quale info meritano un intent diretto? o addirittura un Action?
+--      - PREFERENZE DELL'ASSISTENTE SETTABILI DA NTOP
+--      - Query su dispositivi aggregati (es. traffico degli iphone, delle stampanti, eccc.)
+--      - Alert manager: settare e controllare gliallarmo dall'assistente
+--      - la WebView per ntop, si può aggiungere ad ntop come pagina/barra ecc.  (In generale sfruttare le integrazioni)
+--      - sentiment analisis (mi sa solo per enterprise tier)
+--      - knowledge connectors: all'incirca, l'assistente sa leggere da pagine di FAQs e darti la risposta a
+--      - 
+
 
 --+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 --####################################- nAssistant - UTILS -###############################################
@@ -1012,6 +1021,19 @@ elseif  request.intent_name == "who_is - protocols - fallback" then response = h
 --IDEA: per il repeat facci oun intent solo, generico, e quando capita guardo in cache e replico l'ultimo intent con relativi param ecc:
 --potrei salvarmi l'intera precedente richiesta! e simulare che arrivi (occhio solo a più rietizioni conecutive)
 
+--------------------------------
+--------------------------------
+-- elseif  request.intent_name == "get_security_info" then response = handler_()
+
+-- elseif  request.intent_name == "get_most_relevant_alert" then response = handler_()
+
+-- elseif  request.intent_name == "get_ghost_network_info" then response = handler_()  
+
+-- elseif  request.intent_name == "get_alert_info" then response = handler_()  
+
+
+-------------------------------
+-------------------------------
 
 else response = dialogflow.send("Sorry, but I didn't understand, can you repeat please?") 
 end

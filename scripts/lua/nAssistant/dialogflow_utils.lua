@@ -65,7 +65,7 @@ function utils.create_top_categories_speech_text(top_cat)
     tprint(i)
     tprint(v)
     table.insert(cat_names, v.name)
-    table.insert(cat_perc, v.perc)  --IN APP IS CALLED "PERCENTAGE"
+    table.insert(cat_perc, v.perc)  --IN "APPLICATIONS" IS CALLED "PERCENTAGE" NOT "PERC"
     top_num = top_num + 1
     if top_num == 3 then break end
   end

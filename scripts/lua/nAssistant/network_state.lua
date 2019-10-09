@@ -38,7 +38,7 @@ function network_state.get_stats( type, res, params, caller_deadline,  caller_ca
   local ret = false
 
   --note: works only for "first level" structure, don't works for inner tables
-  local function param_callback(name, stats) --note: is the default callback
+  local function param_callback(name, stats) --note: This is the default callback
     local tmp = {}
     if not res then return false end
 
@@ -355,166 +355,319 @@ end
 --NOTE: le funzion iattuali si riferiscono alla totalità degli alert
 require "alert_utils"
 
-function network_state.get_alerts()--TODO: cambia nome in get_aletrs
-  local engaged_alerts = getAlerts("engaged", getTabParameters(_GET, "engaged"))
-  local past_alerts    = getAlerts("historical", getTabParameters(_GET, "historical"))
-  local flow_alerts    = getAlerts("historical-flows", getTabParameters(_GET, "historical-flows"))
+--
+-- function network_state.get_alerts()--TODO: cambia nome in get_aletrs
+--   local engaged_alerts = getAlerts("engaged", getTabParameters(_GET, "engaged"))
+--   local past_alerts    = getAlerts("historical", getTabParameters(_GET, "historical"))
+--   local flow_alerts    = getAlerts("historical-flows", getTabParameters(_GET, "historical-flows"))
 
-  return engaged_alerts, past_alerts, flow_alerts
-end
+--   return engaged_alerts, past_alerts, flow_alerts
+-- end
 
 --##############################################################################################
 
--- function network_state.get_num_alerts_and_severity()
---   local num_engaged_alerts  = getNumAlerts("engaged", getTabParameters(_GET, "engaged"))
---   local num_past_alerts     = getNumAlerts("historical", getTabParameters(_GET, "historical"))
---   local num_flow_alerts     = getNumAlerts("historical-flows", getTabParameters(_GET,"historical-flows"))
---   local engaged_alerts      = getAlerts("engaged", getTabParameters(_GET, "engaged"))
---   local past_alerts         = getAlerts("historical", getTabParameters(_GET, "historical"))
---   local flow_alerts         = getAlerts("historical-flows", getTabParameters(_GET, "historical-flows"))
-
-
-
---   local severity = {} --severity: (none,) info, warning, error
---   local alert_num = num_engaged_alerts + num_past_alerts + num_flow_alerts
-
---   local function severity_cont(alerts, severity_table )
---     local severity_text = ""
-
---     for i,v in pairs(alerts) do
---       if v.alert_severity then 
---         severity_text = alertSeverityLabel(v.alert_severity, true)
---         severity_table[severity_text] = (severity_table[severity_text] or 0) + 1 
---       end
---     end
---   end
-
---   if alert_num > 0 then
---     severity_cont(engaged_alerts, severity)
---     severity_cont(   flow_alerts, severity)
---     severity_cont(   past_alerts, severity)
---   end
-
---   return alert_num, severity
--- end
-
+--TODO: TEST
 function network_state.get_num_alerts_and_severity()
-
-  local engaged_alerts, past_alerts, flow_alerts = nil, nil, nil
-
-  if hasAlerts("engaged", getTabParameters(_GET, "engaged")) then 
-      engaged_alerts = getAlerts("engaged", getTabParameters(_GET, "engaged"))
-  end
-  
-  if hasAlerts("historical", getTabParameters(_GET, "historical")) then 
-      past_alerts = getAlerts("historical", getTabParameters(_GET, "historical"))
-      print( json.encode( past_alerts, {indent = true}) )
-  end
-  
-  if hasAlerts("historical-flows", getTabParameters(_GET, "historical-flows")) then
-      past_flow_alerts = getAlerts("historical-flows", getTabParameters(_GET, "historical-flows"))
-      print( json.encode( past_flow_alerts, {indent = true}) )
-  end
-
-
 
   local severity = {} --severity: (none,) info, warning, error
 
-  --NON vailternary così
-  local alert_num = ternary(engaged_alerts, #engaged_alerts, 0) + 
-                    ternary(past_alerts, #past_alerts, 0) + 
-                    ternary(past_flow_alerts, #past_flow_alerts, 0)
-
-  --------------------------------------------------------
   local function severity_cont(alerts, severity_table )
-    local severity_text = ""
+      local severity_text = ""
+    
+      for i,v in pairs(alerts) do
+        if v.alert_severity then 
+          severity_text = alertSeverityLabel(v.alert_severity, true)
+          severity_table[severity_text] = (severity_table[severity_text] or 0) + 1 
+        end
+      end
+    end
+    --------------------------------------------------------
 
-    for i,v in pairs(alerts) do
-      if v.alert_severity then 
-        severity_text = alertSeverityLabel(v.alert_severity, true)
-        severity_table[severity_text] = (severity_table[severity_text] or 0) + 1 
+  local engaged_alerts, past_alerts, flow_alerts, alerts_num = nil, nil, nil, 0
+
+  if hasAlerts("engaged", getTabParameters(_GET, "engaged")) then 
+      engaged_alerts = getAlerts("engaged", getTabParameters(_GET, "engaged"))
+      alerts_num = alerts_num + #engaged_alerts
+      severity_cont( engaged_alerts, severity)
+  end
+
+  if hasAlerts("historical", getTabParameters(_GET, "historical")) then 
+      past_alerts = getAlerts("historical", getTabParameters(_GET, "historical"))
+      alerts_num = alerts_num + #past_alerts
+      severity_cont( past_alerts, severity)
+  end
+
+  if hasAlerts("historical-flows", getTabParameters(_GET, "historical-flows")) then
+      past_flow_alerts = getAlerts("historical-flows", getTabParameters(_GET, "historical-flows"))
+      alerts_num = alerts_num + #past_flow_alerts
+      severity_cont( past_flow_alerts, severity)
+  end
+
+  return alerts_num, severity
+end
+
+--------------------------------------------------------------------------------------------
+
+--rilevanza è la somma degli "alert_counter" dei vari alert in cui un host compare come cli o serv
+--LA SOMMA DEGLI ALERT COUNTER DI TUTTI GLI ALERT È IL NUMERO DI "ALERT FLOWS" cioè i flussi con status ~= da normal
+function network_state.get_hosts_flow_alerts_stats()
+  local flows = {} 
+
+  local hosts_score = {}
+
+  if hasAlerts("historical-flows", getTabParameters(_GET, "historical-flows")) then
+    past_flow_alerts = getAlerts("historical-flows", getTabParameters(_GET, "historical-flows"))
+    local alert_type, rowid, t_stamp, srv_addr, cli_addr, severity, alert_counter
+    for _,v in pairs(past_flow_alerts) do 
+
+      --TODO: si vede che non avevo ancora scoperto ternary(), usalo per mettere questi if direttamente dentro "e"
+      if v.alert_type       then alert_type = alertTypeLabel( v.alert_type, true )      else  alert_type      = "Unknown" end
+      if v.rowid            then rowid  =  v.rowid                                      else  rowid           = "Unknown" end
+      if v.alert_tstamp     then t_stamp =  os.date( "%c", tonumber(v.alert_tstamp))    else  t_stamp         = "Unknown" end
+      if v.srv_addr         then srv_addr = v.srv_addr                                  else  srv_addr        = "Unknown" end
+      if v.cli_addr         then cli_addr = v.cli_addr                                  else  cli_addr        = "Unknown" end
+      if v.alert_severity   then severity = alertSeverityLabel(v.alert_severity, true)  else  severity        = "Unknown" end
+      if v.alert_counter    then alert_counter = tonumber(v.alert_counter)              else  alert_counter   = 0         end
+      
+      local e = {
+        id           = rowid,
+        type         = alert_type,
+        tstamp       = t_stamp,
+        severity     = severity,
+        srv_addr     = srv_addr,
+        cli_addr     = cli_addr,
+        alert_counter= alert_counter
+      }
+      --tprint(severity.." ("..alert_counter.. ") for "..cli_addr.." - "..srv_addr)
+      --table.insert( tmp, e )
+
+      --qui sommo i contatori:
+      if hosts_score[srv_addr] then 
+        hosts_score[srv_addr].alert_counter = hosts_score[srv_addr].alert_counter + alert_counter
+        hosts_score[srv_addr].tot_flows_bytes = hosts_score[srv_addr].tot_flows_bytes + v.srv2cli_bytes + v.cli2srv_bytes
+
+        hosts_score[srv_addr].severity[severity] = hosts_score[srv_addr].severity[severity] + alert_counter
+      else 
+        hosts_score[srv_addr] = {
+          alert_counter = alert_counter,
+          tot_flows_bytes = v.srv2cli_bytes + v.cli2srv_bytes,
+          severity = {
+            Error = 0,
+            Warning = 0,
+            Info = 0 }
+        }
+        hosts_score[srv_addr].severity[severity] = hosts_score[srv_addr].severity[severity] + alert_counter
+      end
+
+      if hosts_score[cli_addr] then
+        hosts_score[cli_addr].alert_counter = hosts_score[cli_addr].alert_counter + alert_counter
+        hosts_score[cli_addr].tot_flows_bytes = hosts_score[cli_addr].tot_flows_bytes + v.srv2cli_bytes + v.cli2srv_bytes
+        
+        hosts_score[cli_addr].severity[severity] = hosts_score[cli_addr].severity[severity] + alert_counter
+      else
+        hosts_score[cli_addr] = {
+          alert_counter = alert_counter,
+          tot_flows_bytes = v.srv2cli_bytes + v.cli2srv_bytes,
+          severity = {
+            Error = 0,
+            Warning = 0,
+            Info = 0 }
+        }
+        hosts_score[cli_addr].severity[severity] = hosts_score[cli_addr].severity[severity] + alert_counter
+      end
+
+    end
+  end
+
+    local tmp ={}
+    for i,v in pairs(hosts_score) do
+      table.insert(tmp, table.merge(v,{addr= i}) )
+    end
+  
+  local function compare(a, b) return a.alert_counter > b.alert_counter end
+  table.sort( tmp, compare )
+  --tprint(tmp)
+  hosts_score = tmp
+
+
+  --TODO: CALCOLO SCORE e aggiungo in tabella
+  --come calcolo lo score? per ora SOLO il numero di alert scattati, ergo uso direttamente alert_counter
+
+
+
+  return hosts_score
+end
+
+--##############################################################################################
+
+function network_state.get_hosts_flow_misbehaving_stats()
+  local flow_consts = require "flow_consts"
+  local res = {}
+
+  local function misbehaving_flows(name, stats)
+      local tmp = {}
+      if not res then return false end
+
+      if stats["flow.status"] ~= flow_consts.status_normal then
+        table.insert(res, stats)
+      end
+      return true
+  end
+
+  network_state.get_stats("flow",res,nil,nil, misbehaving_flows) --TODO: error check
+
+  local hosts_score = {}
+
+  for i,v in pairs(res) do
+    local cli_addr, srv_addr, status = v["cli.ip"], v["srv.ip"], v["flow.status"]
+
+    if hosts_score[cli_addr] then
+      hosts_score[cli_addr].flow_counter = hosts_score[cli_addr].flow_counter + 1
+      hosts_score[cli_addr].tot_flows_bytes = hosts_score[cli_addr].tot_flows_bytes + v.bytes
+      hosts_score[cli_addr].score = hosts_score[cli_addr].score + flow_consts.flow_status_types[status].relevance
+      
+      if hosts_score[cli_addr].status[status ] then 
+        hosts_score[cli_addr].status[ status ] = hosts_score[cli_addr].status[ status ] +1
+      else 
+        hosts_score[cli_addr].status[ status ] = 1
+      end
+
+    else
+      hosts_score[cli_addr] = {
+        flow_counter = 1,
+        tot_flows_bytes = v.bytes,
+        status= {},
+        score = flow_consts.flow_status_types[status].relevance
+      }
+      hosts_score[cli_addr].status[status] = 1
+    end
+
+    if hosts_score[srv_addr] then
+      hosts_score[srv_addr].flow_counter = hosts_score[srv_addr].flow_counter + 1
+      hosts_score[srv_addr].tot_flows_bytes = hosts_score[srv_addr].tot_flows_bytes + v.bytes
+      hosts_score[srv_addr].score = hosts_score[srv_addr].score + flow_consts.flow_status_types[status].relevance
+
+      if hosts_score[srv_addr].status[ status ] then 
+        hosts_score[srv_addr].status[ status ] = hosts_score[srv_addr].status[ status ] +1
+      else 
+        hosts_score[srv_addr].status[ status ] = 1
+      end
+
+    else
+      hosts_score[srv_addr] = {
+        flow_counter = 1,
+        tot_flows_bytes = v.bytes,
+        status = { },
+        score = flow_consts.flow_status_types[status].relevance
+      }
+      hosts_score[srv_addr].status[status] = 1
+    end
+
+  end
+  --tprint(hosts_score)
+
+  --NOTE:  score ==> ( #misbehaving flows * "relevance" )
+
+  local tmp ={}
+  for i,v in pairs(hosts_score) do
+    table.insert(tmp, table.merge(v,{addr= i}) )
+  end
+
+  local function compare(a, b) return a.score > b.score end
+  table.sort( tmp, compare )
+ -- tprint(tmp)
+  hosts_score = table.clone(tmp)
+
+  return hosts_score
+end
+
+--##############################################################################################
+
+--return table with entry like [ghost domain name - hits ] what are "hits"?????
+function network_state.get_interface_ghost_network()
+  local res = {}
+
+  local stats, g_dom = interface.getStats(), {}
+  if stats and stats.bcast_domains then 
+    for domain_name, domain_info in pairs(stats.bcast_domains) do
+      if domain_info.ghost_network == "true" then 
+        res[domain_name] = domain_info.hits
       end
     end
   end
-  --------------------------------------------------------
 
-  if alert_num > 0 then
-    severity_cont(engaged_alerts, severity)
-    severity_cont(   flow_alerts, severity)
-    severity_cont(   past_alerts, severity)
-  end
-
-  return alert_num, severity
+  return res
 end
+
 
 
 --##############################################################################################
 
-function network_state.alerts_details()
-  local engaged_alerts, past_alerts, flow_alerts = network_state.get_alerts() 
-  local tmp_alerts, alerts = {}, {}
-  local limit= 3 --temporary limit, add effective selection criterion (eg. text limit is 640 char )
+  -- function network_state.alerts_details()
+  --   local engaged_alerts, past_alerts, flow_alerts = network_state.get_alerts() 
+  --   local tmp_alerts, alerts = {}, {}
+  --   local limit= 3 --temporary limit, add effective selection criterion (eg. text limit is 640 char )
 
-  j = 0
-  for i,v in pairs(engaged_alerts)  do
-    if j < limit then 
-       table.insert( tmp_alerts, v )
-       j = j+1
-    else break end
-  end
+  --   j = 0
+  --   for i,v in pairs(engaged_alerts)  do
+  --     if j < limit then 
+  --        table.insert( tmp_alerts, v )
+  --        j = j+1
+  --     else break end
+  --   end
 
-  j = 0
-  for i,v in pairs(flow_alerts)  do
-    if j < limit then 
-       table.insert( tmp_alerts, v )
-       j = j+1
-    else break end
-  end
+  --   j = 0
+  --   for i,v in pairs(flow_alerts)  do
+  --     if j < limit then 
+  --        table.insert( tmp_alerts, v )
+  --        j = j+1
+  --     else break end
+  --   end
 
-  j = 0
-  for i,v in pairs(past_alerts)  do
-    if j < limit then 
-       table.insert( tmp_alerts, v )
-       j = j+1
-    else break end
-  end
+  --   j = 0
+  --   for i,v in pairs(past_alerts)  do
+  --     if j < limit then 
+  --        table.insert( tmp_alerts, v )
+  --        j = j+1
+  --     else break end
+  --   end
 
-  local alert_type, rowid, t_stamp, srv_addr, srv_port, cli_addr, cli_port, severity, alert_json  
+  --   local alert_type, rowid, t_stamp, srv_addr, srv_port, cli_addr, cli_port, severity, alert_json  
 
-  for i,v in pairs(tmp_alerts) do 
+  --   for i,v in pairs(tmp_alerts) do 
 
-    if v.alert_type       then alert_type = alertTypeLabel( v.alert_type, true )      else  alert_type      = "Sconosciuto" end
-    if v.rowid            then rowid  =  v.rowid                                      else  rowid           = "Sconosciuto" end
-    if v.alert_tstamp     then t_stamp =  os.date( "%c", tonumber(v.alert_tstamp))    else  t_stamp         = "Sconosciuto" end
-    if v.srv_addr         then srv_addr = v.srv_addr                                  else  srv_addr        = "Sconosciuto" end
-    if v.srv_port         then srv_port = v.srv_port                                  else  srv_port        = "Sconosciuto" end
-    if v.cli_addr         then cli_addr = v.cli_addr                                  else  cli_addr        = "Sconosciuto" end
-    if v.cli_port         then cli_port = v.cli_port                                  else  cli_port        = "Sconosciuto" end
-    if v.alert_severity   then severity = alertSeverityLabel(v.alert_severity, true)  else  severity        = "Sconosciuto" end
-    if v.alert_json       then alert_json = v.alert_json                              else  alert_json      = "Sconosciuto" end 
-    
-    local e = {
-      ID            = rowid,
-      Tipo          = alert_type,
-      Scattato      = t_stamp,
-      Pericolosita  = severity,
-      IP_Server     = srv_addr,
-      Porta_Server  = srv_port,
-      IP_Client     = cli_addr,
-      Porta_Client  = cli_port,
-      JSON_info     = alert_json --sono necessarie le JSON INFO? 
-    }
+  --     if v.alert_type       then alert_type = alertTypeLabel( v.alert_type, true )      else  alert_type      = "Sconosciuto" end
+  --     if v.rowid            then rowid  =  v.rowid                                      else  rowid           = "Sconosciuto" end
+  --     if v.alert_tstamp     then t_stamp =  os.date( "%c", tonumber(v.alert_tstamp))    else  t_stamp         = "Sconosciuto" end
+  --     if v.srv_addr         then srv_addr = v.srv_addr                                  else  srv_addr        = "Sconosciuto" end
+  --     if v.srv_port         then srv_port = v.srv_port                                  else  srv_port        = "Sconosciuto" end
+  --     if v.cli_addr         then cli_addr = v.cli_addr                                  else  cli_addr        = "Sconosciuto" end
+  --     if v.cli_port         then cli_port = v.cli_port                                  else  cli_port        = "Sconosciuto" end
+  --     if v.alert_severity   then severity = alertSeverityLabel(v.alert_severity, true)  else  severity        = "Sconosciuto" end
+  --     if v.alert_json       then alert_json = v.alert_json                              else  alert_json      = "Sconosciuto" end 
+      
+  --     local e = {
+  --       ID            = rowid,
+  --       Tipo          = alert_type,
+  --       Scattato      = t_stamp,
+  --       Pericolosita  = severity,
+  --       IP_Server     = srv_addr,
+  --       Porta_Server  = srv_port,
+  --       IP_Client     = cli_addr,
+  --       Porta_Client  = cli_port,
+  --       JSON_info     = alert_json --sono necessarie le JSON INFO? 
+  --     }
 
-    table.insert( alerts, e )
-  end
+  --     table.insert( alerts, e )
+  --   end
 
-  if #alerts > 0 then 
-    return alerts
-  else
-    return nil
-  end
+  --   if #alerts > 0 then 
+  --     return alerts
+  --   else
+  --     return nil
+  --   end
 
-end
+  -- end
   
 --##############################################################################################
 ------------------------------------------------------------------------------------------------

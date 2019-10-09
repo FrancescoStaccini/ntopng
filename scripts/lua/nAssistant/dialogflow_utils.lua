@@ -15,6 +15,7 @@ local json = require("dkjson")
 local utils = {}
 
 function utils.url_encode(str)
+  tprint(str)
     if str then
         str = str:gsub("\n", "\r\n")
         str = str:gsub("([^%w %-%_%.%~])", function(c)
@@ -62,8 +63,6 @@ function utils.create_top_categories_speech_text(top_cat)
   local cat_names, cat_perc = {}, {}
 
   for i,v in pairs(top_cat) do
-    tprint(i)
-    tprint(v)
     table.insert(cat_names, v.name)
     table.insert(cat_perc, v.perc)  --IN "APPLICATIONS" IS CALLED "PERCENTAGE" NOT "PERC"
     top_num = top_num + 1
@@ -87,13 +86,9 @@ function utils.create_top_categories_speech_text(top_cat)
 end
 
 
---TODO: fai meglio le utils per i chart, dallo script dell'assistente voglio solo passare una tabella con le opzioni e un paio di array per i dati e bona
-
-
---NOTE: per ora funge col grafico a barre con UNA SOLA entità per punto
-
---PARAMETER: data must contaim 3 field: labels = dell'asse X; values = di Y; legend_label = the legend;
+--PARAMETER: data must contaim 3 field: labels = X axis; values = Y axis; legend_label = the legend;
 --          options must contain 4 field: bkg_color = background color; w = width; h = height; chart_type = the type of the chart
+
 function utils.create_chart_url(data, options)
     local w,h,site_name = options.w, options.h, "https://quickchart.io/chart?" --TODO: indaga sulle possibili dim dell'img (mantenere un certo rapporto tra w e h?)
     local chart_type = options.chart_type --also Radar, Line, Pie, Doughnut, Scatter, Bubble, Radial, Sparklines, Mixed
@@ -109,26 +104,54 @@ function utils.create_chart_url(data, options)
             labels = data.labels,--labels deve essere un array di valori
             datasets = {{--datasets deve essere un array di valori
                 label = data.legend_label,  
-                data = data["values"] --(inner)data deve essere un array di valori
+                data = data["values"] or data.datasets.data, --(inner)data deve essere un array di valori
             }}
         }
     }
+
     if options.chart_type == "outlabeledPie" then 
         c["options"] = {
-            plugins = {
-              legend = false,
-              outlabels = {
-                text = "%l %p",
-                color = "white",
-                stretch = 35,
-                font = {
-                  resizable = true,
-                  minSize = 12,
-                  maxSize = 18
-                }
+          legend = {
+            labels = {  
+              fontSize = ternary(options.legend_labels_font_size, options.legend_labels_font_size, 15),
+              fontStyle = "bold"
+            }
+          },
+          plugins = {
+            legend = ternary(options.show_legend ~= nil, options.show_legend, true),
+            outlabels = {
+              text = ternary(options.outlabels_text, options.outlabels_text, "%l - %v "),
+              color = "black",
+              stretch = ternary(options.outlabels_stretch, options.outlabels_stretch, 25),
+              font = {
+                resizable = true,
+                minSize = 15,
+                maxSize = 25
               }
             }
           }
+        }
+        else
+          c["options"] = {
+            legend = {
+              labels = {
+                fontSize = 15,
+                fontStyle = "bold"
+              }
+            },
+
+            plugins = {
+              datalabels = {
+                display = true,
+                font = {
+                  style= 'bold',
+                  resizable = false,
+                  minSize = 20,
+                } 
+              }
+            }
+          }
+
     end
 
     local jn = json.encode(c)
@@ -136,11 +159,12 @@ function utils.create_chart_url(data, options)
     --tprint(jn)
 
     local url = ""
-    if options.chart_type == "outlabeledPie" then 
-        url = site_name.."bkg=".. bkg_color.."&c="..utils.url_encode(jn)
-    else
+   --if options.chart_type == "outlabeledPie" then 
+  if not (w and h) then 
+       url = site_name.."bkg=".. bkg_color.."&c="..utils.url_encode(jn)
+   else
         url = site_name.."w="..w.."&h="..h.."&bkg=".. bkg_color.."&c="..utils.url_encode(jn)
-    end
+   end
 
     return url
 end
@@ -151,7 +175,7 @@ end
 ---------------
 return utils
 
-
+--test:
 -- {
 --   "data":{
 --     "labels":["Unspecified","Network","Cloud","Web","System","Email"],

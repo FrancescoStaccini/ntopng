@@ -138,104 +138,6 @@ local function createStats(matrix)
     return t_res
 end
 
---FIND HOSTS:
--- -- Limits
---     local max_group_items = 10
---     local max_total_items = 20
-
---     local cur_results
---     local already_printed = {}
-
---     local results = {}
---     local query = "a"
---     local hosts_only = true
---     if(query == nil) then query = "" end
-
---     interface.select(ifname)
-
---     -- Hosts
---     local res = interface.findHost(query)
---     tprint(res)
-
---     -- Also look at the custom names
---     local ip_to_name = ntop.getHashAllCache(getHostAltNamesKey()) or {}
---     for ip,name in pairs(ip_to_name) do
---     if string.contains(string.lower(name), string.lower(query)) then
---         res[ip] = hostVisualization(ip, name)
---         --tprint(res[ip])
---     end
---     end
-
---     -- Also look at the DHCP cache
---     -- local mac_to_name = ntop.getHashAllCache(getDhcpNamesKey(getInterfaceId(ifname))) or {}
---     -- for mac, name in pairs(mac_to_name) do
---     --     if string.contains(string.lower(name), string.lower(query)) then
---     --         res[mac] = hostVisualization(mac, name)
---     --         --tprint(res[mac])
---     --     end
---     -- end
-
---     cur_results = 0
-
---     local ips = {}
---     local info_host_by_mac = nil
---     for k, v in pairs(res) do
---       if((cur_results >= max_group_items) or (#results >= max_total_items)) then
---           break
---       end
-  
---       --note: non so se lasciarlo [IPv6], vediamo, se non da noia lascialo
---       if isIPv6(v) and (not string.contains(v, "%[IPv6%]")) then
---         v = v.." [IPv6]"
---       end
-  
---       if((v ~= "") and (already_printed[v] == nil)) then
---         ips = {}
---         if isMacAddress(v) then         --caso in cui il mac è anche il nome --> v = k
-  
---           info_host_by_mac = interface.findHostByMac(v)
---           for _,vv in pairs(info_host_by_mac) do
---             table.insert(ips,vv)
---           end
-  
---           results[#results + 1] = {name = v, mac = v, type = "mac", ip = ips}
-  
---         elseif isMacAddress(k) then     --caso in cui la chiave è il mac
---             tprint("AAAAAAAAAAAAAAAAAAAa\nAAAAAAAAAAAAAAAAAa\nAAAAAAAAAAAAAAAAAa\nAAAAAAAAAAAAAAAAAa")
-
---           info_host_by_mac = interface.findHostByMac(k)
---           for _,vv in pairs(info_host_by_mac) do
---             table.insert(ips,vv)
---           end
-  
---           results[#results + 1] = {name = v, mac = k, type = "mac", ip = ips}
-  
---         else                            --caso in cui ne k ne v sono mac --> k è ip, v è nome
-
---           local h_info = interface.getHostInfo(k)
---           if h_info then
-
---             info_host_by_mac = interface.findHostByMac(h_info["mac"])
-
---             for _,vv in pairs(info_host_by_mac) do
---               table.insert(ips,vv)
---             end
-
---             results[#results + 1] = {name = v, mac = h_info["mac"], type = "ip", ip = ips}
---           end
-  
---         end
---         already_printed[v] = true
---         cur_results = cur_results + 1
-  
---     end 
---     end--\for
-
---     local resp = {interface = ifname, results = results}
-
---     print( json.encode(  resp , {indent = true} ) )
-
-
 
 --print(json.encode( interface.getIfNames() ))
 --[[
@@ -288,86 +190,147 @@ end
 
 --======================================================================================
 --++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+--MISBEHAVING FLOW: Ntopng can detect possibly anomalous flows, and report them as alerts.
+--                  Such flows are called “Misbehaving Flows”.
+--++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 --======================================================================================
-
 require "alert_utils"
+local dialogflow = require "nAssistant/dialogflow_APIv2"
+local net_state = require "nAssistant/network_state"
+local df_utils = require "nAssistant/dialogflow_utils" --NOTE: poi andranno nelle utils
+local flow_consts = require "flow_consts"
 
--- local num_engaged_alerts  = hasAlerts("engaged", getTabParameters(_GET, "engaged"))
--- local num_past_alerts     = hasAlerts("historical", getTabParameters(_GET, "historical"))
--- local num_flow_alerts     = hasAlerts("historical-flows", getTabParameters(_GET,"historical-flows"))
+-- local s = {}
+-- for i = 0, 27, 1 do 
+--     s[i] = flow_consts.flow_status_types[i].i18n_title
+--     s[i] = string.gsub(s[i], "_", " ")
+--     s[i] = string.gsub(s[i], "flow_details.", "") 
+--     s[i] = string.gsub(s[i], "alerts_dashboard.", "") 
+--     s[i] = s[i].."\""
+-- end 
 
---I GET ALERT VANNO, MA PRIMAC'È DA FARE IL CHECK CON hasAlert SENNÒ MI DA ERRORE DI PAGINAZIONE
---  local engaged_alerts      = getAlerts("engaged", getTabParameters(_GET, "engaged"))
---  local past_alerts         = getAlerts("historical", getTabParameters(_GET, "historical"))
---  local past_flow_alerts    = getAlerts("historical-flows", getTabParameters(_GET, "historical-flows"))
+-- tprint(s)
 
--- print( json.encode( num_past_alerts, {indent = true}) )
+--print( json.encode( interface.findFlowByKey(688828559), {indent = true}) )
+
+local query = "bri" 
+local res = {}
+
+print( json.encode( interface.findHost(query), {indent = true}) )
+-- local ip_to_name = ntop.getHashAllCache(getHostAltNamesKey()) or {}
+
+-- for ip,name in pairs(ip_to_name) do
+--   if string.contains(string.lower(name), string.lower(query)) then
+--       res[ip] = hostVisualization(ip, name)     --note: hostVisualization(...) mette "[IPv6]"agli host con ip v6
+--   end
+-- end
+
+local mac_to_name = ntop.getHashAllCache(getDhcpNamesKey(getInterfaceId(ifname))) or {}
+for mac, name in pairs(mac_to_name) do
+   if string.contains(string.lower(name), string.lower(query)) then
+      res[mac] = hostVisualization(mac, name)
+   end
+end
+
+ print( json.encode( res, {indent = true}) )
+ print( json.encode( interface.findHostByMac("00:1F:CF:61:19:64"), {indent = true}) )
+
+-- local a= {aaa = "bbb"}
+
+
+
+
+
+    --tprint("MISBEHAVING:")
+    --tprint(mis_flows[1].status)
+    --[[esempio di un elemendo di mis_flows:
+          1 table
+          1.status table
+          1.tot_flows_bytes number 255188
+          1.addr string 192.168.1.212
+          1.flow_counter number 0
+  
+    ]]
+ 
+  --print( json.encode( interface.getHostInfo( getHostAltName("00:1F:CF:61:19:64") ) ), {indent = true} ) 
 
 --QUESTA È UTILE
 --print( json.encode( interface.getEngagedAlertsCount(0), {indent = true}) )
 
-
 -- firma: function getAlerts(what, options, with_counters) 
 --      what --> "engaged"/"release"
---        options -->
---print( json.encode( getAlerts("release",nil,nil), {indent = true}) )
+--        options --> ??????????
 
 
---PER ORA PRENDO LA SEVERITY, MA POTREI VOLERE ALTRI PARAMETRI
---------------------------------------------------------
-local severity = {} --severity: (none,) info, warning, error
 
-local function severity_cont(alerts, severity_table )
-    local severity_text = ""
-  
-    for i,v in pairs(alerts) do
-      if v.alert_severity then 
-        severity_text = alertSeverityLabel(v.alert_severity, true)
-        severity_table[severity_text] = (severity_table[severity_text] or 0) + 1 
-      end
-    end
-  end
-  --------------------------------------------------------
-
-local engaged_alerts, past_alerts, flow_alerts, alerts_num = nil, nil, nil, 0
-
-if hasAlerts("engaged", getTabParameters(_GET, "engaged")) then 
-    engaged_alerts = getAlerts("engaged", getTabParameters(_GET, "engaged"))
-    alerts_num = alerts_num + #engaged_alerts
-    severity_cont( engaged_alerts, severity)
-end
-
-if hasAlerts("historical", getTabParameters(_GET, "historical")) then 
-    past_alerts = getAlerts("historical", getTabParameters(_GET, "historical"))
-    alerts_num = alerts_num + #past_alerts
-    severity_cont( past_alerts, severity)
-    --print( json.encode( past_alerts, {indent = true}) )
-end
-
-if hasAlerts("historical-flows", getTabParameters(_GET, "historical-flows")) then
-    past_flow_alerts = getAlerts("historical-flows", getTabParameters(_GET, "historical-flows"))
-    alerts_num = alerts_num + #past_flow_alerts
-    severity_cont( past_flow_alerts, severity)
-    --print( json.encode( past_flow_alerts, {indent = true}) )
-end
+--local res = net_state.get_hosts_flow_misbehaving_stats()
+--print( json.encode( res ), {indent = true} ) 
 
 
---FUNGE!
-  
-  
+--print( json.encode(interface.getStats() ), {indent = true} ) 
+-----------------------------------------------------------------------------
+--STATS DI "2019-06-22-traffic-analysis-exercise.pcap"
+
+    --in show_alert
+    --23 FLOW ALERT, che aggregano i 69 flow alerted
+
+    --in flow_stats:
+        --346 flow con misbehaving status (filtro "all misbehaving")
+        --69 alerted flow (filtro all alerted)
+-----------------------------------------------------------------------------
 
 
---return alerts_num, severity
-print( json.encode( table.merge(severity,  {alerts_num = alerts_num} ), {indent = true}) )
+--[[
+esempio alert_flow potenzialmente pericoloso:	
+    cli_localhost	"0"
+    alert_tstamp	"1568909450"
+    cli_os	""
+    alert_json	"{ \"info\": \"syndication.twitter.com\", \"status_info\": { \"cli.devtype\": 0, \"srv.devtype\": 8, \"ntopng.key\": 1928694160, \"ja3_signature\": \"4d7a28d6f2263ed61de88ca66eb011e3\" } }"
+    l7_proto	"120"
+    srv_asn	"0"
+    flow_status	"27"
+    cli2srv_bytes	"3540"
+    alert_severity	"1"
+    cli_asn	"0"
+    l7_master_proto	"91"
+    srv_localhost	"0"
+    rowid	"1"
+    cli_blacklisted	"0"
+    cli2srv_packets	"26"
+    srv2cli_bytes	"10344"
+    vlan_id	"0"
+    srv2cli_packets	"23"
+    srv_country	""
+    alert_type	"48"
+    cli_country	""
+    cli_addr	"10.0.76.193"
+    srv_addr	"104.244.42.8"
+    srv_os	""
+    alert_counter	"2"
+    alert_tstamp_end	"1568909450"
+    srv_blacklisted	"0"
+    proto	"6"
+
+
+esempio flow normale
+    ntopng.key	2695364967
+    goodput_bytes	0
+    srv.key	3758096386
+    flow.status	0
+    bytes	46
+    srv.ip	"224.0.0.2"
+    cli.ip	"192.168.1.99"
+    srv.port	0
+    status_map	1
+    flow.idle	false
+    cli.key	3232235875
+    cli.port	0
+]]
 
 
 
 --1 interface.getStats() --> DALLA IF POSSO PRENDERE GLI ENGAGED ALERTS, DROPPED ALERTS, E HAS ALERT
 
---2 hasAlerts("engaged", getTabParameters(_GET, "engaged"))
---  hasAlerts("historical", getTabParameters(_GET, "historical"))
---  hasAlerts("historical-flows", getTabParameters(_GET,"historical-flows"))
---  loro danno true/false sesono presenti quegli alertdel DB
 --======================================================================================
 --++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 --======================================================================================
@@ -404,60 +367,6 @@ print( json.encode( table.merge(severity,  {alerts_num = alerts_num} ), {indent 
 
 
 --++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-
---[[ROBA PER DEBUGGARE CIÒ
-string 0|72
-17/Jul/2019 12:00:01 [LuaEngine.cpp:9552] WARNING: Script failure [/home/f/my_ntop/ntopng/scripts/callbacks/interface/5min.lua][/home/f/my_ntop/ntopng/scripts/lua/modules/ntop_utils.lua:199: bad argument #1 to 'floor' (number expected, got string)]
-
- string 63954|0
-17/Jul/2019 12:10:00 [LuaEngine.cpp:9552] WARNING: Script failure [/home/f/my_ntop/ntopng/scripts/callbacks/interface/5min.lua][/home/f/my_ntop/ntopng/scripts/lua/modules/ntop_utils.lua:199: bad argument #1 to 'floor' (number expected, got string)]
-
- string 1211|0
-17/Jul/2019 12:15:01 [LuaEngine.cpp:9552] WARNING: Script failure [/home/f/my_ntop/ntopng/scripts/callbacks/interface/5min.lua][/home/f/my_ntop/ntopng/scripts/lua/modules/ntop_utils.lua:199: bad argument #1 to 'floor' (number expected, got string)]
-
-string 0|173
-17/Jul/2019 12:20:01 [LuaEngine.cpp:9552] WARNING: Script failure [/home/f/my_ntop/ntopng/scripts/callbacks/interface/5min.lua][/home/f/my_ntop/ntopng/scripts/lua/modules/ntop_utils.lua:199: bad argument #1 to 'floor' (number expected, got string)]
-
-sembra sia dovuto a un dump effettuato ogni 5 min
-
-
-RISULTATI DI GREP SUL SIMBOLO |
-
-lua/get_host_contacts.lua:115:base_name = when.."|"..ifname.."|"..host
-lua/get_host_contacts.lua:116:keyname = base_name.."|"..mode
-lua/modules/os_utils.lua:169:--! @return active|inactive|error
-lua/modules/lua_utils.lua:3515:-- Banner format: {type="success|warning|danger", text="..."}
-lua/modules/ebpf_utils.lua:106:      .attr("x", function(d) { return d.children || d._children ? -10 : 10; })
-lua/get_http_hosts.lua:25:   print (k .."|".. v["host"] .."|".. v["http_requests"] .."<br>")
-lua/system/rtt_stats.lua:364:    return [host2key(host, iptype, probetype), orig_host, host, iptype, probetype, max_rtt].join("|");
-
-
-lua/top_hosts.lua:87:	  }, (name + "|" + symname));
-lua/get_host_contacts.lua:115:base_name = when.."|"..ifname.."|"..host
-lua/get_host_contacts.lua:116:keyname = base_name.."|"..mode
-lua/modules/timeseries/drivers/influxdb.lua:899:   local parts = split(item, "|")
-lua/modules/ts_5min_dump_utils.lua:410:    local sep = string.find(value, "|")
-lua/modules/ts_5min_dump_utils.lua:422:    local sep = string.find(value, "|")
-lua/modules/alert_utils.lua:1172:               local configdump = table.concat(config_to_dump, "|")
-lua/modules/alert_utils.lua:1282:	    deserialized_config = split(serialized_config, "|")
-lua/modules/alert_utils.lua:1769:               var alert_key = $("td:nth(7)", this).html().split("|");
-lua/modules/alert_utils.lua:2579:      for _, group in pairs(split(quota_exceeded_pools_values[pool], "|")) do
-lua/modules/alert_utils.lua:2647:	       ntop.setHashCache(quota_exceeded_pools_key, pool, table.tconcat(pool_exceeded_quotas, "=", "|"))
-lua/modules/rtt_utils.lua:65:  local parts = string.split(val, "|")
-lua/get_http_hosts.lua:25:   print (k .."|".. v["host"] .."|".. v["http_requests"] .."<br>")
-lua/system/rtt_stats.lua:97:        local parts = string.split(host_line, "|")
-lua/system/rtt_stats.lua:100:        local value = table.concat(parts, "|")
-lua/system/rtt_stats.lua:364:    return [host2key(host, iptype, probetype), orig_host, host, iptype, probetype, max_rtt].join("|");
-lua/get_alerts_table_data.lua:167:      column_id = column_id.."|"..explore()
-lua/get_db_flows.lua:112:	    if(elems > 0) then print("|") end
-lua/get_db_flows.lua:122:	 if(elems > 0) then print("|") end
-lua/admin/host_pools.lua:59:    local parts = split(value, "|")
-lua/admin/host_pools.lua:861:          settings[address] = [original, alias, icon].join("|");
-
-    name string host:ndpi
- table
-    bytes_rcvd string 516|0
-]]
 --++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 
@@ -505,251 +414,251 @@ lua/admin/host_pools.lua:861:          settings[address] = [original, alias, ico
 
 --[[ HOST INFO
 
-bytes.ndpi.unknown number 0
-tcp.packets.lost number 0
-active_flows.as_server number 0
-systemhost boolean false
-udp.bytes.sent number 29669
-json string { "flows.as_client": 5, "flows.as_server": 0, "anomalous_flows.as_client": 0, "anomalous_flows.as_server": 0, "unreachable_flows.as_client": 0, "unreachable_flows.as_server": 0, "host_unreachable_flows.as_client": 0, "host_unreachable_flows.as_server": 0, "total_alerts": 0, "sent": { "packets": 52, "bytes": 29669 }, "rcvd": { "packets": 0, "bytes": 0 }, "ndpiStats": { "MDNS": { "duration": 20, "bytes": { "sent": 25801, "rcvd": 0 }, "packets": { "sent": 32, "rcvd": 0 } }, "NetBIOS": { "duration": 15, "bytes": { "sent": 2360, "rcvd": 0 }, "packets": { "sent": 16, "rcvd": 0 } }, "Dropbox": { "duration": 5, "bytes": { "sent": 1508, "rcvd": 0 }, "packets": { "sent": 4, "rcvd": 0 } }, "categories": { "Cloud": { "id": 13, "bytes_sent": 1508, "bytes_rcvd": 0, "duration": 5 }, "Network": { "id": 14, "bytes_sent": 25801, "bytes_rcvd": 0, "duration": 20 }, "System": { "id": 18, "bytes_sent": 2360, "bytes_rcvd": 0, "duration": 15 } } }, "total_activity_time": 25, "ip": { "ipVersion": 4, "localHost": false, "ip": "146.48.99.68" }, "mac_address": "00:0E:C6:C7:D8:4A", "ifid": 3, "seen.first": 1556542967, "seen.last": 1556542989, "last_stats_reset": 0, "asn": 137, "symbolic_name": "Marlin", "asname": "Consortium GARR", "localHost": false, "systemHost": false, "broadcastDomainHost": true, "is_blacklisted": false, "num_alerts": 0 }
-continent string EU
-os string 
-low_goodput_flows.as_server number 0
-packets.sent number 52
-bytes.rcvd number 0
-total_alerts number 0
-host_pool_id number 0
-tcp.bytes.sent.anomaly_index number 0
-privatehost boolean false
-ipkey number 2452644676
-is_multicast boolean false
-longitude number 12.109700202942
-bytes.rcvd.anomaly_index number 0
-tcp.packets.out_of_order number 0
-drop_all_host_traffic boolean false
-packets.rcvd number 0
-dhcpHost boolean false
-duration number 23
-tcp.packets.rcvd number 0
-throughput_pps number 0.0
-other_ip.bytes.rcvd.anomaly_index number 0
-broadcast_domain_host boolean true
-tskey string 146.48.99.68
-other_ip.packets.sent number 0
-udp.bytes.sent.anomaly_index number 0
-low_goodput_flows.as_client.anomaly_index number 0
-seen.first number 1556542967
-total_activity_time number 25
-throughput_trend_pps number 2
-tcp.packets.sent number 0
-is_broadcast boolean false
-tcp.packets.retransmissions number 0
-anomalous_flows.as_server number 0
-low_goodput_flows.as_client number 0
-packets.sent.anomaly_index number 0
-host_unreachable_flows.as_client number 0
-icmp.bytes.rcvd.anomaly_index number 0
-latitude number 43.147899627686
-country string IT
-last_throughput_pps number 0.80018645524979
-throughput_trend_bps number 2
-names table
-names.dhcp string Marlin
-names.mdns string Marlin
-num_alerts number 0
-ifid number 3
-name string Marlin
-asname string Consortium GARR
-udp.bytes.rcvd.anomaly_index number 0
-udp.packets.rcvd number 0
-active_http_hosts number 0
-other_ip.bytes.rcvd number 0
-other_ip.packets.rcvd number 0
-contacts.as_client number 0
-other_ip.bytes.sent.anomaly_index number 0
-ndpi table
-ndpi.Dropbox table
-ndpi.Dropbox.packets.rcvd number 0
-ndpi.Dropbox.duration number 5
-ndpi.Dropbox.packets.sent number 4
-ndpi.Dropbox.bytes.rcvd number 0
-ndpi.Dropbox.breed string Acceptable
-ndpi.Dropbox.bytes.sent number 1508
-ndpi.MDNS table
-ndpi.MDNS.packets.rcvd number 0
-ndpi.MDNS.duration number 20
-ndpi.MDNS.packets.sent number 32
-ndpi.MDNS.bytes.rcvd number 0
-ndpi.MDNS.breed string Acceptable
-ndpi.MDNS.bytes.sent number 25801
-ndpi.NetBIOS table
-ndpi.NetBIOS.packets.rcvd number 0
-ndpi.NetBIOS.duration number 15
-ndpi.NetBIOS.packets.sent number 16
-ndpi.NetBIOS.bytes.rcvd number 0
-ndpi.NetBIOS.breed string Acceptable
-ndpi.NetBIOS.bytes.sent number 2360
-icmp.packets.sent number 0
-asn number 137
-packets.rcvd.anomaly_index number 0
-flows.as_server number 0
-icmp.bytes.sent number 0
-ip string 146.48.99.68
-bytes.sent.anomaly_index number 0
-udp.bytes.rcvd number 0
-udp.packets.sent number 52
-mac string 00:0E:C6:C7:D8:4A
-tcp.bytes.rcvd number 0
-vlan number 0
-flows.as_client number 5
-tcp.bytes.sent number 0
-devtype number 4
-low_goodput_flows.as_server.anomaly_index number 0
-contacts.as_server number 0
-throughput_trend_bps_diff number -301.67028808594
-localhost boolean false
-active_flows.as_client number 5
-other_ip.bytes.sent number 0
-childSafe boolean false
-unreachable_flows.as_server number 0
-unreachable_flows.as_client number 0
-seen.last number 1556542989
-tcp.bytes.rcvd.anomaly_index number 0
-ndpi_categories table
-ndpi_categories.System table
-ndpi_categories.System.bytes.sent number 2360
-ndpi_categories.System.duration number 15
-ndpi_categories.System.category number 18
-ndpi_categories.System.bytes.rcvd number 0
-ndpi_categories.System.bytes number 2360
-ndpi_categories.Network table
-ndpi_categories.Network.bytes.sent number 25801
-ndpi_categories.Network.duration number 20
-ndpi_categories.Network.category number 14
-ndpi_categories.Network.bytes.rcvd number 0
-ndpi_categories.Network.bytes number 25801
-ndpi_categories.Cloud table
-ndpi_categories.Cloud.bytes.sent number 1508
-ndpi_categories.Cloud.duration number 5
-ndpi_categories.Cloud.category number 13
-ndpi_categories.Cloud.bytes.rcvd number 0
-ndpi_categories.Cloud.bytes number 1508
-icmp.bytes.sent.anomaly_index number 0
-total_flows.as_client number 5
-tcp.packets.keep_alive number 0
-icmp.bytes.rcvd number 0
-total_flows.as_server number 0
-pktStats.sent table
-pktStats.sent.upTo1024 number 2
-pktStats.sent.rst number 0
-pktStats.sent.finack number 0
-pktStats.sent.upTo1518 number 14
-pktStats.sent.above9000 number 0
-pktStats.sent.upTo512 number 10
-pktStats.sent.synack number 0
-pktStats.sent.syn number 0
-pktStats.sent.upTo64 number 0
-pktStats.sent.upTo2500 number 0
-pktStats.sent.upTo9000 number 0
-pktStats.sent.upTo6500 number 0
-pktStats.sent.upTo128 number 10
-pktStats.sent.upTo256 number 16
-icmp.packets.rcvd number 0
-pktStats.recv table
-pktStats.recv.upTo1024 number 0
-pktStats.recv.rst number 0
-pktStats.recv.finack number 0
-pktStats.recv.upTo1518 number 0
-pktStats.recv.above9000 number 0
-pktStats.recv.upTo512 number 0
-pktStats.recv.synack number 0
-pktStats.recv.syn number 0
-pktStats.recv.upTo64 number 0
-pktStats.recv.upTo2500 number 0
-pktStats.recv.upTo9000 number 0
-pktStats.recv.upTo6500 number 0
-pktStats.recv.upTo128 number 0
-pktStats.recv.upTo256 number 0
-operatingSystem number 0
-city string 
-anomalous_flows.as_client number 0
-is_blacklisted boolean false
-has_dropbox_shares boolean true
-bytes.sent number 29669
-host_unreachable_flows.as_server number 0
-hiddenFromTop boolean false
-tcp.packets.seq_problems boolean false
-last_throughput_bps number 301.67028808594
-throughput_bps number 0.0
+    bytes.ndpi.unknown number 0
+    tcp.packets.lost number 0
+    active_flows.as_server number 0
+    systemhost boolean false
+    udp.bytes.sent number 29669
+    json string { "flows.as_client": 5, "flows.as_server": 0, "anomalous_flows.as_client": 0, "anomalous_flows.as_server": 0, "unreachable_flows.as_client": 0, "unreachable_flows.as_server": 0, "host_unreachable_flows.as_client": 0, "host_unreachable_flows.as_server": 0, "total_alerts": 0, "sent": { "packets": 52, "bytes": 29669 }, "rcvd": { "packets": 0, "bytes": 0 }, "ndpiStats": { "MDNS": { "duration": 20, "bytes": { "sent": 25801, "rcvd": 0 }, "packets": { "sent": 32, "rcvd": 0 } }, "NetBIOS": { "duration": 15, "bytes": { "sent": 2360, "rcvd": 0 }, "packets": { "sent": 16, "rcvd": 0 } }, "Dropbox": { "duration": 5, "bytes": { "sent": 1508, "rcvd": 0 }, "packets": { "sent": 4, "rcvd": 0 } }, "categories": { "Cloud": { "id": 13, "bytes_sent": 1508, "bytes_rcvd": 0, "duration": 5 }, "Network": { "id": 14, "bytes_sent": 25801, "bytes_rcvd": 0, "duration": 20 }, "System": { "id": 18, "bytes_sent": 2360, "bytes_rcvd": 0, "duration": 15 } } }, "total_activity_time": 25, "ip": { "ipVersion": 4, "localHost": false, "ip": "146.48.99.68" }, "mac_address": "00:0E:C6:C7:D8:4A", "ifid": 3, "seen.first": 1556542967, "seen.last": 1556542989, "last_stats_reset": 0, "asn": 137, "symbolic_name": "Marlin", "asname": "Consortium GARR", "localHost": false, "systemHost": false, "broadcastDomainHost": true, "is_blacklisted": false, "num_alerts": 0 }
+    continent string EU
+    os string 
+    low_goodput_flows.as_server number 0
+    packets.sent number 52
+    bytes.rcvd number 0
+    total_alerts number 0
+    host_pool_id number 0
+    tcp.bytes.sent.anomaly_index number 0
+    privatehost boolean false
+    ipkey number 2452644676
+    is_multicast boolean false
+    longitude number 12.109700202942
+    bytes.rcvd.anomaly_index number 0
+    tcp.packets.out_of_order number 0
+    drop_all_host_traffic boolean false
+    packets.rcvd number 0
+    dhcpHost boolean false
+    duration number 23
+    tcp.packets.rcvd number 0
+    throughput_pps number 0.0
+    other_ip.bytes.rcvd.anomaly_index number 0
+    broadcast_domain_host boolean true
+    tskey string 146.48.99.68
+    other_ip.packets.sent number 0
+    udp.bytes.sent.anomaly_index number 0
+    low_goodput_flows.as_client.anomaly_index number 0
+    seen.first number 1556542967
+    total_activity_time number 25
+    throughput_trend_pps number 2
+    tcp.packets.sent number 0
+    is_broadcast boolean false
+    tcp.packets.retransmissions number 0
+    anomalous_flows.as_server number 0
+    low_goodput_flows.as_client number 0
+    packets.sent.anomaly_index number 0
+    host_unreachable_flows.as_client number 0
+    icmp.bytes.rcvd.anomaly_index number 0
+    latitude number 43.147899627686
+    country string IT
+    last_throughput_pps number 0.80018645524979
+    throughput_trend_bps number 2
+    names table
+    names.dhcp string Marlin
+    names.mdns string Marlin
+    num_alerts number 0
+    ifid number 3
+    name string Marlin
+    asname string Consortium GARR
+    udp.bytes.rcvd.anomaly_index number 0
+    udp.packets.rcvd number 0
+    active_http_hosts number 0
+    other_ip.bytes.rcvd number 0
+    other_ip.packets.rcvd number 0
+    contacts.as_client number 0
+    other_ip.bytes.sent.anomaly_index number 0
+    ndpi table
+    ndpi.Dropbox table
+    ndpi.Dropbox.packets.rcvd number 0
+    ndpi.Dropbox.duration number 5
+    ndpi.Dropbox.packets.sent number 4
+    ndpi.Dropbox.bytes.rcvd number 0
+    ndpi.Dropbox.breed string Acceptable
+    ndpi.Dropbox.bytes.sent number 1508
+    ndpi.MDNS table
+    ndpi.MDNS.packets.rcvd number 0
+    ndpi.MDNS.duration number 20
+    ndpi.MDNS.packets.sent number 32
+    ndpi.MDNS.bytes.rcvd number 0
+    ndpi.MDNS.breed string Acceptable
+    ndpi.MDNS.bytes.sent number 25801
+    ndpi.NetBIOS table
+    ndpi.NetBIOS.packets.rcvd number 0
+    ndpi.NetBIOS.duration number 15
+    ndpi.NetBIOS.packets.sent number 16
+    ndpi.NetBIOS.bytes.rcvd number 0
+    ndpi.NetBIOS.breed string Acceptable
+    ndpi.NetBIOS.bytes.sent number 2360
+    icmp.packets.sent number 0
+    asn number 137
+    packets.rcvd.anomaly_index number 0
+    flows.as_server number 0
+    icmp.bytes.sent number 0
+    ip string 146.48.99.68
+    bytes.sent.anomaly_index number 0
+    udp.bytes.rcvd number 0
+    udp.packets.sent number 52
+    mac string 00:0E:C6:C7:D8:4A
+    tcp.bytes.rcvd number 0
+    vlan number 0
+    flows.as_client number 5
+    tcp.bytes.sent number 0
+    devtype number 4
+    low_goodput_flows.as_server.anomaly_index number 0
+    contacts.as_server number 0
+    throughput_trend_bps_diff number -301.67028808594
+    localhost boolean false
+    active_flows.as_client number 5
+    other_ip.bytes.sent number 0
+    childSafe boolean false
+    unreachable_flows.as_server number 0
+    unreachable_flows.as_client number 0
+    seen.last number 1556542989
+    tcp.bytes.rcvd.anomaly_index number 0
+    ndpi_categories table
+    ndpi_categories.System table
+    ndpi_categories.System.bytes.sent number 2360
+    ndpi_categories.System.duration number 15
+    ndpi_categories.System.category number 18
+    ndpi_categories.System.bytes.rcvd number 0
+    ndpi_categories.System.bytes number 2360
+    ndpi_categories.Network table
+    ndpi_categories.Network.bytes.sent number 25801
+    ndpi_categories.Network.duration number 20
+    ndpi_categories.Network.category number 14
+    ndpi_categories.Network.bytes.rcvd number 0
+    ndpi_categories.Network.bytes number 25801
+    ndpi_categories.Cloud table
+    ndpi_categories.Cloud.bytes.sent number 1508
+    ndpi_categories.Cloud.duration number 5
+    ndpi_categories.Cloud.category number 13
+    ndpi_categories.Cloud.bytes.rcvd number 0
+    ndpi_categories.Cloud.bytes number 1508
+    icmp.bytes.sent.anomaly_index number 0
+    total_flows.as_client number 5
+    tcp.packets.keep_alive number 0
+    icmp.bytes.rcvd number 0
+    total_flows.as_server number 0
+    pktStats.sent table
+    pktStats.sent.upTo1024 number 2
+    pktStats.sent.rst number 0
+    pktStats.sent.finack number 0
+    pktStats.sent.upTo1518 number 14
+    pktStats.sent.above9000 number 0
+    pktStats.sent.upTo512 number 10
+    pktStats.sent.synack number 0
+    pktStats.sent.syn number 0
+    pktStats.sent.upTo64 number 0
+    pktStats.sent.upTo2500 number 0
+    pktStats.sent.upTo9000 number 0
+    pktStats.sent.upTo6500 number 0
+    pktStats.sent.upTo128 number 10
+    pktStats.sent.upTo256 number 16
+    icmp.packets.rcvd number 0
+    pktStats.recv table
+    pktStats.recv.upTo1024 number 0
+    pktStats.recv.rst number 0
+    pktStats.recv.finack number 0
+    pktStats.recv.upTo1518 number 0
+    pktStats.recv.above9000 number 0
+    pktStats.recv.upTo512 number 0
+    pktStats.recv.synack number 0
+    pktStats.recv.syn number 0
+    pktStats.recv.upTo64 number 0
+    pktStats.recv.upTo2500 number 0
+    pktStats.recv.upTo9000 number 0
+    pktStats.recv.upTo6500 number 0
+    pktStats.recv.upTo128 number 0
+    pktStats.recv.upTo256 number 0
+    operatingSystem number 0
+    city string 
+    anomalous_flows.as_client number 0
+    is_blacklisted boolean false
+    has_dropbox_shares boolean true
+    bytes.sent number 29669
+    host_unreachable_flows.as_server number 0
+    hiddenFromTop boolean false
+    tcp.packets.seq_problems boolean false
+    last_throughput_bps number 301.67028808594
+    throughput_bps number 0.0
 
 
 
 
 
 
-macs.1.throughput_trend_bps_diff number 0.0
-macs.1.bytes.sent number 6030
-macs.1.location string lan
-macs.1.arp_requests.rcvd number 0
-macs.1.arp_replies.rcvd number 0
-macs.1.bytes.sent.anomaly_index number 60
-macs.1.packets.rcvd.anomaly_index number 0
-macs.1.throughput_pps number 0.0
-macs.1.fingerprint string 
-macs.1.throughput_bps number 0.0
-macs.1.seen.last number 1557827812
-macs.1.talkers.asServer number 0
-macs.1.talkers.asClient number 6
-macs.1.packets.sent.anomaly_index number 0
-macs.1.source_mac boolean true
-macs.1.duration number 341
-macs.1.special_mac boolean false
-macs.1.last_throughput_bps number 0.0
-macs.1.seen.first number 1557827472
-macs.1.arp_requests.sent number 107
-macs.1.pool number 0
-macs.1.bytes.rcvd number 0
-macs.1.devtype number 0
+    macs.1.throughput_trend_bps_diff number 0.0
+    macs.1.bytes.sent number 6030
+    macs.1.location string lan
+    macs.1.arp_requests.rcvd number 0
+    macs.1.arp_replies.rcvd number 0
+    macs.1.bytes.sent.anomaly_index number 60
+    macs.1.packets.rcvd.anomaly_index number 0
+    macs.1.throughput_pps number 0.0
+    macs.1.fingerprint string 
+    macs.1.throughput_bps number 0.0
+    macs.1.seen.last number 1557827812
+    macs.1.talkers.asServer number 0
+    macs.1.talkers.asClient number 6
+    macs.1.packets.sent.anomaly_index number 0
+    macs.1.source_mac boolean true
+    macs.1.duration number 341
+    macs.1.special_mac boolean false
+    macs.1.last_throughput_bps number 0.0
+    macs.1.seen.first number 1557827472
+    macs.1.arp_requests.sent number 107
+    macs.1.pool number 0
+    macs.1.bytes.rcvd number 0
+    macs.1.devtype number 0
 
 
 
     DEVICE TABLE(quella passata a ts_utils_append(...))
 
     table
-arp_requests.sent number 0
-bytes.rcvd number 942695
-bytes.sent number 0
-mac string FF:FF:FF:FF:FF:FF
-pool number 0
-devtype number 0
-arp_replies.rcvd number 10
-packets.sent.anomaly_index number 0
-throughput_pps number 80.430160522461
-packets.rcvd number 12861
-throughput_bps number 7064.2490234375
-bridge_seen_iface_id number 0
-bytes.rcvd.anomaly_index number 100
-location string unknown
-last_throughput_bps number 6710.5068359375
-source_mac boolean false
-arp_replies.sent number 0
-seen.first number 1558082557
-special_mac boolean true
-arp_requests.rcvd number 11999
-talkers.asServer number 1557
-talkers.asClient number 3
-bytes.sent.anomaly_index number 0
-throughput_trend_bps number 1
-num_hosts number 2
-throughput_trend_bps_diff number 353.7421875
-fingerprint string 
-bytes.ndpi.unknown number 0
-operatingSystem number 0
-packets.sent number 0
-duration number 1
-packets.rcvd.anomaly_index number 100
-seen.last number 1558082557
-last_throughput_pps number 95.141967773438
-throughput_trend_pps number 2
+    arp_requests.sent number 0
+    bytes.rcvd number 942695
+    bytes.sent number 0
+    mac string FF:FF:FF:FF:FF:FF
+    pool number 0
+    devtype number 0
+    arp_replies.rcvd number 10
+    packets.sent.anomaly_index number 0
+    throughput_pps number 80.430160522461
+    packets.rcvd number 12861
+    throughput_bps number 7064.2490234375
+    bridge_seen_iface_id number 0
+    bytes.rcvd.anomaly_index number 100
+    location string unknown
+    last_throughput_bps number 6710.5068359375
+    source_mac boolean false
+    arp_replies.sent number 0
+    seen.first number 1558082557
+    special_mac boolean true
+    arp_requests.rcvd number 11999
+    talkers.asServer number 1557
+    talkers.asClient number 3
+    bytes.sent.anomaly_index number 0
+    throughput_trend_bps number 1
+    num_hosts number 2
+    throughput_trend_bps_diff number 353.7421875
+    fingerprint string 
+    bytes.ndpi.unknown number 0
+    operatingSystem number 0
+    packets.sent number 0
+    duration number 1
+    packets.rcvd.anomaly_index number 100
+    seen.last number 1558082557
+    last_throughput_pps number 95.141967773438
+    throughput_trend_pps number 2
 
 
 

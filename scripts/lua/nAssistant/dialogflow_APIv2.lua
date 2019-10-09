@@ -5,23 +5,25 @@
 dirs = ntop.getDirs()
 package.path = dirs.installdir .. "/scripts/lua/modules/?.lua;" .. package.path
 if((dirs.scriptdir ~= nil) and (dirs.scriptdir ~= "")) then package.path = dirs.scriptdir .. "/lua/modules/?.lua;" .. package.path end
+ignore_post_payload_parse = 1 --controllase effettivamente serve
+
 require "lua_utils"
 local json = require("dkjson")--CHECK: if i load a module already loaded, i need to explicitly that module here?
 
 sendHTTPContentTypeHeader('Application/json')
 
 --------------------------------------------------------------------------
-local debug = false
+local debug = true
 ---------------------------------------------------------------------------
 local ga_module = {}
 local request = {}
 local response = {}
 
---CHECK: è possibile NON mandare la risposta testuale?
+--CHECK: è possibile NON mandare la risposta testuale? 
 
---"suggestions_strings" must be a string array, and "card" must be created with create_card()
-local function fill_response(speech_text, display_text, expect_response, suggestions_strings, card)  
-  if display_text == nil or display_text == "" then display_text = speech_text end
+--"suggestions_strings" must be a string array
+local function fill_response(speech_text, display_text, suggestions_strings, card)  
+  if display_text == nil  then display_text = speech_text end
   if expect_response == nil then expect_response = true end
 
   local mysuggestions, r, myitems = {}, {}, {}
@@ -33,7 +35,7 @@ local function fill_response(speech_text, display_text, expect_response, suggest
   end
 
   if card then
-    myitems =  {  --note: all the rich response must be put inside "myitems"
+    myitems =  {  
       { 
         simpleResponse = {
           textToSpeech = speech_text,
@@ -50,67 +52,68 @@ local function fill_response(speech_text, display_text, expect_response, suggest
       }
     } 
   end
-  
-  --if a context was created, consume it
-  local mycontext = ga_module.getContext()
-  if mycontext then 
-    r = {
-      fulfillmentText = display_text,
-      payload = {
-        google = {
-          expectUserResponse = expect_response,
-          richResponse = {
-            items = myitems,
-            suggestions = mysuggestions
-          }
-        } 
-      },
-      outputContexts = mycontext
-    }
-    ga_module.deleteContext()
-  else
-    r = {
-      fulfillmentText = display_text,
-      payload = {
-        google = {
-          expectUserResponse = expect_response,
-          richResponse = {
-            items = myitems,
-            suggestions = mysuggestions
-          }
-        } 
-      }
-    }
-  end
 
-  return json.encode(r)
-end
-
---TODO: MAKE BUTTON OPTIONAL
---TODO: cards allow many things (like buttons), implement them ---> [ https://dialogflow.com/docs/rich-messages#card ]
---note: in google assistant, the display/speech_text will appear in a bubble over the card
---    "button_title" and "button_open_url"_action are optional
-function ga_module.create_card(card_title, card_url_image, accessibility_image_text, button_title, button_open_url_action  )
-  local card = {}
-  if button_title and button_open_url_action then 
-    local button = {}
-    button = { 
-      {
-        title = button_title,
-        openUrlAction = { url = button_open_url_action}
+  r = {
+    fulfillmentText = display_text,
+    payload = {
+      google = {
+        expectUserResponse = true,
+        richResponse = {
+          items = myitems,
+          suggestions = mysuggestions
+        }
       } 
     }
-    card = {
-      title = card_title,
-      image = { url = card_url_image, accessibilityText = accessibility_image_text },
-      buttons = button
-    }
-  else 
-    card = {
-      title = card_title,
-      image = { url = card_url_image, accessibilityText = accessibility_image_text },
-    }
+  }
+
+  if mysuggestions then 
+    r.payload.google.richResponse.suggestions = mysuggestions
   end
+
+  local mycontext = ga_module.getContext()
+
+  if mycontext then
+    r.outputContexts = mycontext
+  end
+
+  ga_module.deleteContext()
+
+  return json.encode(r, {indent = true})
+end
+
+--TODO: cards allow many things (like buttons), implement them ---> [ https://dialogflow.com/docs/rich-messages#card ]
+--note: in google assistant, the display/speech_text will appear in a bubble over the card
+--    "weblink_title" and "button_open_url"_action are optional
+-- IMAGE: The height is fixed to 192dp [https://actions-on-google.github.io/actions-on-google-nodejs/classes/conversation_response.basiccard.html]
+--NOTE: dentro basiccard= imageDisplayOptions --> https://developers.google.com/actions/reference/rest/Shared.Types/ImageDisplayOptions
+
+--PARAM
+  --text: string
+  --image: table --> { img_url = X, img_description = X }
+  --optional: table --> { title = x, subtitle =X, weblink_title = X, weblink = X } 
+function ga_module.create_card(text, image, optional)
+  if not image and not text then return nil end--NOTE: image obbligatoria se non c'è il formattedText e viceversa!
+
+  local card, button = {}, {}
+
+  if text then card.formattedText = text end
+  if image then card.image = { url = image.img_url, accessibilityText = image.img_description } end
+
+  if optional then 
+    local title, subtitle, weblink, weblink_title = optional.title, optional.subtitle, optional.weblink, optional.weblink_title
+    if title then card.title = title end
+    if subtitle then card.subtitle = subtitle end
+  
+    if weblink_title and weblink then 
+      card.buttons =  { 
+        {
+          title = weblink_title,
+          openUrlAction = { url = weblink}
+        } 
+      }
+    end
+  end
+
   return card
 end
 
@@ -157,11 +160,9 @@ function ga_module.getContext()
   return mycontext
 end
 
---!! TODO !! tieni sempre in cache il precedente intent + parameters,
---           in pratica voglio sapere lo stato precedente del dialogo e non solo il corrente
---  TRY SOLUZIONE: SE FACCI OL'ALBERO DEL DIALOGO A MODO (USANDO I FOLLOW-UP), È L'AGENTE CHE MI INVIA I PRECEDENTI PARAMETRI
---                  m idevo disegnare la struttura sotto del dialogo, dei singoli dialoghi e sotto varie viste (contesti, parametri, collegamenti possibili tra contesti) 
 
+--TODO!: rifai a modo la send, tenendo conto dei componeni non implementati.
+  --    metti solo i parametri obbligatori e in "optional" il resto
 
 --[[PARAM
   speech_text, diplay_text: self explanatory
@@ -169,7 +170,10 @@ end
   suggestions_strings: suggestions displayed on the bottom of the screen (MAX 8)
   (basic)card: one of the "rich message" response [https://dialogflow.com/docs/intents/rich-messages]
   ]]
-function ga_module.send(speech_text, display_text, expect_response, suggestions_strings, card )
+
+--idea: metto tra i parametri le cose che uso spesso, in optional le altre varie ed eventuali da implementare
+--function ga_module.send(speech_text, display_text, expect_response, suggestions_strings, card )
+function ga_module.send(speech_text, display_text, suggestions_strings, card, optional )
 
   if suggestions_strings then 
     for i,v in pairs(suggestions_strings) do 
@@ -179,44 +183,125 @@ function ga_module.send(speech_text, display_text, expect_response, suggestions_
     end
   end
 
-  res = fill_response(speech_text, display_text,expect_response, suggestions_strings, card)
+  res = fill_response(speech_text, display_text, suggestions_strings, card)
   print(res.."\n")
 
-    if --[[ debug ]] true then 
+    if debug then 
       io.write("\n")
       io.write("NTOPNG RESPONSE\n")
       tprint(res)
       io.write("\n---------------------------------------------------------\n")
     end
-
 end
+
+--DIALOGFLOW REQUEST EXAMPLE:
+ --[[
+   dialogflow request: Default Welcome Intent (SIMULATORE - phone)
+
+ {
+  "responseId": "fb4882ed-3826-4ea9-9cb7-4abe47efb88a-2a4c0c5e",
+  "queryResult": {
+    "queryText": "GOOGLE_ASSISTANT_WELCOME",
+    "action": "input.welcome",
+    "parameters": {
+    },
+    "allRequiredParamsPresent": true,
+    "fulfillmentText": "Hello! What do you want to know about your network?",
+    "fulfillmentMessages": [{
+      "text": {
+        "text": ["Hello! What do you want to know about your network?"]
+      }
+    }],
+    "outputContexts": [{
+      "name": "projects/nassistant02-qbmwmv/agent/sessions/ABwppHHFEUZ0n4OextFk2WXwY0w1T1CFpInJ-kJnfnvuh1cJmXEkgQrmetaijJl88IkTWtDryG8UuBtesBtf8qTQUg/contexts/actions_capability_web_browser"
+    }, {
+      "name": "projects/nassistant02-qbmwmv/agent/sessions/ABwppHHFEUZ0n4OextFk2WXwY0w1T1CFpInJ-kJnfnvuh1cJmXEkgQrmetaijJl88IkTWtDryG8UuBtesBtf8qTQUg/contexts/actions_capability_media_response_audio"
+    }, {
+      "name": "projects/nassistant02-qbmwmv/agent/sessions/ABwppHHFEUZ0n4OextFk2WXwY0w1T1CFpInJ-kJnfnvuh1cJmXEkgQrmetaijJl88IkTWtDryG8UuBtesBtf8qTQUg/contexts/actions_capability_audio_output"
+    }, {
+      "name": "projects/nassistant02-qbmwmv/agent/sessions/ABwppHHFEUZ0n4OextFk2WXwY0w1T1CFpInJ-kJnfnvuh1cJmXEkgQrmetaijJl88IkTWtDryG8UuBtesBtf8qTQUg/contexts/actions_capability_account_linking"
+    }, {
+      "name": "projects/nassistant02-qbmwmv/agent/sessions/ABwppHHFEUZ0n4OextFk2WXwY0w1T1CFpInJ-kJnfnvuh1cJmXEkgQrmetaijJl88IkTWtDryG8UuBtesBtf8qTQUg/contexts/actions_capability_screen_output"
+    }, {
+      "name": "projects/nassistant02-qbmwmv/agent/sessions/ABwppHHFEUZ0n4OextFk2WXwY0w1T1CFpInJ-kJnfnvuh1cJmXEkgQrmetaijJl88IkTWtDryG8UuBtesBtf8qTQUg/contexts/google_assistant_input_type_keyboard"
+    }, {
+      "name": "projects/nassistant02-qbmwmv/agent/sessions/ABwppHHFEUZ0n4OextFk2WXwY0w1T1CFpInJ-kJnfnvuh1cJmXEkgQrmetaijJl88IkTWtDryG8UuBtesBtf8qTQUg/contexts/google_assistant_welcome"
+    }],
+    "intent": {
+      "name": "projects/nassistant02-qbmwmv/agent/intents/e3f5e886-5abc-48f4-a685-9ea8d8244039",
+      "displayName": "Default Welcome Intent"
+    },
+    "intentDetectionConfidence": 1.0,
+    "languageCode": "en"
+  },
+  "originalDetectIntentRequest": {
+    "source": "google",
+    "version": "2",
+    "payload": {
+      "user": {
+        "locale": "en-US",
+        "lastSeen": "2019-10-03T10:52:43Z",
+        "userVerificationStatus": "VERIFIED"
+      },
+      "conversation": {
+        "conversationId": "ABwppHHFEUZ0n4OextFk2WXwY0w1T1CFpInJ-kJnfnvuh1cJmXEkgQrmetaijJl88IkTWtDryG8UuBtesBtf8qTQUg",
+        "type": "NEW"
+      },
+      "inputs": [{
+        "intent": "actions.intent.MAIN",
+        "rawInputs": [{
+          "inputType": "KEYBOARD",
+          "query": "Talk to nAssistant two"
+        }]
+      }],
+      "surface": {
+        "capabilities": [{
+          "name": "actions.capability.WEB_BROWSER"
+        }, {
+          "name": "actions.capability.MEDIA_RESPONSE_AUDIO"
+        }, {
+          "name": "actions.capability.AUDIO_OUTPUT"
+        }, {
+          "name": "actions.capability.ACCOUNT_LINKING"
+        }, {
+          "name": "actions.capability.SCREEN_OUTPUT"
+        }]
+      },
+      "isInSandbox": true,
+      "availableSurfaces": [{
+        "capabilities": [{
+          "name": "actions.capability.AUDIO_OUTPUT"
+        }, {
+          "name": "actions.capability.WEB_BROWSER"
+        }, {
+          "name": "actions.capability.SCREEN_OUTPUT"
+        }]
+      }],
+      "requestType": "SIMULATOR"
+    }
+  },
+  "session": "projects/nassistant02-qbmwmv/agent/sessions/ABwppHHFEUZ0n4OextFk2WXwY0w1T1CFpInJ-kJnfnvuh1cJmXEkgQrmetaijJl88IkTWtDryG8UuBtesBtf8qTQUg"
+}
+ ]] 
 
 --TODO: dovrei chiamare request ciò che qua soto chiamo response
 --TODO: salva il contesto appena arriva un intent e cancella il precedente (insomma voglio che il precedente contesto sia a disposizione)
 function ga_module.receive()
+  local payload = _POST["payload"] 
+  local info, pos, err = json.decode(payload, 1, nil)--I assume only ONE outputContext
+  --WIP: volgio in pratica passare direttamente la richiesta decodificata, qui solo gestione errori, cache, e boh
 
-  local info, pos, err = json.decode(_POST["payload"], 1, nil)--I assume only ONE outputContext
-  
-  response["responseId"] = info.responseId
-  response["queryText"] = info.queryResult.queryText
-  if info.queryResult.parameters ~= nil then response["parameters"] = info.queryResult.parameters end
-  if info.queryResult.outputContexts and info.queryResult.outputContexts[1].name then response["context"] = info.queryResult.outputContexts[1].name end
-  if info.queryResult.outputContexts then response["outputContext"] = info.queryResult.outputContexts end
-  ---response["outputContext"] = info.queryResult.outputContexts[1].name  
-  --response["outputContext_parameters"] = info.queryResult.outputContexts[1].parameters.number
-  response["intent_name"] = info.queryResult.intent.displayName
-  response["session"] = info.session
-
-  ntop.setCache("session_id", info.session )
+  --TODO: gestione cache! es:salvo info per l'intent successivo. sì, cià spezza un pò l'architettura che creo sudialogflow,
+      --  la quale coi strumenti della piattaforma dovrebbe saper direzionare il dialogo.
 
     if debug then   
       io.write("\n")
       io.write("DIALOGFLOW REQUEST")
-      tprint(response)
-      io.write("\n")
+      tprint(payload)
+      io.write("\n---------------------------------------------------------\n")
     end
 
-  return response
+  return info
 end
 
 return ga_module

@@ -76,7 +76,7 @@ elseif  user_request.queryResult.intent.displayName == "get_ghost_network_info" 
 else ntop_response = dialogflow.send("Sorry, but I didn't understand, can you repeat please?") 
 end
 
---TODO: controllo errori?! roba cache qui? tipo salvo i dati diquesta user_request solo ora,
+--TODO: controllo errori?! roba cache qui? tipo salvo i dati di questa user_request solo ora,
 --      così che durante l'elaborazione dell'intent in cache c'era il precedente
 
 dialogflow.send(

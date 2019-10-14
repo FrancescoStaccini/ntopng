@@ -194,5 +194,5 @@ local t = {}
 for i,v in pairs(interface.getnDPIProtocols()) do 
     table.insert(t,{value = i, synonyms = {i} })
 end
---ho rimosso a mano "sina(weibo)" perchè Dialogflow non vuole parentesi
+--ho rimosso a mano "sina(weibo)", a Dialogflow non piacciono le parentesi
 ]]

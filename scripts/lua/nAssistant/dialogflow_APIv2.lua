@@ -5,10 +5,10 @@
 dirs = ntop.getDirs()
 package.path = dirs.installdir .. "/scripts/lua/modules/?.lua;" .. package.path
 if((dirs.scriptdir ~= nil) and (dirs.scriptdir ~= "")) then package.path = dirs.scriptdir .. "/lua/modules/?.lua;" .. package.path end
-ignore_post_payload_parse = 1 --controllase effettivamente serve
+ignore_post_payload_parse = 1 
 
 require "lua_utils"
-local json = require("dkjson")--CHECK: if i load a module already loaded, i need to explicitly that module here?
+local json = require("dkjson")
 
 sendHTTPContentTypeHeader('Application/json')
 
@@ -19,16 +19,13 @@ local ga_module = {}
 local request = {}
 local response = {}
 
---CHECK: è possibile NON mandare la risposta testuale? 
-
---"suggestions_strings" must be a string array
 local function fill_response(speech_text, display_text, suggestions_strings, card)  
   if display_text == nil  then display_text = speech_text end
   if expect_response == nil then expect_response = true end
 
   local mysuggestions, r, myitems = {}, {}, {}
 
-  if suggestions_strings then 
+  if suggestions_strings then --note: "suggestions_strings" must be a string array
     for i = 1, #suggestions_strings do
       table.insert( mysuggestions, {title = suggestions_strings[i]} )
     end
@@ -117,7 +114,8 @@ function ga_module.create_card(text, image, optional)
   return card
 end
 
---Used to set an arbitrary context (and overwrite the old one) call setContext() (TODO: check se è ancora così)
+--TODO: rifai le fun per i context!? architetturalmente i contesti li tocca solo l'agente dialogflow
+--Used to set an arbitrary context (and overwrite the old one) call setContext()
 --For complex structures use as many prefs as there are fields to save
 function ga_module.setContext(name, lifespan, parameter) 
 
@@ -128,7 +126,6 @@ function ga_module.setContext(name, lifespan, parameter)
     ntop.setCache("context_lifespan", tostring(lifespan), 60 * 20)
   end
 
-  --TODO:  nel caso sia una tabella di parametri, metti un for in cui salvo tutti i parametri della tabella parameter,
   if parameter then 
     ntop.setCache("context_param", parameter, 60 * 20)
   end
@@ -171,7 +168,7 @@ end
   (basic)card: one of the "rich message" response [https://dialogflow.com/docs/intents/rich-messages]
   ]]
 
---idea: metto tra i parametri le cose che uso spesso, in optional le altre varie ed eventuali da implementare
+--idea: metto tra i parametri i campi che uso spesso, in optional le altre varie ed eventuali da implementare
 --function ga_module.send(speech_text, display_text, expect_response, suggestions_strings, card )
 function ga_module.send(speech_text, display_text, suggestions_strings, card, optional )
 
@@ -284,14 +281,13 @@ end
 }
  ]] 
 
---TODO: dovrei chiamare request ciò che qua soto chiamo response
---TODO: salva il contesto appena arriva un intent e cancella il precedente (insomma voglio che il precedente contesto sia a disposizione)
+--TODO: voglio che il precedente (NON attuale) contesto sia a disposizione
 function ga_module.receive()
   local payload = _POST["payload"] 
-  local info, pos, err = json.decode(payload, 1, nil)--I assume only ONE outputContext
-  --WIP: volgio in pratica passare direttamente la richiesta decodificata, qui solo gestione errori, cache, e boh
+  local info, pos, err = json.decode(payload, 1, nil)
+  --WIP: volgio in pratica passare direttamente la richiesta decodificata, qui solo gestione errori, cache etc
 
-  --TODO: gestione cache! es:salvo info per l'intent successivo. sì, cià spezza un pò l'architettura che creo sudialogflow,
+  --TODO: gestione cache! es:salvo info per l'intent successivo. sì, ciò spezza un pò l'architettura che creo su dialogflow,
       --  la quale coi strumenti della piattaforma dovrebbe saper direzionare il dialogo.
 
     if debug then   

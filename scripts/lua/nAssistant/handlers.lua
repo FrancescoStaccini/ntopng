@@ -317,7 +317,7 @@ end
 
 --#########################################################################################################
 
-function handlers_module.device_info(user_request) --in realtà è la fallback dell'intent "ask_for_single_device_info"
+function handlers_module.device_info(user_request) -- fallback dell'intent "ask_for_single_device_info"
   local text = "I don't get it, can you repeat please?"
   local device_name = user_request.queryResult.queryText
   if (not device_name) or (device_name == "") then
@@ -1162,7 +1162,7 @@ function handlers_module.host_info(user_request)
         --  ..ternary(mac_info.model, "Model "..mac_info.model.."\n" , "" )
   end
 
-  ntop_response.speech_text = text
+  ntop_response.speech_text = "Here you have some info about the host"
   ntop_response.display_text = text
   ntop_response.suggestions = sugg    
 
@@ -1206,7 +1206,7 @@ function handlers_module.host_info_more(user_request)
   local card_title, chart_description = "Chart", "Chart"
 
   if     info_type == "applications" then ------------------------------------
-    if table.len(host_info.ndpi) <= 0 then --TEST TODO se il break rompe l'if
+    if table.len(host_info.ndpi) <= 0 then
       ntop_response.speech_text = "No application detected. Please, ask me something else"
       ntop_response.display_text = "No application detected. Please, ask me something else"
       ntop_response.suggestions = sugg    
@@ -1273,7 +1273,7 @@ function handlers_module.host_info_more(user_request)
     i = 0
     for name,v in ipairs( top_ndpi_cat) do
       table.insert(data.labels, v.name)
-      table.insert(data.values, tonumber(string.format("%.2f", v.bytes/1024)  ) ) --TODO: se necessario (tanto traffico) metti i MB invece dei KB
+      table.insert(data.values, tonumber(string.format("%.2f", v.bytes/1024)  ) ) --TODO: metti i MB invece dei KB all'occorrenza
 
       i = i + 1
       if i >= limit_num_ndpi_categories_chart then break end   
@@ -1413,7 +1413,7 @@ function handlers_module.host_info_more(user_request)
 
   elseif info_type == "general" then ------------------------------------
 
-      if not host_info then --TEST TODO se il break rompe l'if
+      if not host_info then 
         ntop_response.speech_text = "I don't get it, can you repeat please?"
         return ntop_response
       end    
@@ -1440,10 +1440,10 @@ function handlers_module.host_info_more(user_request)
       local mac_info = interface.getMacInfo(host_info.mac)
       --tprint(mac_info)
       if mac_info then 
-        text = text ..ternary(mac_info.manufacturer , "Manufacturer "..mac_info.manufacturer.."\n" , "" )
+        text = text ..ternary(mac_info.manufacturer ~= nil , "Manufacturer "..mac_info.manufacturer.."\n" , "" )
             --  ..ternary(mac_info.model, "Model "..mac_info.model.."\n" , "" )
       end
-      speech_text = text
+      speech_text = "Here you have some info about the host"
       display_text = text
   end 
 

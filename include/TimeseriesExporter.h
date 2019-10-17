@@ -29,7 +29,7 @@ class TimeseriesExporter {
   time_t flushTime;
   u_int32_t cursize;
   u_int32_t num_exports;
-  int fd;
+  FILE *fp;
   char fbase[PATH_MAX], fname[PATH_MAX+32];
   NetworkInterface *iface;
   u_int num_cached_entries; 

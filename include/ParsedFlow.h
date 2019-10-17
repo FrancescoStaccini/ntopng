@@ -31,12 +31,12 @@ class ParsedFlow : public ParsedFlowCore, public ParsedeBPF {
   ndpi_serializer *additional_fields_tlv;
 
  public:
-  char *http_url, *http_site;
+  char *http_url, *http_site, *http_method;
   char *dns_query;
   char *ssl_server_name, *bittorrent_hash;
   char *ja3c_hash, *ja3s_hash;
-  char *suricata_alert;
-  u_int8_t suricata_alert_severity;
+  char *external_alert;
+  u_int8_t external_alert_severity;
   u_int8_t ssl_unsafe_cipher;
   u_int16_t ssl_cipher;
   u_int16_t http_ret_code;
@@ -69,6 +69,7 @@ class ParsedFlow : public ParsedFlowCore, public ParsedeBPF {
   inline void setParsedeBPF()       { has_parsed_ebpf = true; };
   virtual ~ParsedFlow();
   void swap();
+  void fromLua(lua_State *L, int index);
 };
 
 #endif /* _PARSED_FLOW_H_ */

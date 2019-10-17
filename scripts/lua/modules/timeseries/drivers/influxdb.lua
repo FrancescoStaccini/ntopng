@@ -9,6 +9,7 @@ local ts_common = require("ts_common")
 local json = require("dkjson")
 local os_utils = require("os_utils")
 local alerts_api = require("alerts_api")
+local data_retention_utils = require "data_retention_utils"
 require("ntop_utils")
 require "alert_utils"
 
@@ -76,7 +77,7 @@ end
 -- ##############################################
 
 local function getDatabaseRetentionDays()
-  return tonumber(ntop.getPref("ntopng.prefs.influx_retention")) or 365 -- TODO make in common with prefs.lua
+   return data_retention_utils.getDataRetentionDays()
 end
 
 local function get1dDatabaseRetentionDays()
@@ -453,9 +454,28 @@ end
 
 -- ##############################################
 
+local function getLastTsQuery(schema, query_schema, tags)
+  return string.format('SELECT LAST('.. schema._metrics[1] ..') FROM %s WHERE 1=1 AND %s', query_schema, table.tconcat(tags, "=", " AND ", nil, "'"))
+end
+
+-- ##############################################
+
 function driver:_makeTotalSerie(schema, query_schema, raw_step, tstart, tend, tags, options, url, time_step, label, unaligned_offset, data_type)
   local query = getTotalSerieQuery(schema, query_schema, raw_step, tstart, tend + unaligned_offset, tags, time_step, data_type, label)
-  local data = influx_query(url .. "/query?db=".. self.db .."&epoch=s", query, self.username, self.password, options)
+  local last_ts_query = getLastTsQuery(schema, query_schema, tags)
+  local jres = influx_query_multi(url .. "/query?db=".. self.db .."&epoch=s", string.format("%s;%s", query, last_ts_query), self.username, self.password, options)
+  local last_ts = os.time()
+  local data = {}
+
+  if(jres and jres.results and (#jres.results == 2)) then
+    if jres.results[1].series then
+      data = jres.results[1]
+    end
+
+    if jres.results[2].series and jres.results[2].series[1].values then
+      last_ts = jres.results[2].series[1].values[1][1]
+    end
+  end
 
   if table.empty(data) then
     local rv = {}
@@ -471,7 +491,7 @@ function driver:_makeTotalSerie(schema, query_schema, raw_step, tstart, tend, ta
 
   data = data.series[1]
 
-  local series, count, tstart = influx2Series(schema, tstart + time_step, tend, tags, options, data, time_step)
+  local series, count, tstart = influx2Series(schema, tstart + time_step, tend, tags, options, data, time_step, last_ts)
   return series[1].data
 end
 
@@ -545,7 +565,7 @@ function driver:query(schema, tstart, tend, tags, options)
   local series, count
 
   -- Perform an additional query to determine the last point in the raw data
-  local last_ts_query = string.format('SELECT LAST('.. schema._metrics[1] ..') FROM %s WHERE 1=1 AND %s', query_schema, table.tconcat(tags, "=", " AND ", nil, "'"))
+  local last_ts_query = getLastTsQuery(schema, query_schema, tags)
   local jres = influx_query_multi(url .. "/query?db=".. getDatabaseName(schema, self.db) .."&epoch=s", string.format("%s;%s", query, last_ts_query), self.username, self.password, options)
   local last_ts = os.time()
 
@@ -693,18 +713,23 @@ end
 
 -- Exports a timeseries file in line format to InfluxDB
 -- Returns a tuple(success, file_still_existing)
-function driver:_exportTsFile(fname)
+function driver:_exportTsFile(exportable)
   local rv = true
+  local fname = exportable["fname"]
 
   if not ntop.exists(fname) then
     traceError(TRACE_ERROR, TRACE_CONSOLE,
-      string.format("Cannot find ts file %s. Some timeseries data will be lost.", fname))
-    return false, false
+	       string.format("Cannot find ts file %s. Some timeseries data will be lost.", fname))
+    -- The file isn't in place, probably has been manually deleted or a write failure prevented
+    -- it from being written. It's safe to remove the corresponding item from the queue as this
+    -- won't be a recoverable export.
+    ntop.lremCache(INFLUX_EXPORT_QUEUE, exportable["item"])
+    return false
   end
 
   -- Delete the file after POST
   local delete_file_after_post = false
-  local ret = ntop.postHTTPTextFile(self.username, self.password, self.url .. "/write?db=" .. self.db, fname, delete_file_after_post, 30 --[[ timeout ]])
+  local ret = ntop.postHTTPTextFile(self.username, self.password, self.url .. "/write?precision=s&db=" .. self.db, fname, delete_file_after_post, 30 --[[ timeout ]])
 
   if((ret == nil) or ((ret.RESPONSE_CODE ~= 200) and (ret.RESPONSE_CODE ~= 204))) then
     -- local msg = self:_exportErrorMsg(ret)
@@ -896,7 +921,7 @@ function driver:_performExport(exportable)
    local prev_t = tonumber(ntop.getCache(time_key)) or 0
 
    local start_t = ntop.gettimemsec()
-   local rv = self:_exportTsFile(exportable["fname"])
+   local rv = self:_exportTsFile(exportable)
    local end_t = ntop.gettimemsec()
 
    if rv then
@@ -925,6 +950,7 @@ local function getExportable(item)
       return res
    end
 
+   res["item"]       = item
    res["fname"]      = os_utils.fixPath(dirs.workingdir .. "/" .. ifid .. "/ts_export/" .. export_id .. "_" .. time_ref)
    res["ifid_str"]   = ifid_str
    res["ifid"]       = ifid

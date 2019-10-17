@@ -42,7 +42,8 @@ class Utils {
   static char* formatTraffic(float numBits, bool bits, char *buf, u_int buf_len);
   static char* formatPackets(float numPkts, char *buf, u_int buf_len);
   static char* l4proto2name(u_int8_t proto);
-  static u_int8_t l4name2proto(char *name);
+  static u_int8_t l4name2proto(const char *name);
+  static u_int8_t queryname2type(const char *name);
   static bool  isIPAddress(char *name);
   static int   setThreadAffinity(pthread_t thread, int core_id);
   static void  setThreadName(const char *name);
@@ -115,6 +116,7 @@ class Utils {
   static int numberOfSetBits(u_int32_t i);
   static void initRedis(Redis **r, const char *redis_host, const char *redis_password,
 			u_int16_t redis_port, u_int8_t _redis_db_id, bool giveup_on_failure);
+  static json_object *cloneJSONSimple(json_object *src);
 
   /* ScriptPeriodicity */
   static const char* periodicityToScriptName(ScriptPeriodicity p);
@@ -183,17 +185,10 @@ class Utils {
   static void init_pcap_header(struct pcap_file_header * const h, NetworkInterface * const iface);
 
   /* Bitmap functions */
-  static inline bool bitmapIsSet(u_int64_t bitmap, u_int8_t v) {
-    return(((bitmap >> v) & 1) ? true : false);
-  }
-  static inline u_int64_t bitmapSet(u_int64_t bitmap, u_int8_t v) {
-    bitmap |= ((u_int64_t)1) << v;
-    return(bitmap);
-  }
-  static inline u_int64_t bitmapClear(u_int64_t bitmap, u_int8_t v) {
-    bitmap &= ~(((u_int64_t)1) << v);
-    return(bitmap);
-  }
+  static bool bitmapIsSet(u_int64_t bitmap, u_int8_t v);  
+  static u_int64_t bitmapSet(u_int64_t bitmap, u_int8_t v);  
+  static u_int64_t bitmapClear(u_int64_t bitmap, u_int8_t v);
+
   static inline u_int64_t bitmapOr(u_int64_t bitmap1, u_int64_t bitmap2) {
     return(bitmap1 | bitmap2);
   }

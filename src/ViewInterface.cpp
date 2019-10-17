@@ -221,11 +221,11 @@ u_int32_t ViewInterface::getFlowsHashSize() {
 
 /* **************************************************** */
 
-Flow* ViewInterface::findFlowByKey(u_int32_t key, AddressTree *allowed_hosts) {
+Flow* ViewInterface::findFlowByKeyAndHashId(u_int32_t key, u_int hash_id, AddressTree *allowed_hosts) {
   Flow *f = NULL;
 
   for(u_int8_t s = 0; s < num_viewed_interfaces; s++) {
-    if((f = (Flow*)viewed_interfaces[s]->findFlowByKey(key, allowed_hosts)))
+    if((f = (Flow*)viewed_interfaces[s]->findFlowByKeyAndHashId(key, hash_id, allowed_hosts)))
       break;
   }
 
@@ -278,7 +278,7 @@ static bool viewed_flows_walker(GenericHashEntry *flow, void *user_data, bool *m
 
   if(acked_to_purge) {
     /* We can set the 'ready to be purged' state on behalf of the underlying viewed interface.
-       It is safe as this view is in sync with the viewed interfaces by bean of acked_to_purge */
+       It is safe as this view is in sync with the viewed interfaces by mean of acked_to_purge */
     f->set_hash_entry_state_ready_to_be_purged();
   }
 

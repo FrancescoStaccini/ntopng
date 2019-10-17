@@ -42,11 +42,12 @@ class GenericHash {
   u_int32_t num_hashes; /**< Number of hash.*/
   u_int32_t current_size; /**< Current size of hash (including idle or ready-to-purge elements).*/
   u_int32_t max_hash_size; /**< Max size of hash.*/
-  Mutex **locks;
+  RwLock **locks;
   NetworkInterface *iface; /**< Pointer of network interface for this generic hash.*/
   u_int last_purged_hash; /**< Index of last purged hash.*/
+  u_int last_entry_id; /**< An uniue identifier assigned to each entry in the hash table */
   u_int purge_step;
-  
+
  public:
   /**
    * @brief A Constructor
@@ -119,14 +120,6 @@ class GenericHash {
    * @return Pointer of network interface instance.
    */
   inline NetworkInterface* getInterface() { return(iface); };
-  /**
-   * @brief Find an entry by key value.
-   *
-   * @param key Key value to be found in the hash.
-   * @return Pointer of entry that matches with the key parameter, NULL if there isn't entry with the key parameter or if the hash is empty.
-   */
-  GenericHashEntry* findByKey(u_int32_t key);
-
   /**
    * @brief Check whether the hash has empty space
    *

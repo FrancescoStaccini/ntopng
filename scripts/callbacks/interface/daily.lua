@@ -11,6 +11,8 @@ require "alert_utils"
 local callback_utils = require "callback_utils"
 local db_utils = require "db_utils"
 local ts_utils = require "ts_utils"
+local data_retention_utils = require "data_retention_utils"
+local user_scripts = require("user_scripts")
 
 if(ntop.isPro()) then
    package.path = dirs.installdir .. "/pro/scripts/callbacks/interface/?.lua;" .. package.path
@@ -23,20 +25,20 @@ local verbose = ntop.verboseTrace()
 local ifstats = interface.getStats()
 local _ifname = ifstats.name
 
-local mysql_retention = ntop.getCache("ntopng.prefs.mysql_retention")
-if((mysql_retention == nil) or (mysql_retention == "")) then mysql_retention = "7" end
-mysql_retention = os.time() - 86400*tonumber(mysql_retention)
-
-local minute_top_talkers_retention = ntop.getCache("ntopng.prefs.minute_top_talkers_retention")
-if((minute_top_talkers_retention == nil) or (minute_top_talkers_retention == "")) then minute_top_talkers_retention = "365" end
-
 -- ########################################################
 
 local interface_id = getInterfaceId(_ifname)
-scanAlerts("day", ifstats)
 
-ntop.deleteMinuteStatsOlderThan(interface_id, tonumber(minute_top_talkers_retention))
+user_scripts.runPeriodicScripts("day")
 
-db_utils.harverstExpiredMySQLFlows(_ifname, mysql_retention, verbose)
+local data_retention = data_retention_utils.getDataRetentionDays()
+
+ntop.deleteMinuteStatsOlderThan(interface_id, data_retention)
+
+if ntop.getPrefs()["is_dump_flows_to_mysql_enabled"] and not ifstats.isViewed then
+   local mysql_retention = os.time() - 86400 * data_retention
+   db_utils.harverstExpiredMySQLFlows(_ifname, mysql_retention, verbose)
+end
 
 ts_utils.deleteOldData(interface_id)
+optimizeAlerts()

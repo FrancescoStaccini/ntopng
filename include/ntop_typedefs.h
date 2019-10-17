@@ -100,9 +100,9 @@ typedef enum {
 } TcpFlowStateFilter;
 
 typedef enum {
-  traffic_type_all,
-  traffic_type_one_way,
-  traffic_type_bidirectional,
+  traffic_type_all = 0,
+  traffic_type_one_way = 1,
+  traffic_type_bidirectional = 2,
 } TrafficType;
 
 /* keep in sync with Utils::policySource */
@@ -135,12 +135,20 @@ typedef enum {
   alert_influxdb_export_failure = 26,
   alert_port_errors = 27,
   alert_broadcast_domain_too_large = 34,
-  alert_ids = 35,
+  alert_external = 35,
   misconfigured_dhcp_range = 36,
   slow_periodic_activity = 40,
   login_failed = 42,
   alert_potentially_dangerous_protocol = 43,
   alert_malicious_signature = 48,
+
+  /* Custom user alerts */
+  alert_custom_1 = 59,
+  alert_custom_2 = 60,
+  alert_custom_3 = 61,
+  alert_custom_4 = 62,
+  alert_custom_5 = 63,
+
   /* 
      IMPORTANT IMPORTANT IMPORTANT
      If # status >= 64 then extend Utils.h and Lua bitmap functions to handle it
@@ -360,7 +368,7 @@ typedef enum {
   status_elephant_remote_to_local, /* 18 */
   status_longlived, /* 19 */
   status_not_purged, /* 20 */
-  status_ids_alert /* 21 */,
+  status_external_alert /* 21 */,
   status_tcp_severe_connection_issues /* 22 - higher severity than status_tcp_connection_issues */,
   status_ssl_unsafe_ciphers /* 23 */,
   status_data_exfiltration /* 24 */,
@@ -373,16 +381,22 @@ typedef enum {
      If # status >= 32 then change to 64 bit disabled_flow_status in Host.h 
      If # status >= 64 then change FlowStatusMap
   */
+
+  /* Custom user alerts */
+  status_custom_1 = 59,
+  status_custom_2 = 60,
+  status_custom_3 = 61,
+  status_custom_4 = 62,
+  status_custom_5 = 63,
 } FlowStatus;
 
 typedef enum {
-  flow_lua_call_protocol_detected,
+  flow_lua_call_protocol_detected = 0,
   flow_lua_call_flow_status_changed,
   flow_lua_call_periodic_update,
   flow_lua_call_idle,
+  FLOW_LUA_CALL_MAX_VAL /* Leave it as last element */
 } FlowLuaCall;
-
-typedef u_int64_t FlowStatusMap;
 
 typedef enum {
   details_normal = 0,
@@ -487,6 +501,9 @@ typedef enum {
 } FlowHashingEnum;
 
 typedef enum {
+  hash_entry_state_allocated = 0,
+  hash_entry_state_flow_notyetdetected,   /* Flow only */
+  hash_entry_state_flow_protocoldetected, /* Flow only */
   hash_entry_state_active,
   hash_entry_state_idle,
   hash_entry_state_ready_to_be_purged

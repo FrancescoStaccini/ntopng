@@ -1,5 +1,5 @@
 --
--- (C) 2014-18 - ntop.org
+-- (C) 2014-19 - ntop.org
 --
 
 dirs = ntop.getDirs()
@@ -13,8 +13,6 @@ require "ntop_utils"
 locales_utils = require "locales_utils"
 local os_utils = require "os_utils"
 local format_utils = require "format_utils"
-local alert_consts = require "alert_consts"
-local flow_consts = require "flow_consts"
 local page_utils = require("page_utils")
 
 -- ##############################################
@@ -169,24 +167,37 @@ function __LINE__() return debug.getinfo(2, 'l').currentline end
 function sendHTTPHeaderIfName(mime, ifname, maxage, content_disposition, extra_headers)
   info = ntop.getInfo(false)
   local cookie_attr = ntop.getCookieAttributes()
+  local lines = {
+    'Cache-Control: max-age=0, no-cache, no-store',
+    'Server: ntopng '..info["version"]..' ['.. info["platform"]..']',
+    'Pragma: no-cache',
+    'X-Frame-Options: DENY',
+    'X-Content-Type-Options: nosniff',
+    'Content-Type: '.. mime,
+    'Last-Modified: '..os.date("!%a, %m %B %Y %X %Z"),
+  }
 
-  print('HTTP/1.1 200 OK\r\n')
-  print('Cache-Control: max-age=0, no-cache, no-store\r\n')
-  print('Server: ntopng '..info["version"]..' ['.. info["platform"]..']\r\n')
-  print('Pragma: no-cache\r\n')
-  print('X-Frame-Options: DENY\r\n')
-  print('X-Content-Type-Options: nosniff\r\n')
-  if(_SESSION ~= nil) then print('Set-Cookie: session='.._SESSION["session"]..'; max-age=' .. maxage .. '; path=/; ' .. cookie_attr .. '\r\n') end
-  if(ifname ~= nil) then print('Set-Cookie: ifname=' .. ifname .. '; path=/' .. cookie_attr .. '\r\n') end
-  print('Content-Type: '.. mime ..'\r\n')
-  if(content_disposition ~= nil) then print('Content-Disposition: '..content_disposition..'\r\n') end
+  if(_SESSION ~= nil) then
+    lines[#lines + 1] = 'Set-Cookie: session='.._SESSION["session"]..'; max-age=' .. maxage .. '; path=/; ' .. cookie_attr
+  end
+
+  if(ifname ~= nil) then
+    lines[#lines + 1] = 'Set-Cookie: ifname=' .. ifname .. '; path=/' .. cookie_attr
+  end
+
+  if(content_disposition ~= nil) then
+    lines[#lines + 1] = 'Content-Disposition: '..content_disposition
+  end
+
   if type(extra_headers) == "table" then
      for hname, hval in pairs(extra_headers) do
-	print(hname..': '..hval..'\r\n')
+        lines[#lines + 1] = hname..': '..hval
      end
   end
-  print('Last-Modified: '..os.date("!%a, %m %B %Y %X %Z").."\r\n")
-  print('\r\n')
+
+  -- Buffer the HTTP reply and write it in one "print" to avoid fragmenting
+  -- it into multiple packets, to ease HTTP debugging with wireshark.
+  print("HTTP/1.1 200 OK\r\n" .. table.concat(lines, "\r\n") .. "\r\n\r\n")
 end
 
 -- ##############################################
@@ -325,33 +336,6 @@ end
 
 -- ##############################################
 
-function printL4ProtoDropdown(base_url, page_params, l4_protocols)
-   local l4proto = _GET["l4proto"]
-   local l4proto_filter
-   if not isEmptyString(l4proto) then
-      l4proto_filter = '<span class="glyphicon glyphicon-filter"></span>'
-   else
-      l4proto_filter = ''
-   end
-   local l4proto_params = table.clone(page_params)
-   l4proto_params["l4proto"] = nil
-
-   print[[\
-      <button class="btn btn-link dropdown-toggle" data-toggle="dropdown">]] print(i18n("flows_page.l4_protocol")) print[[]] print(l4proto_filter) print[[<span class="caret"></span></button>\
-      <ul class="dropdown-menu" role="menu" id="flow_dropdown">\
-         <li><a href="]] print(getPageUrl(base_url, l4proto_params)) print[[">]] print(i18n("flows_page.all_l4_protocols")) print[[</a></li>]]
-
-    if l4_protocols then
-      for key, value in pairsByKeys(l4_protocols, asc) do
-        print[[<li]] if tonumber(l4proto) == key then print(' class="active"') end print[[><a href="]] l4proto_params["l4proto"] = key; print(getPageUrl(base_url, l4proto_params)); print[[">]] print(l4_proto_to_string(key)) print [[ (]] print(string.format("%d",value.count)) print [[)</a></li>]]
-      end
-    end
-
-    print[[</ul>]]
-end
-
--- ##############################################
-
 function printVLANFilterDropdown(base_url, page_params)
    local vlans = interface.getVLANsList()
 
@@ -407,8 +391,12 @@ function printTrafficTypeFilterDropdown(base_url, page_params)
    -- now forthe one-way
    traffic_type_params["traffic_type"] = "one_way"
    print[[
-         <li>\
+         <li]] if traffic_type == "one_way" then print(' class="active"') end print[[>\
            <a href="]] print(getPageUrl(base_url, traffic_type_params)) print[[">]] print(i18n("hosts_stats.traffic_type_one_way")) print[[</a></li>\]]
+   traffic_type_params["traffic_type"] = "bidirectional"
+   print[[
+         <li]] if traffic_type == "bidirectional" then print(' class="active"') end print[[>\
+           <a href="]] print(getPageUrl(base_url, traffic_type_params)) print[[">]] print(i18n("hosts_stats.traffic_type_two_ways")) print[[</a></li>\]]
    print[[
       </ul>]]
 end
@@ -643,10 +631,6 @@ function noHtml(s)
       :gsub("^%s*(.-)%s*$", "%1")
 
    return unescape(cleaned)
-end
-
-function alertLevelToSyslogLevel(v)
-  return alert_consts.alert_severities[v]
 end
 
 function areAlertsEnabled()
@@ -2231,6 +2215,11 @@ function getPasswordInputPattern()
   return [[^[\w\$\\!\/\(\)= \?\^\*@_\-\u0000-\u0019\u0021-\u00ff]{5,31}$]]
 end
 
+-- NOTE: keep in sync with validateLicense()
+function getLicensePattern()
+  return [[^[a-zA-Z0-9\+/=]+$]]
+end
+
 function getIPv4Pattern()
   return "^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$"
 end
@@ -2429,54 +2418,7 @@ end
 
 -- ###############################################
 
-function formatSuspiciousDeviceProtocolAlert(flowstatus_info)
-   local msg, devtype
-
-   if not flowstatus_info then
-      return i18n("alerts_dashboard.suspicious_device_protocol")
-   end
-
-   local discover = require("discover_utils")
-   local forbidden_proto = flowstatus_info["devproto_forbidden_id"] or 0
-
-   if (flowstatus_info["devproto_forbidden_peer"] == "cli") then
-      msg = "flow_details.suspicious_client_device_protocol"
-      devtype = flowstatus_info["cli.devtype"]
-   else
-      msg = "flow_details.suspicious_server_device_protocol"
-      devtype = flowstatus_info["srv.devtype"]
-   end
-
-   local label = discover.devtype2string(devtype)
-   return i18n(msg, {proto=interface.getnDPIProtoName(forbidden_proto), devtype=label,
-      url=getDeviceProtocolPoliciesUrl("device_type="..
-      devtype.."&l7proto="..forbidden_proto)})
-end
-
--- ###############################################
-
-function formatIDSFlowAlert(flowstatus_info)
-   if not flowstatus_info then
-      return i18n("alerts_dashboard.ids_alert")
-   end
-
-   local signature = (flowstatus_info.ids_alert and flowstatus_info.ids_alert.signature)
-   local category = (flowstatus_info.ids_alert and flowstatus_info.ids_alert.category)
-   local severity = (flowstatus_info.ids_alert and flowstatus_info.ids_alert.severity)
-   local signature_info = (signature and signature:split(" "));
-   local maker = (signature_info and table.remove(signature_info, 1))
-   local scope = (signature_info and table.remove(signature_info, 1))
-   local msg = (signature_info and table.concat(signature_info, " "))
-   if maker and alert_consts.ids_rule_maker[maker] then
-     maker = alert_consts.ids_rule_maker[maker]
-   end
-   local res = i18n("flow_details.ids_alert", { scope=scope, msg=msg, severity=severity, maker=maker } )
-   return res
-end
-
--- ###############################################
-
-function formatElephantFlowAlert(flowstatus_info, local2remote)
+function formatElephantFlowStatus(status, flowstatus_info, local2remote)
    local threshold = ""
    local res = ""
 
@@ -2508,133 +2450,6 @@ function formatElephantFlowAlert(flowstatus_info, local2remote)
 end
 
 -- ###############################################
-
-function formatLongLivedFlowAlert(flowstatus_info)
-   local threshold = ""
-   local res = i18n("flow_details.longlived_flow")
-
-   if not flowstatus_info then
-      return res
-   end
-
-   if flowstatus_info["longlived.threshold"] then
-      threshold = flowstatus_info["longlived.threshold"]
-   end
-
-   res = string.format("%s<sup><i class='fa fa-info-circle' aria-hidden='true' title='"..i18n("flow_details.longlived_flow_descr").."'></i></sup>", res)
-
-   if threshold ~= "" then
-      res = string.format("%s [%s]", res, i18n("flow_details.longlived_exceeded", {amount = secondsToTime(threshold)}))
-   end
-
-   return res
-end
-
--- ###############################################
-
-function formatMaliciousSignature(flowstatus_info)
-  local res = i18n("alerts_dashboard.malicious_signature_detected")
-
-  if not flowstatus_info then
-    return res
-  end
-
-  if(flowstatus_info.ja3_signature ~= nil) then
-    res = i18n("flow_details.malicious_ja3_signature", {
-      signature = flowstatus_info.ja3_signature,
-      url = "https://sslbl.abuse.ch/ja3-fingerprints/" .. flowstatus_info.ja3_signature,
-      icon = " <i class=\"fa fa-external-link\"></i>",
-    })
-  end
-
-  return res
-end
-
--- ###############################################
-
-function formatBlacklistedFlow(status, flowstatus_info, alert)
-   local who = {}
-
-   if not flowstatus_info then
-      return i18n("flow_details.blacklisted_flow")
-   end
-
-   if flowstatus_info["blacklisted.cli"] --[[ old format --]] or flowstatus_info["cli.blacklisted"] --[[ new format --]] then
-      who[#who + 1] = i18n("client")
-   end
-
-   if flowstatus_info["blacklisted.srv"] --[[ old format --]] or flowstatus_info["srv.blacklisted"] --[[ new format --]] then
-      who[#who + 1] = i18n("server")
-   end
-
-   -- if either the client or the server is blacklisted
-   -- then also the category is blacklisted so there's no need
-   -- to check it.
-   -- Domain is basically the union of DNS names, SSL CNs and HTTP hosts.
-   if #who == 0 and flowstatus_info["blacklisted.cat"] then
-      who[#who + 1] = i18n("domain")
-   end
-
-   if #who == 0 then
-      return i18n("flow_details.blacklisted_flow")
-   end
-
-   local res = i18n("flow_details.blacklisted_flow_detailed", {who = table.concat(who, ", ")})
-
-   return res
-end
-
--- ###############################################
-
-function formatSSLCertificateMismatch(status, flowstatus_info, alert)
-   if not flowstatus_info then
-      return i18n("flow_details.ssl_certificate_mismatch")
-   end
-
-   local crts = {}
-   if not isEmptyString(flowstatus_info["ssl_crt.cli"]) then
-      crts[#crts + 1] = string.format("[%s: %s]", i18n("flow_details.ssl_client_certificate"), flowstatus_info["ssl_crt.cli"])
-   end
-
-   if not isEmptyString(flowstatus_info["ssl_crt.srv"]) then
-      crts[#crts + 1] = string.format("[%s: %s]", i18n("flow_details.ssl_server_certificate"), flowstatus_info["ssl_crt.srv"])
-   end
-
-   return string.format("%s %s", i18n("flow_details.ssl_certificate_mismatch"), table.concat(crts, " "))
-end
-
--- ###############################################
-
--- TODO put description formatter into flow_consts.flow_status_types
-function getFlowStatus(status, flowstatus_info, alert, no_icon)
-   local res = i18n("flow_details.unknown_status",{status=status})
-
-   -- NOTE: flowstatus_info can be nil
-   if(status == flow_consts.status_ssl_certificate_mismatch) then 
-     res = formatSSLCertificateMismatch(status, flowstatus_info, alert)
-   elseif(status == flow_consts.status_blacklisted) then 
-     res = formatBlacklistedFlow(status, flowstatus_info, alert)
-   elseif(status == flow_consts.status_device_protocol_not_allowed) then 
-     res = formatSuspiciousDeviceProtocolAlert(flowstatus_info)
-   elseif(status == flow_consts.status_elephant_local_to_remote) then 
-     res = formatElephantFlowAlert(flowstatus_info, true --[[ local 2 remote --]])
-   elseif(status == flow_consts.status_elephant_remote_to_local) then 
-     res = formatElephantFlowAlert(flowstatus_info, false --[[ remote 2 local --]])
-   elseif(status == flow_consts.status_longlived) then 
-     res = formatLongLivedFlowAlert(flowstatus_info)
-   elseif(status == flow_consts.status_ids_alert) then
-     res = formatIDSFlowAlert(flowstatus_info)
-   elseif(status == flow_consts.status_tcp_severe_connection_issues) then 
-     res = i18n("flow_details.tcp_severe_connection_issues")
-   elseif(status == flow_consts.status_malicious_signature) then res = formatMaliciousSignature(flowstatus_info)
-   elseif(status == flow_consts.status_normal) then 
-     res = i18n(flow_consts.flow_status_types[flow_consts.status_normal].i18n_title)
-   elseif(flow_consts.flow_status_types[status] ~= nil) then 
-     res = i18n(flow_consts.flow_status_types[status].i18n_title)
-   end
-
-   return res
-end
 
 -- prints purged information for hosts / flows
 function purgedErrorString()

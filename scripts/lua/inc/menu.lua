@@ -62,7 +62,7 @@ ifId = ifs.id
 
 -- ##############################################
 
-if active_page == "home" or active_page == "about" or active_page == "telemetry" then
+if active_page == "home" or active_page == "about" or active_page == "telemetry" or active_page == "directories" then
   print [[ <li class="dropdown active"> ]]
 else
   print [[ <li class="dropdown"> ]]
@@ -73,9 +73,8 @@ print [[
         <i class="fa fa-home fa-lg"></i> <b class="caret"></b>
       </a>
     <ul class="dropdown-menu">
-      <li><a href="]]
-print(ntop.getHttpPrefix())
-print [[/lua/about.lua"><i class="fa fa-question-circle"></i> ]] print(i18n("about.about_ntopng")) print[[</a></li>
+      <li><a href="]] print(ntop.getHttpPrefix()) print [[/lua/about.lua"><i class="fa fa-question-circle"></i> ]] print(i18n("about.about_ntopng")) print[[</a></li>
+      <li><a href="]] print(ntop.getHttpPrefix()) print [[/lua/directories.lua"><i class="fa fa-folder"></i> ]] print(i18n("about.directories")) print[[</a></li>
       <li><a href="]] print(ntop.getHttpPrefix()) print[[/lua/telemetry.lua"><i class="fa fa-rss"></i> ]] print(i18n("telemetry")) print[[</a></li>
       <li><a href="http://blog.ntop.org/" target="_blank"><i class="fa fa-bullhorn"></i> ]] print(i18n("about.ntop_blog")) print[[ <i class="fa fa-external-link"></i></a></li>
       <li><a href="https://t.me/ntop_community" target="_blank"><i class="fa fa-telegram"></i> ]] print(i18n("about.telegram")) print[[ <i class="fa fa-external-link"></i></a></li>
@@ -340,6 +339,7 @@ local ifnames = {}
 local ifdescr = {}
 local ifHdescr = {}
 local ifCustom = {}
+local dynamic = {}
 
 for v,k in pairs(iface_names) do
    interface.select(k)
@@ -348,6 +348,7 @@ for v,k in pairs(iface_names) do
    ifdescr[_ifstats.id] = _ifstats.description
    --io.write("["..k.."/"..v.."][".._ifstats.id.."] "..ifnames[_ifstats.id].."=".._ifstats.id.."\n")
    if(_ifstats.isView == true) then views[k] = true end
+   if(_ifstats.isDynamic == true) then dynamic[k] = true end
    if(recording_utils.isEnabled(_ifstats.id)) then recording[k] = true end
    if(interface.isPacketInterface()) then packetinterfaces[k] = true end
    if(_ifstats.stats_since_reset.drops * 100 > _ifstats.stats_since_reset.packets) then
@@ -402,6 +403,10 @@ for round = 1, 2 do
 	    print(' <i class="fa fa-eye" aria-hidden="true"></i> ')
 	 end
 
+	 if(dynamic[v] == true) then
+	    print(' <i class="fa fa-code-fork" aria-hidden="true"></i> ')
+	 end
+
 	 if(drops[v] == true) then
 	    print('&nbsp;<span><i class="fa fa-tint" aria-hidden="true"></i></span>')
 	 end
@@ -435,19 +440,27 @@ if isAllowedSystemInterface() then
    print [[
       <a class="dropdown-toggle" data-toggle="dropdown" href="#">]]
    print(i18n("system")) print[[ <b class="caret"></b>
-         </a>
+	 </a>
        <ul class="dropdown-menu">]]
-
-   print[[<li><a href="]] print(ntop.getHttpPrefix()) print[[/lua/system_stats.lua">]] print(i18n("system_status")) print[[</a></li>]]
-
-   for _, entry in ipairs(system_scripts.getSystemMenuEntries()) do
-      print[[<li><a href="]] print(entry.url) print[[">]] print(entry.label) print[[</a></li>]]
-   end
 
    if ntop.isEnterprise() then
       print('<li><a href="'..ntop.getHttpPrefix()..'/lua/pro/enterprise/snmpdevices_stats.lua">') print(i18n("prefs.snmp")) print('</a></li>')
    end
-   print[[</ul></li>]]
+
+   print[[<li><a href="]] print(ntop.getHttpPrefix()) print[[/lua/system_stats.lua">]] print(i18n("system_status")) print[[</a></li>]]
+
+   local system_menu_entries = system_scripts.getSystemMenuEntries()
+
+   if #system_menu_entries > 0 then
+      print('<li class="divider"></li>')
+      print('<li class="dropdown-header">') print(i18n("system_stats.probes")) print('</li>')
+
+      for _, entry in ipairs(system_scripts.getSystemMenuEntries()) do
+	 print[[<li><a href="]] print(entry.url) print[[">]] print(entry.label) print[[</a></li>]]
+      end
+   end
+
+   print[[</ul>]]
 end
 
 -- Admin
@@ -612,5 +625,12 @@ print('<br><div id="move-rrd-to-influxdb" class="alert alert-warning" style="dis
 print[[<button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>]]
 print(i18n("about.influxdb_migration_msg", {url="https://www.ntop.org/ntopng/ntopng-and-time-series-from-rrd-to-influxdb-new-charts-with-time-shift/"}))
 print('</div>')
+
+if(_SESSION["INVALID_CSRF"]) then
+  print('<br><div id="move-rrd-to-influxdb" class="alert alert-warning" role="alert"><i class="fa fa-warning fa-lg" id="alerts-menu-triangle"></i> ')
+  print[[<button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>]]
+  print(i18n("expired_csrf"))
+  print('</div>')
+end
 
 telemetry_utils.show_notice()

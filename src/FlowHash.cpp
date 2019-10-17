@@ -36,12 +36,19 @@ Flow* FlowHash::find(IpAddress *src_ip, IpAddress *dst_ip,
 		     u_int16_t src_port, u_int16_t dst_port, 
 		     u_int16_t vlanId, u_int8_t protocol,
 		     const ICMPinfo * const icmp_info,
-		     bool *src2dst_direction) {
+		     bool *src2dst_direction,
+		     bool is_inline_call) {
   u_int32_t hash = ((src_ip->key() + dst_ip->key()
 		     + (icmp_info ? icmp_info->key() : 0)
 		     + src_port + dst_port + vlanId + protocol) % num_hashes);
   Flow *head = (Flow*)table[hash];
   u_int16_t num_loops = 0;
+
+  if(!head)
+    return(NULL);
+
+  if(!is_inline_call)
+    locks[hash]->rdlock(__FILE__, __LINE__);
 
   // ntop->getTrace()->traceEvent(TRACE_NORMAL, "%u:%u / %u:%u [icmp: %u][key: %u][icmp info key: %u][head: 0x%x]", src_ip->key(), src_port, dst_ip->key(), dst_port, icmp_info ? 1 : 0, hash, icmp_info ? icmp_info->key() : 0, head);
 
@@ -52,7 +59,8 @@ Flow* FlowHash::find(IpAddress *src_ip, IpAddress *dst_ip,
 	ntop->getTrace()->traceEvent(TRACE_INFO, "DEBUG: [Num loops: %u][hashId: %u]", num_loops, hash);
 	max_num_loops = num_loops;
       }
-      return(head);
+
+      break;
     } else
       head = (Flow*)head->next(), num_loops++;
   }
@@ -62,5 +70,30 @@ Flow* FlowHash::find(IpAddress *src_ip, IpAddress *dst_ip,
     max_num_loops = num_loops;
   }
 
-  return(NULL);
+  if(!is_inline_call)
+    locks[hash]->unlock(__FILE__, __LINE__);
+
+  return(head);
+}
+
+/* ************************************ */
+
+Flow* FlowHash::findByKeyAndHashId(u_int32_t key, u_int hash_id) {
+  u_int32_t hash = key % num_hashes;
+  Flow *head = (Flow*)table[hash];
+
+  if(head == NULL) return(NULL);
+
+  locks[hash]->rdlock(__FILE__, __LINE__);
+
+  while(head) {
+    if(!head->idle() && head->get_hash_entry_id() == hash_id)
+      break;
+    else
+      head = (Flow*)head->next();
+  }
+
+  locks[hash]->unlock(__FILE__, __LINE__);
+
+  return((Flow*)head);
 }

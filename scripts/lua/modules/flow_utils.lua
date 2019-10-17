@@ -1,5 +1,5 @@
 --
--- (C) 2013-18 - ntop.org
+-- (C) 2013-19 - ntop.org
 --
 
 dirs = ntop.getDirs()
@@ -32,6 +32,204 @@ function formatInterfaceId(id, idx, snmpdevice)
 	 return(id)
       end
    end
+end
+
+-- #######################
+
+function getFlowsFilter()
+   -- Pagination
+   local sortColumn  = _GET["sortColumn"]
+   local sortOrder   = _GET["sortOrder"]
+   local currentPage = _GET["currentPage"]
+   local perPage     = _GET["perPage"]
+
+   -- Other Filters
+   local port        = _GET["port"]
+   local application = _GET["application"]
+   local category    = _GET["category"]
+   local network_id  = _GET["network"]
+   local traffic_profile = _GET["traffic_profile"]
+   local traffic_type = _GET["traffic_type"]
+   local flowhosts_type = _GET["flowhosts_type"]
+   local ipversion    = _GET["version"]
+   local l4proto      = _GET["l4proto"]
+   local vlan        = _GET["vlan"]
+   local username = _GET["username"]
+   local host   = _GET["host"]
+   local pid_name = _GET["pid_name"]
+   local container   = _GET["container"]
+   local pod         = _GET["pod"]
+   local icmp_type   = _GET["icmp_type"]
+   local icmp_code   = _GET["icmp_cod"]
+   local flow_status = _GET["flow_status"]
+   local deviceIP    = _GET["deviceIP"]
+   local inIfIdx     = _GET["inIfIdx"]
+   local outIfIdx    = _GET["outIfIdx"]
+   local asn         = _GET["asn"]
+   local tcp_state   = _GET["tcp_flow_state"]
+
+   if sortColumn == nil or sortColumn == "column_" or sortColumn == "" then
+      sortColumn = getDefaultTableSort("flows")
+   elseif sortColumn ~= "column_" and  sortColumn ~= "" then
+      tablePreferences("sort_flows", sortColumn)
+   else
+      sortColumn = "column_client"
+   end
+
+   if sortOrder == nil then
+      sortOrder = getDefaultTableSortOrder("flows")
+   elseif sortColumn ~= "column_" and sortColumn ~= "" then
+      tablePreferences("sort_order_flows", sortOrder)
+   end
+
+   if currentPage == nil then
+      currentPage = 1
+   else
+      currentPage = tonumber(currentPage)
+   end
+
+   if perPage == nil then
+      perPage = getDefaultTableSize()
+   else
+      perPage = tonumber(perPage)
+      tablePreferences("rows_number",perPage)
+   end
+
+   if port ~= nil then
+      port = tonumber(port)
+   end
+
+   if network_id ~= nil then
+      network_id = tonumber(network_id)
+   end
+
+   local to_skip = (currentPage - 1) * perPage
+
+   local a2z = false
+   if sortOrder == "desc" then
+      a2z = false
+   else a2z = true
+   end
+
+   local pageinfo = {
+      ["perPage"] = perPage, ["currentPage"] = currentPage,
+      ["sortOrder"] = sortOrder or "", ["sortColumn"] = sortColumn or "",
+      ["toSkip"] = to_skip, ["maxHits"] = perPage,
+      ["a2zSortOrder"] = a2z,
+      ["hostFilter"] = host,
+      ["portFilter"] = port,
+      ["LocalNetworkFilter"] = network_id,
+   }
+
+   if application ~= nil and application ~= "" then
+      pageinfo["l7protoFilter"] = interface.getnDPIProtoId(application)
+
+   end
+
+   if category ~= nil and category ~= "" then
+      pageinfo["l7categoryFilter"] = interface.getnDPICategoryId(category)
+   end
+
+   if traffic_profile ~= nil then
+      pageinfo["trafficProfileFilter"] = traffic_profile
+   end
+
+   if not isEmptyString(flowhosts_type) then
+      if flowhosts_type == "local_origin_remote_target" then
+	 pageinfo["clientMode"] = "local"
+	 pageinfo["serverMode"] = "remote"
+      elseif flowhosts_type == "local_only" then
+	 pageinfo["clientMode"] = "local"
+	 pageinfo["serverMode"] = "local"
+      elseif flowhosts_type == "remote_origin_local_target" then
+	 pageinfo["clientMode"] = "remote"
+	 pageinfo["serverMode"] = "local"
+      elseif flowhosts_type == "remote_only" then
+	 pageinfo["clientMode"] = "remote"
+	 pageinfo["serverMode"] = "remote"
+      end
+   end
+
+   if not isEmptyString(traffic_type) then
+      if traffic_type:contains("unicast") then
+	 pageinfo["unicast"] = true
+      else
+	 pageinfo["unicast"] = false
+      end
+
+      if traffic_type:contains("one_way") then
+	 pageinfo["unidirectional"] = true
+      end
+   end
+
+   if not isEmptyString(flow_status) then
+      if flow_status == "normal" then
+	 pageinfo["alertedFlows"] = false
+	 pageinfo["misbehavingFlows"] = false
+	 pageinfo["filteredFlows"] = false
+      elseif flow_status == "misbehaving" then
+	 pageinfo["misbehavingFlows"] = true
+      elseif flow_status == "alerted" then
+	 pageinfo["alertedFlows"] = true
+      elseif flow_status == "filtered" then
+	 pageinfo["filteredFlows"] = true
+      else
+	 pageinfo["statusFilter"] = tonumber(flow_status)
+      end
+   end
+
+   if not isEmptyString(ipversion) then
+      pageinfo["ipVersion"] = tonumber(ipversion)
+   end
+
+   if not isEmptyString(l4proto) then
+      pageinfo["L4Protocol"] = tonumber(l4proto)
+   end
+
+   if not isEmptyString(vlan) then
+      pageinfo["vlanIdFilter"] = tonumber(vlan)
+   end
+
+   if not isEmptyString(username) then
+      pageinfo["usernameFilter"] = username
+   end
+
+   if not isEmptyString(pid_name) then
+      pageinfo["pidnameFilter"] = pid_name
+   end
+
+   if not isEmptyString(container) then
+      pageinfo["container"] = container
+   end
+
+   if not isEmptyString(pod) then
+      pageinfo["pod"] = pod
+   end
+
+   if not isEmptyString(deviceIP) then
+      pageinfo["deviceIpFilter"] = deviceIP
+
+      if not isEmptyString(inIfIdx) then
+	 pageinfo["inIndexFilter"] = tonumber(inIfIdx)
+      end
+
+      if not isEmptyString(outIfIdx) then
+	 pageinfo["outIndexFilter"] = tonumber(outIfIdx)
+      end
+   end
+
+   if not isEmptyString(asn) then
+      pageinfo["asnFilter"] = tonumber(asn)
+   end
+
+   pageinfo["icmp_type"] = tonumber(icmp_type)
+   pageinfo["icmp_code"] = tonumber(icmp_code)
+
+   if not isEmptyString(tcp_state) then
+      pageinfo["tcpFlowStateFilter"] = tcp_state
+   end
+
+   return pageinfo
 end
 
 -- #######################
@@ -103,6 +301,15 @@ function handleCustomFlowField(key, value, snmpdevice)
   end
 
   -- Unformatted value
+
+  if (type(value) == "boolean") then
+    if (value) then 
+      value = i18n("yes") 
+    else 
+      value = i18n("no") 
+    end
+  end
+
   return value
 end
 
@@ -156,6 +363,42 @@ function getL4ProtoName(proto_id)
   return nil
 end
  
+ -- #######################
+ 
+local dns_types = {
+  ['A'] = 1,
+  ['NS'] = 2,
+  ['MD'] = 3,
+  ['MF'] = 4,
+  ['CNAME'] = 5,
+  ['SOA'] = 6,
+  ['MB'] = 7,
+  ['MG'] = 8,
+  ['MR'] = 9,
+  ['NULL'] = 10,
+  ['WKS'] = 11,
+  ['PTR'] = 12,
+  ['HINFO'] = 13,
+  ['MINFO'] = 14,
+  ['MX'] = 15,
+  ['TXT'] = 16,
+  ['AAAA'] = 28,
+  ['A6'] = 38, 
+  ['SPF'] = 99,
+  ['AXFR'] = 252,
+  ['MAILB'] = 253,
+  ['MAILA'] = 254,
+  ['ANY'] = 255,
+}
+
+function get_dns_type(dns_type_name)
+   if dns_types[dns_type_name] then
+      return dns_types[dns_type_name]
+   else
+      return 0
+   end
+end
+
  -- #######################
 
 local icmp_v4_msgs = {
@@ -712,6 +955,7 @@ function getSIPTableRows(info)
        end
        show_rtp_stream = 1
      end
+
      if((getFlowValue(info, "SIP_RTP_L4_DST_PORT")~=nil) and (getFlowValue(info, "SIP_RTP_L4_DST_PORT")~="") and (sip_rtp_dst_addr == 1)) then
 	--string_table = string_table ..":"..getFlowValue(info, "SIP_RTP_L4_DST_PORT")
 	--string_table_5 = ":"..getFlowValue(info, "SIP_RTP_L4_DST_PORT")
@@ -732,7 +976,8 @@ function getSIPTableRows(info)
      local rtp_flow_key  = interface.getFlowKey(sip_rtp_src_address_ip or "", tonumber(sip_rtp_src_port) or 0,
 						sip_rtp_dst_address_ip or "", tonumber(sip_rtp_dst_port) or 0,
 						17 --[[ UDP --]])
-     if tonumber(rtp_flow_key) ~= nil and interface.findFlowByKey(tonumber(rtp_flow_key)) ~= nil then
+     -- TODO: fix
+     if tonumber(rtp_flow_key) ~= nil and interface.findFlowByKeyAndHashId(tonumber(rtp_flow_key), 0) ~= nil then
 	string_table = string_table..'&nbsp;'
 	string_table = string_table.."<A HREF=\""..ntop.getHttpPrefix().."/lua/flow_details.lua?flow_key="..rtp_flow_key
 	string_table = string_table.."&label="..sip_rtp_src_address_ip..":"..sip_rtp_src_port
@@ -1121,7 +1366,7 @@ function printBlockFlowJs()
   print[[
   var block_flow_csrf = "]] print(ntop.getRandomCSRFValue()) print[[";
 
-  function block_flow(flow_key) {
+  function block_flow(flow_key, flow_hash_id) {
     var url = "]] print(ntop.getHttpPrefix()) print[[/lua/pro/nedge/block_flow.lua";
     $.ajax({
       type: 'GET',
@@ -1129,17 +1374,19 @@ function printBlockFlowJs()
       cache: false,
       data: {
         csrf: block_flow_csrf,
-        flow_key: flow_key
+        flow_key: flow_key,
+        flow_hash_id: flow_hash_id,
       },
       success: function(content) {
         var data = jQuery.parseJSON(content);
+        var row_id = flow_key + "_" + flow_hash_id;
         block_flow_csrf = data.csrf;
         if (data.status == "BLOCKED") {
-          $('#'+flow_key+'_info').find('.block-badge')
+          $('#'+row_id+'_info').find('.block-badge')
             .removeClass('label-default')
             .addClass('label-danger')
             .attr('title', ']] print(i18n("flow_details.flow_traffic_is_dropped")) print[[');
-          $('#'+flow_key+'_application, #'+flow_key+'_l4, #'+flow_key+'_client, #'+flow_key+'_server')
+          $('#'+row_id+'_application, #'+row_id+'_l4, #'+row_id+'_client, #'+row_id+'_server')
             .css("text-decoration", "line-through");
         }
       },
@@ -1149,6 +1396,52 @@ function printBlockFlowJs()
     });
   }
   ]]
+end
+
+-- #######################
+
+function printL4ProtoDropdown(base_url, page_params, l4_protocols)
+   local l4proto = _GET["l4proto"]
+   local l4proto_filter
+   if not isEmptyString(l4proto) then
+      l4proto_filter = '<span class="glyphicon glyphicon-filter"></span>'
+   else
+      l4proto_filter = ''
+   end
+
+   local l4proto_params = table.clone(page_params)
+   l4proto_params["l4proto"] = nil
+   -- Used to possibly remove tcp state filters when selecting a non-TCP l4 protocol
+   local l4proto_params_non_tcp = table.clone(l4proto_params)
+   if l4proto_params_non_tcp["tcp_flow_state"] then
+      l4proto_params_non_tcp["tcp_flow_state"] = nil
+   end
+
+   print[[\
+      <button class="btn btn-link dropdown-toggle" data-toggle="dropdown">]] print(i18n("flows_page.l4_protocol")) print[[]] print(l4proto_filter) print[[<span class="caret"></span></button>\
+      <ul class="dropdown-menu" role="menu" id="flow_dropdown">\
+         <li><a href="]] print(getPageUrl(base_url, l4proto_params_non_tcp)) print[[">]] print(i18n("flows_page.all_l4_protocols")) print[[</a></li>]]
+
+    if l4_protocols then
+       for key, value in pairsByKeys(l4_protocols, asc) do
+	  print[[<li]]
+
+	  if tonumber(l4proto) == key then
+	     print(' class="active"')
+	  end
+
+	  print[[><a href="]]
+
+	  local l4_table = ternary(key ~= 6, l4proto_params_non_tcp, l4proto_params)
+
+	  l4_table["l4proto"] = key
+	  print(getPageUrl(base_url, l4_table))
+
+	  print[[">]] print(l4_proto_to_string(key)) print [[ (]] print(string.format("%d", value.count)) print [[)</a></li>]]
+      end
+    end
+
+    print[[</ul>]]
 end
 
 -- #######################
@@ -1218,11 +1511,14 @@ function printActiveFlowsDropdown(base_url, page_params, ifstats, flowstats, is_
 
        local status_stats = flowstats["status"]
        local first = true
-       for t,s in ipairs(flow_consts.flow_status_types) do
-          if t then
+       for _, s in pairs(flow_consts.status_types) do
+          local t = s.status_id
+
+          if(t > 0) then
              if status_stats[t] and status_stats[t].count > 0 then
                if first then
                  entries[#entries + 1] = '<li role="separator" class="divider"></li>'
+                 entries[#entries + 1] = '<li class="dropdown-header">'.. i18n("flow_details.mibehaving_flows") ..'</li>'
                  first = false
                end
                entries[#entries + 1] = {string.format("%u", t), i18n(s.i18n_title) .. " ("..status_stats[t].count..")"}
@@ -1241,28 +1537,30 @@ function printActiveFlowsDropdown(base_url, page_params, ifstats, flowstats, is_
     ']]
 
     if not is_ebpf_flows then
-	-- TCP flow state filter
-	local tcp_state_params = table.clone(page_params)
-	tcp_state_params["tcp_flow_state"] = nil
+       if page_params["l4proto"] and page_params["l4proto"] == "6" then
+	  -- TCP flow state filter
+	  local tcp_state_params = table.clone(page_params)
+	  tcp_state_params["tcp_flow_state"] = nil
 
-	print[[, '\
+	  print[[, '\
 	   <div class="btn-group">\
 	      <button class="btn btn-link dropdown-toggle" data-toggle="dropdown">]] print(i18n("flows_page.tcp_state")) print(getParamFilter(page_params, "tcp_flow_state")) print[[<span class="caret"></span></button>\
 	      <ul class="dropdown-menu" role="menu">\
 	      <li><a href="]] print(getPageUrl(base_url, tcp_state_params)) print[[">]] print(i18n("flows_page.all_flows")) print[[</a></li>\]]
 
-	local entries = {}
-	for _, entry in pairs({"established", "connecting", "closed", "reset"}) do
-	   entries[#entries + 1] = {entry, tcp_flow_state_utils.state2i18n(entry)}
-	end
+	  local entries = {}
+	  for _, entry in pairs({"established", "connecting", "closed", "reset"}) do
+	     entries[#entries + 1] = {entry, tcp_flow_state_utils.state2i18n(entry)}
+	  end
 
-	printDropdownEntries(entries, base_url, tcp_state_params, "tcp_flow_state", page_params.tcp_flow_state)
-	print[[\
+	  printDropdownEntries(entries, base_url, tcp_state_params, "tcp_flow_state", page_params.tcp_flow_state)
+	  print[[\
 	      </ul>\
 	   </div>\
 	']]
+       end
 
-	-- Unidirectional flows selector
+       -- Unidirectional flows selector
 	local traffic_type_params = table.clone(page_params)
 	traffic_type_params["traffic_type"] = nil
 
@@ -1339,52 +1637,50 @@ function printActiveFlowsDropdown(base_url, page_params, ifstats, flowstats, is_
 	end
     end
 
-    if not page_params.category then
-       -- L7 Application
-       print(', \'<div class="btn-group"><button class="btn btn-link dropdown-toggle" data-toggle="dropdown">'..i18n("report.applications")..' ' .. getParamFilter(page_params, "application") .. '<span class="caret"></span></button> <ul class="dropdown-menu" role="menu" id="flow_dropdown">')
-       print('<li><a href="')
-       local application_filter_params = table.clone(page_params)
-       application_filter_params["application"] = nil
+    -- L7 Application
+    print(', \'<div class="btn-group"><button class="btn btn-link dropdown-toggle" data-toggle="dropdown">'..i18n("report.applications")..' ' .. getParamFilter(page_params, "application") .. '<span class="caret"></span></button> <ul class="dropdown-menu" role="menu" id="flow_dropdown">')
+    print('<li><a href="')
+
+    local application_filter_params = table.clone(page_params)
+    application_filter_params["application"] = nil
+    print(getPageUrl(base_url, application_filter_params))
+    print('">'..i18n("flows_page.all_proto")..'</a></li>')
+
+    for key, value in pairsByKeys(flowstats["ndpi"], asc) do
+       local class_active = ''
+       if(key == page_params.application) then
+
+	  class_active = ' class="active"'
+       end
+       print('<li '..class_active..'><a href="')
+       application_filter_params["application"] = key
        print(getPageUrl(base_url, application_filter_params))
-       print('">'..i18n("flows_page.all_proto")..'</a></li>')
-
-       for key, value in pairsByKeys(flowstats["ndpi"], asc) do
-	  local class_active = ''
-	  if(key == page_params.application) then
-	     class_active = ' class="active"'
-	  end
-	  print('<li '..class_active..'><a href="')
-	  application_filter_params["application"] = key
-	  print(getPageUrl(base_url, application_filter_params))
-	  print('">'..key..'</a></li>')
-       end
-
-       print("</ul> </div>'")
+       print('">'..key..'</a></li>')
     end
 
-    if not page_params.application then
-       -- L7 Application Category
-       print(', \'<div class="btn-group"><button class="btn btn-link dropdown-toggle" data-toggle="dropdown">'..i18n("users.categories")..' ' .. getParamFilter(page_params, "category") .. '<span class="caret"></span></button> <ul class="dropdown-menu" role="menu" id="flow_dropdown">')
-       print('<li><a href="')
-       local category_filter_params = table.clone(page_params)
-       category_filter_params["category"] = nil
+    print("</ul> </div>'")
+
+    -- L7 Application Category
+    print(', \'<div class="btn-group"><button class="btn btn-link dropdown-toggle" data-toggle="dropdown">'..i18n("users.categories")..' ' .. getParamFilter(page_params, "category") .. '<span class="caret"></span></button> <ul class="dropdown-menu" role="menu" id="flow_dropdown">')
+    print('<li><a href="')
+    local category_filter_params = table.clone(page_params)
+    category_filter_params["category"] = nil
+    print(getPageUrl(base_url, category_filter_params))
+    print('">'..i18n("flows_page.all_categories")..'</a></li>')
+    local ndpicatstats = ifstats["ndpi_categories"]
+
+    for key, value in pairsByKeys(ndpicatstats, asc) do
+       local class_active = ''
+       if(key == page_params.category) then
+	  class_active = ' class="active"'
+       end
+       print('<li '..class_active..'><a href="')
+       category_filter_params["category"] = key
        print(getPageUrl(base_url, category_filter_params))
-       print('">'..i18n("flows_page.all_categories")..'</a></li>')
-       local ndpicatstats = ifstats["ndpi_categories"]
-
-       for key, value in pairsByKeys(ndpicatstats, asc) do
-	  local class_active = ''
-	  if(key == page_params.category) then
-	     class_active = ' class="active"'
-	  end
-	  print('<li '..class_active..'><a href="')
-	  category_filter_params["category"] = key
-	  print(getPageUrl(base_url, category_filter_params))
-	  print('">'..key..'</a></li>')
-       end
-
-       print("</ul> </div>'")
+       print('">'..key..'</a></li>')
     end
+
+    print("</ul> </div>'")
 
     -- Ip version selector
     local ipversion_params = table.clone(page_params)
@@ -1453,13 +1749,13 @@ end
 
 function getFlowsTableTitle()
     local status_type
-    
     if _GET["flow_status"] then
       local flow_status_id = tonumber(_GET["flow_status"])
-      if flow_status_id and flow_consts.flow_status_types[flow_status_id] then
-        status_type = i18n(flow_consts.flow_status_types[flow_status_id].i18n_title)
+
+      if(flow_status_id ~= nil) then
+         status_type = flow_consts.getStatusTitle(_GET["flow_status"])
       else
-        status_type = _GET["flow_status"]
+         status_type = _GET["flow_status"]
       end
     end
 
@@ -1526,8 +1822,10 @@ end
 -- #######################
 
 -- A one line flow description
+-- This uses the information from flow.getInfo()
 function shortFlowLabel(flow)
-  return(string.format("[%s] %s:%d -> %s:%s [%s]", flow["proto.l4"],
+  return(string.format("[%s] %s:%d -> %s:%s [%s]",
+    flow["proto.l4"],
     flow["cli.ip"], flow["cli.port"],
     flow["srv.ip"], flow["srv.port"],
     flow["proto.ndpi"]

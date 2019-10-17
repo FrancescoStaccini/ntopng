@@ -477,7 +477,7 @@
 #define CONST_DEFAULT_ALERT_DATA_EXFILTRATION_ENABLED     1
 #define CONST_DEFAULT_ALERT_SYSLOG_ENABLED                0
 #define CONST_DEFAULT_MALWARE_ALERTS_ENABLED              1
-#define CONST_DEFAULT_IDS_ALERTS_ENABLED                  1
+#define CONST_DEFAULT_EXTERNAL_ALERTS_ENABLED             1
 #define CONST_DEFAULT_PACKETS_DROP_PERCENTAGE_ALERT       5
 #define CONST_DEFAULT_IS_ACTIVE_LOCAL_HOSTS_CACHE_ENABLED 0
 #define CONST_DEFAULT_ACTIVE_LOCAL_HOSTS_CACHE_INTERVAL   3600 /* Every hour by default */
@@ -526,6 +526,7 @@
 #define CONST_SQL_BATCH_SIZE               32
 #define CONST_MAX_SQL_QUERY_LEN            8192
 #define CONST_DEFAULT_MIRRORED_TRAFFIC     false
+#define CONST_DEFAULT_SHOW_DYN_IFACE_TRAFFIC false
 #define CONST_DEFAULT_LBD_SERIALIZE_AS_MAC false
 #define CONST_ALERT_DISABLED_PREFS         NTOPNG_PREFS_PREFIX".disable_alerts_generation"
 #define CONST_PREFS_ENABLE_ACCESS_LOG      NTOPNG_PREFS_PREFIX".enable_access_log"
@@ -533,6 +534,7 @@
 #define CONST_TOP_TALKERS_ENABLED          NTOPNG_PREFS_PREFIX".host_top_sites_creation"
 #define CONST_SUPPRESSED_ALERT_PREFS       NTOPNG_PREFS_PREFIX".alerts.ifid_%d"
 #define CONST_MIRRORED_TRAFFIC_PREFS       NTOPNG_PREFS_PREFIX".ifid_%d.is_traffic_mirrored"
+#define CONST_SHOW_DYN_IFACE_TRAFFIC_PREFS NTOPNG_PREFS_PREFIX".ifid_%d.show_dynamic_interface_traffic"
 #define CONST_DISABLED_FLOW_DUMP_PREFS     NTOPNG_PREFS_PREFIX".ifid_%d.is_flow_dump_disabled"
 #define CONST_LBD_SERIALIZATION_PREFS      NTOPNG_PREFS_PREFIX".ifid_%d.serialize_local_broadcast_hosts_as_macs"
 #define CONST_USE_NINDEX                   NTOPNG_PREFS_PREFIX".use_nindex"
@@ -550,6 +552,7 @@
 #define CONST_IFACE_SCALING_FACTOR_PREFS    NTOPNG_PREFS_PREFIX".iface_%d.scaling_factor"
 #define CONST_IFACE_HIDE_FROM_TOP_PREFS     NTOPNG_PREFS_PREFIX".iface_%d.hide_from_top"
 #define CONST_IFACE_COMPANIONS_SET          NTOPNG_PREFS_PREFIX".companion_interface.ifid_%d.companion_of"
+#define CONST_IFACE_DYN_IFACE_MODE_PREFS    NTOPNG_PREFS_PREFIX".dynamic_sub_interfaces.ifid_%d.mode"
 #define CONST_HOST_REFRESH_DISABLED_FLOW_ALERT_TYPES NTOPNG_PREFS_PREFIX".alerts.ifid_%d.disabled_status.host_%s"
 #define CONST_REMOTE_HOST_IDLE_PREFS        NTOPNG_PREFS_PREFIX".non_local_host_max_idle"
 #define CONST_FLOW_MAX_IDLE_PREFS           NTOPNG_PREFS_PREFIX".flow_max_idle"
@@ -578,7 +581,7 @@
 #define HOST_POOL_MEMBERS_KEY               NTOPNG_PREFS_PREFIX".%u.host_pools.members.%s"
 #define HOST_POOL_SHAPERS_KEY               NTOPNG_PREFS_PREFIX".%u.l7_policies.%s"
 #define HOST_POOL_DETAILS_KEY               NTOPNG_PREFS_PREFIX".%u.host_pools.details.%u"
-#define CONST_SUBINTERFACES_PREFS           NTOPNG_PREFS_PREFIX".subinterfaces"
+#define CONST_SUBINTERFACES_PREFS           NTOPNG_PREFS_PREFIX".%u.sub_interfaces"
 
 #define CONST_PREFS_CLIENT_X509_AUTH        NTOPNG_PREFS_PREFIX".is_client_x509_auth_enabled"
 
@@ -606,7 +609,7 @@
 #define CONST_RUNTIME_PREFS_THPT_CONTENT               NTOPNG_PREFS_PREFIX".thpt_content"     /* bps / pps */
 #define CONST_RUNTIME_PREFS_ALERT_SYSLOG               NTOPNG_PREFS_PREFIX".alerts_syslog"    /* 0 / 1 */
 #define CONST_RUNTIME_PREFS_MALWARE_ALERTS             NTOPNG_PREFS_PREFIX".host_blacklist"   /* 0 / 1 */
-#define CONST_RUNTIME_PREFS_IDS_ALERTS                 NTOPNG_PREFS_PREFIX".ids_alerts"       /* 0 / 1 */
+#define CONST_RUNTIME_PREFS_EXTERNAL_ALERTS            NTOPNG_PREFS_PREFIX".external_alerts"  /* 0 / 1 */
 #define CONST_RUNTIME_PREFS_ALERT_PROBING              NTOPNG_PREFS_PREFIX".probing_alerts"   /* 0 / 1 */
 #define CONST_RUNTIME_PREFS_ALERT_SSL                  NTOPNG_PREFS_PREFIX".ssl_alerts"       /* 0 / 1 */
 #define CONST_RUNTIME_PREFS_ALERT_DNS                  NTOPNG_PREFS_PREFIX".dns_alerts"       /* 0 / 1 */
@@ -689,7 +692,7 @@
 #define FLOW_LUA_CALL_PROTOCOL_DETECTED_FN_NAME  "protocolDetected"
 #define FLOW_LUA_CALL_FLOW_STATUS_CHANGE_FN_NAME "statusChanged"
 #define FLOW_LUA_CALL_PERIODIC_UPDATE_FN_NAME    "periodicUpdate"
-#define FLOW_LUA_CALL_IDLE_FN_NAME               "idle"
+#define FLOW_LUA_CALL_IDLE_FN_NAME               "flowEnd"
 
 /* Tiny Flows */
 #define CONST_DEFAULT_IS_TINY_FLOW_EXPORT_ENABLED        true  /* disabled by default */
@@ -873,7 +876,6 @@
 #define STATS_MANAGER_STORE_NAME             "top_talkers.db"
 
 #define ALERTS_MANAGER_NOTIFICATION_QUEUE_NAME "ntopng.alerts.notifications_queue"
-#define ALERTS_MANAGER_EXTERNAL_NOTIFICATIONS_ENABLED NTOPNG_PREFS_PREFIX".alerts.external_notifications_enabled"
 
 #define CONST_MAX_NUM_THREADED_ACTIVITIES 64
 #define STARTUP_SCRIPT_PATH        "startup.lua"
@@ -890,6 +892,10 @@
 #define FIVE_MINUTES_SCRIPT_PATH   "5min.lua"
 #define HOURLY_SCRIPT_PATH         "hourly.lua"
 #define DAILY_SCRIPT_PATH          "daily.lua"
+
+#define SYSLOG_SCRIPT_PATH         "callbacks/syslog.lua"
+#define SYSLOG_SCRIPTS_PATH        "callbacks/syslog"
+#define SYSLOG_SCRIPT_CALLBACK_EVENT "handleEvent"
 
 /* GRE (Generic Route Encapsulation) */
 #ifndef IPPROTO_GRE

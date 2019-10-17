@@ -101,9 +101,14 @@ else
 end
 
 local custom_column_key, custom_column_format
-local one_way_traffic
+local traffic_type_filter
 
-if(traffic_type == "one_way") then one_way_traffic = true end
+if traffic_type == "one_way" then
+   traffic_type_filter = 1 -- ntop_typedefs.h TrafficType traffic_type_one_way
+elseif traffic_type == "bidirectional" then
+   traffic_type_filter = 2 -- ntop_typedefs.h TrafficType traffic_type_bidirectional
+end
+
 if(tracked ~= nil) then tracked = tonumber(tracked) else tracked = 0 end
 
 if((mode == nil) or (mode == "")) then mode = "all" end
@@ -138,7 +143,7 @@ local hosts_stats = hosts_retrv_function(false, sortColumn, perPage, to_skip, sO
 					 country, os_, tonumber(vlan), tonumber(asn),
 					 tonumber(network), mac,
 					 tonumber(pool), tonumber(ipversion),
-					 tonumber(protocol), one_way_traffic,
+					 tonumber(protocol), traffic_type_filter,
 					 filtered_hosts, blacklisted_hosts, top_hidden, anomalous, dhcp_hosts, cidr)
 
 if(hosts_stats == nil) then total = 0 else total = hosts_stats["numHosts"] end
@@ -312,8 +317,6 @@ for _key, _value in pairsByKeys(vals, funct) do
    record["column_since"] = secondsToTime(now-value["seen.first"] + 1)
    record["column_last"] = secondsToTime(now-value["seen.last"] + 1)
 
-   local _, custom_column_key = custom_column_utils.getCustomColumnName()
-   record["column_"..custom_column_key] = custom_column_utils.hostStatsToColumnValue(value, custom_column_key, true)
    if((value["throughput_trend_"..throughput_type] ~= nil) and
       (value["throughput_trend_"..throughput_type] > 0)) then
 
@@ -384,6 +387,9 @@ for _key, _value in pairsByKeys(vals, funct) do
    if(sent2rcvd == nil) then sent2rcvd = 0 end
    record["column_breakdown"] = "<div class='progress'><div class='progress-bar progress-bar-warning' style='width: "
 	     .. sent2rcvd .."%;'>Sent</div><div class='progress-bar progress-bar-info' style='width: " .. (100-sent2rcvd) .. "%;'>Rcvd</div></div>"
+
+   local _, custom_column_key = custom_column_utils.getCustomColumnName()
+   record["column_"..custom_column_key] = custom_column_utils.hostStatsToColumnValue(value, custom_column_key, true)
 
    formatted_res[#formatted_res + 1] = record
 end -- for

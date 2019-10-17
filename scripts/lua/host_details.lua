@@ -462,6 +462,11 @@ if(isAdministrator()) then
    elseif interface.isPcapDumpInterface() == false then
       print("\n<li><a href=\""..url.."&page=config\"><i class=\"fa fa-cog fa-lg\"></i></a></li>")
    end
+   if(page == "callbacks") then
+      print("\n<li class=\"active\"><a href=\"#\"><i class=\"fa fa-superpowers fa-lg\"></i></a></li>\n")
+   else
+      print("\n<li><a href=\""..url.."&page=callbacks\"><i class=\"fa fa-superpowers fa-lg\"></i></a></li>")
+   end
 end
 
 print [[
@@ -699,16 +704,18 @@ end
 
    if debug_score then
       print("<tr><th>"..i18n("details.anomalous_flows_reasons").."</th><td nowrap><span id=anomalous_flows_status_map_as_client>")
-      for id, t in ipairs(flow_consts.flow_status_types) do
+      for _, t in pairs(flow_consts.status_types) do
+         local id = t.status_id
          if ntop.bitmapIsSet(host["anomalous_flows_status_map.as_client"], id) then
-            print(getFlowStatus(id).."<br />")
+            print(flow_consts.getStatusDescription(id).."<br />")
          end
       end
       print("</span></td>\n")
       print("<td  width='35%'><span id=anomalous_flows_status_map_as_server>")
-      for id, t in ipairs(flow_consts.flow_status_types) do
+      for _, t in pairs(flow_consts.status_types) do
+         local id = t.status_id
          if ntop.bitmapIsSet(host["anomalous_flows_status_map.as_server"], id) then
-            print(getFlowStatus(id).."<br />")
+            print(flow_consts.getStatusDescription(id).."<br />")
          end
       end
       print("</span></td></tr>\n")
@@ -1498,6 +1505,7 @@ print [[/lua/host_http_breakdown.lua', { ]] print(hostinfo2json(host_info)) prin
 	 print("<tr><th>HEAD</th><td style=\"text-align: right;\"><span id=http_query_num_head>".. formatValue(http["sender"]["query"]["num_head"]) .."</span> <span id=trend_http_query_num_head></span></td></tr>")
 	 print("<tr><th>PUT</th><td style=\"text-align: right;\"><span id=http_query_num_put>".. formatValue(http["sender"]["query"]["num_put"]) .."</span> <span id=trend_http_query_num_put></span></td></tr>")
 	 print("<tr><th>"..i18n("http_page.other_method").."</th><td style=\"text-align: right;\"><span id=http_query_num_other>".. formatValue(http["sender"]["query"]["num_other"]) .."</span> <span id=trend_http_query_num_other></span></td></tr>")
+if not ntop.isnEdge() then
 	 print("<tr><th colspan=4>&nbsp;</th></tr>")
 	 print("<tr><th rowspan=6 width=20%><A HREF='http://en.wikipedia.org/wiki/List_of_HTTP_status_codes'>"..i18n("http_page.http_responses").."</A></th><th width=20%>"..i18n("http_page.response_code").."</th><th width=20%>"..i18n("http_page.responses").."</th><th colspan=2>"..i18n("http_page.distribution").."</th></tr>")
 	 print("<tr><th>"..i18n("http_page.response_code_1xx").."</th><td style=\"text-align: right;\"><span id=http_response_num_1xx>".. formatValue(http["receiver"]["response"]["num_1xx"]) .."</span> <span id=trend_http_response_num_1xx></span></td><td colspan=2 rowspan=5>")
@@ -1516,7 +1524,7 @@ print [[/lua/host_http_breakdown.lua', { ]] print(hostinfo2json(host_info)) prin
 	 print("<tr><th>"..i18n("http_page.response_code_3xx").."</th><td style=\"text-align: right;\"><span id=http_response_num_3xx>".. formatValue(http["receiver"]["response"]["num_3xx"]) .."</span> <span id=trend_http_response_num_3xx></span></td></tr>")
 	 print("<tr><th>"..i18n("http_page.response_code_4xx").."</th><td style=\"text-align: right;\"><span id=http_response_num_4xx>".. formatValue(http["receiver"]["response"]["num_4xx"]) .."</span> <span id=trend_http_response_num_4xx></span></td></tr>")
 	 print("<tr><th>"..i18n("http_page.response_code_5xx").."</th><td style=\"text-align: right;\"><span id=http_response_num_5xx>".. formatValue(http["receiver"]["response"]["num_5xx"]) .."</span> <span id=trend_http_response_num_5xx></span></td></tr>")
-
+end
          vh = http["virtual_hosts"]
 	 if(vh ~= nil) then
 	    local now    = os.time()
@@ -1939,10 +1947,18 @@ else
    print(i18n("contacts_page.no_contacts_message"))
 end
 
-elseif(page == "alerts") then
+elseif(page == "callbacks") then
+   if(not isAdministrator()) then
+      return
+   end
 
    drawAlertSourceSettings("host", hostkey,
       i18n("show_alerts.host_delete_config_btn", {host=host_name}), "show_alerts.host_delete_config_confirm",
+      "host_details.lua", {ifid=ifId, host=hostkey},
+      host_name, "host", {host_ip=host_ip, host_vlan=host_vlan, remote_host = (not host["localhost"])})
+
+elseif(page == "alerts") then
+   printAlertTables("host", hostkey,
       "host_details.lua", {ifid=ifId, host=hostkey},
       host_name, "host", {host_ip=host_ip, host_vlan=host_vlan, remote_host = (not host["localhost"])})
 
@@ -1988,12 +2004,12 @@ elseif (page == "config") then
          interface.reloadHideFromTop()
       end
 
-      if(_POST["mud_recording"] ~= nil) then
+      if _POST["mud_recording"] then
          mud_utils.setHostMUDRecordingPref(ifId, host_info.host, _POST["mud_recording"])
          interface.reloadHostPrefs(host_info.host)
       end
 
-      if(_POST["action"] == "delete_mud") then
+      if _POST["action"] == "delete_mud" then
         mud_utils.deleteHostMUD(ifId, host_info.host)
       end
    end
@@ -2035,7 +2051,7 @@ elseif (page == "config") then
       local mud_recording_pref = mud_utils.getHostMUDRecordingPref(ifId, host_info.host, _POST["mud_recording"])
 
       print [[<tr>
-         <th>]] print(i18n("host_config.mud_recording")) print[[</th>
+         <th>]] print(i18n("host_config.mud_recording")) print[[ <a href="https://developer.cisco.com/docs/mud/#!what-is-mud" target="_blank"><i class='fa fa-external-link'></i></a></th>
          <td>
                <select name="mud_recording" class="form-control" style="width:20em;">
                   <option value="disabled" ]] if mud_recording_pref == "disabled" then print("selected") end print[[>]] print(i18n("traffic_recording.disabled")) print[[</option>

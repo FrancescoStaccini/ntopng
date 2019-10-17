@@ -217,7 +217,7 @@ char* Utils::l4proto2name(u_int8_t proto) {
 
 /* ****************************************************** */
 
-u_int8_t Utils::l4name2proto(char *name) {
+u_int8_t Utils::l4name2proto(const char *name) {
        if(strcmp(name, "IP") == 0) return 0;
   else if(strcmp(name, "ICMP") == 0) return 1;
   else if(strcmp(name, "IGMP") == 0) return 2;
@@ -233,6 +233,35 @@ u_int8_t Utils::l4name2proto(char *name) {
   else if(strcmp(name, "PIM") == 0) return 103;
   else if(strcmp(name, "VRRP") == 0) return 112;
   else if(strcmp(name, "HIP") == 0) return 139;
+  else return 0;
+}
+
+/* ****************************************************** */
+
+u_int8_t Utils::queryname2type(const char *name) {
+       if(strcmp(name, "A") == 0) return 1;
+  else if(strcmp(name, "NS") == 0) return 2;
+  else if(strcmp(name, "MD") == 0) return 3;
+  else if(strcmp(name, "MF") == 0) return 4;
+  else if(strcmp(name, "CNAME") == 0) return 5;
+  else if(strcmp(name, "SOA") == 0) return 6;
+  else if(strcmp(name, "MB") == 0) return 7;
+  else if(strcmp(name, "MG") == 0) return 8;
+  else if(strcmp(name, "MR") == 0) return 9;
+  else if(strcmp(name, "NULL") == 0) return 10;
+  else if(strcmp(name, "WKS") == 0) return 11;
+  else if(strcmp(name, "PTR") == 0) return 12;
+  else if(strcmp(name, "HINFO") == 0) return 13;
+  else if(strcmp(name, "MINFO") == 0) return 14;
+  else if(strcmp(name, "MX") == 0) return 15;
+  else if(strcmp(name, "TXT") == 0) return 16;
+  else if(strcmp(name, "AAAA") == 0) return 28;
+  else if(strcmp(name, "A6") == 0) return 38;
+  else if(strcmp(name, "SPF") == 0) return 99;
+  else if(strcmp(name, "AXFR") == 0) return 252;
+  else if(strcmp(name, "MAILB") == 0) return 253;
+  else if(strcmp(name, "MAILA") == 0) return 254;
+  else if(strcmp(name, "ANY") == 0) return 255;
   else return 0;
 }
 
@@ -574,6 +603,7 @@ int Utils::mkdir(const char *path, mode_t mode) {
 
 /* **************************************************** */
 
+// TODO: remove from C?
 AlertLevel Utils::flowStatus2AlertLevel(FlowStatus s, u_int8_t ext_severity /* e.g. IDS severity */) {
   AlertLevel default_level = alert_level_warning;
   AlertLevel level = default_level;
@@ -592,7 +622,7 @@ AlertLevel Utils::flowStatus2AlertLevel(FlowStatus s, u_int8_t ext_severity /* e
   case status_potentially_dangerous:
     level = alert_level_error;
     break;
-  case status_ids_alert:
+  case status_external_alert:
     if(ext_severity == 1)
       level = alert_level_error;
     break;
@@ -605,11 +635,17 @@ AlertLevel Utils::flowStatus2AlertLevel(FlowStatus s, u_int8_t ext_severity /* e
 
 /* **************************************************** */
 
+// TODO: remove from C
 AlertType Utils::flowStatus2AlertType(FlowStatus s) {
   switch(s) {
   case status_normal:
   case num_flow_status:
   case status_flow_when_interface_alerted: /* TODO replace with new status */
+  case status_custom_1:
+  case status_custom_2:
+  case status_custom_3:
+  case status_custom_4:
+  case status_custom_5:
     return(alert_none);
   case status_slow_tcp_connection:
   case status_slow_application_header:
@@ -646,8 +682,8 @@ AlertType Utils::flowStatus2AlertType(FlowStatus s) {
   case status_ssl_unsafe_ciphers:
   case status_ssl_old_protocol_version:
     return(alert_potentially_dangerous_protocol);
-  case status_ids_alert:
-    return(alert_ids);
+  case status_external_alert:
+    return(alert_external);
   }
 
   /* Should be never reached */
@@ -692,8 +728,8 @@ bool Utils::dumpFlowStatus(FlowStatus s) {
     return(ntop->getPrefs()->are_longlived_flows_alerts_enabled());
   case status_data_exfiltration:
     return(ntop->getPrefs()->are_exfiltration_alerts_enabled());
-  case status_ids_alert:
-    return(ntop->getPrefs()->are_ids_alerts_enabled());
+  case status_external_alert:
+    return(ntop->getPrefs()->are_external_alerts_enabled());
   default:
     return(false);
   }
@@ -4024,4 +4060,75 @@ DeviceType Utils::getDeviceTypeFromOsDetail(const char *os) {
     return(device_tablet);
 
   return(device_unknown);
+}
+
+/* Bitmap functions */
+bool Utils::bitmapIsSet(u_int64_t bitmap, u_int8_t v) {
+  if(v > 64) {
+    ntop->getTrace()->traceEvent(TRACE_WARNING, "INTERNAL ERROR: bitmapIsSet out of range (%u > %u)",
+				 v, sizeof(bitmap));
+    return(false);
+  }
+  
+  return(((bitmap >> v) & 1) ? true : false);
+}
+
+u_int64_t Utils::bitmapSet(u_int64_t bitmap, u_int8_t v) {
+  if(v > 64)
+    ntop->getTrace()->traceEvent(TRACE_WARNING, "INTERNAL ERROR: bitmapSet out of range (%u > %u)",
+				 v, sizeof(bitmap));
+  else
+    bitmap |= ((u_int64_t)1) << v;
+  
+  return(bitmap);
+}
+
+u_int64_t Utils::bitmapClear(u_int64_t bitmap, u_int8_t v) {
+  if(v > 64)
+    ntop->getTrace()->traceEvent(TRACE_WARNING, "INTERNAL ERROR: bitmapClear out of range (%u > %u)",
+				 v, sizeof(bitmap));
+  else
+    bitmap &= ~(((u_int64_t)1) << v);
+  
+  return(bitmap);
+}
+
+/* ****************************************************** */
+
+json_object *Utils::cloneJSONSimple(json_object *src) {
+  struct json_object_iterator obj_it = json_object_iter_begin(src);
+  struct json_object_iterator obj_itEnd = json_object_iter_end(src);
+  json_object *obj = json_object_new_object();
+
+  if (obj == NULL)
+    return NULL;
+
+  while(!json_object_iter_equal(&obj_it, &obj_itEnd)) {
+    const char *key   = json_object_iter_peek_name(&obj_it);
+    json_object *v    = json_object_iter_peek_value(&obj_it);
+    enum json_type type = json_object_get_type(v);
+
+    if(key != NULL && v != NULL)
+    switch(type) {
+    case json_type_int:
+      json_object_object_add(obj, key, json_object_new_int64(json_object_get_int64(v)));
+      break;
+    case json_type_double:
+      json_object_object_add(obj, key, json_object_new_double(json_object_get_double(v)));
+      break;
+    case json_type_string:
+      json_object_object_add(obj, key, json_object_new_string(json_object_get_string(v)));
+      break;
+    case json_type_boolean:
+      json_object_object_add(obj, key, json_object_new_boolean(json_object_get_boolean(v)));
+      break;
+    case json_type_object: /* not supported */
+    default:
+      break;
+    }
+
+    json_object_iter_next(&obj_it);
+  }
+
+  return obj;
 }

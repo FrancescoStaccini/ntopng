@@ -2,7 +2,7 @@
 -- (C) 2013-18 - ntop.org
 --
 
-dirs = ntop.getDirs()
+local dirs = ntop.getDirs()
 package.path = dirs.installdir .. "/scripts/lua/modules/?.lua;" .. package.path
 package.path = dirs.installdir .. "/scripts/lua/modules/timeseries/drivers/?.lua;" .. package.path -- for influxdb
 if((dirs.scriptdir ~= nil) and (dirs.scriptdir ~= "")) then package.path = dirs.scriptdir .. "/lua/modules/?.lua;" .. package.path end
@@ -18,6 +18,7 @@ local slack_utils = require("slack")
 local webhook_utils = require("webhook")
 local recording_utils = require "recording_utils"
 local remote_assistance = require "remote_assistance"
+local data_retention_utils = require "data_retention_utils"
 local page_utils = require("page_utils")
 local ts_utils = require("ts_utils")
 local influxdb = require("influxdb")
@@ -226,36 +227,6 @@ local subpage_active, tab = prefsGetActiveSubpage(show_advanced_prefs, _GET["tab
 function printInterfaces()
   print('<form method="post">')
   print('<table class="table">')
-  print('<tr><th colspan=2 class="info">'..i18n("prefs.dynamic_network_interfaces")..'</th></tr>')
-
-  local labels = {i18n("prefs.none"),
-		  i18n("prefs.vlan"),
-		  i18n("prefs.probe_ip_address"),
-		  i18n("prefs.flow_interface"),
-		  i18n("prefs.ingress_flow_interface"),
-		  i18n("prefs.ingress_vrf_id")}
-  local values = {"none",
-		  "vlan",
-		  "probe_ip",
-		  "iface_idx",
-		  "ingress_iface_idx",
-		  "ingress_vrf_id"}
-
-  local elementToSwitch = {}
-  local showElementArray = { true, false, false }
-  local javascriptAfterSwitch = "";
-  local cur_mode_key = "ntopng.prefs.dynamic_flow_collection_mode"
-  local cur_mode = ntop.getPref(cur_mode_key)
-
-  prefsDropdownFieldPrefs(subpage_active.entries["dynamic_interfaces_creation"].title,
-			  subpage_active.entries["dynamic_interfaces_creation"].description.."<p><b>"..i18n("notes").."</b><ul>"..
-			     "<li>"..i18n("prefs.dynamic_interfaces_creation_note_0").."</li>"..
-			     "<li>"..i18n("prefs.dynamic_interfaces_creation_note_1").."</li>"..
-			     "<li>"..i18n("prefs.dynamic_interfaces_creation_note_2").."</li>"..
-			     "<li>"..i18n("prefs.dynamic_interfaces_creation_note_3").."</li></ul>",
-			  "disaggregation_criterion", labels,
-  			  ternary(not isEmptyString(cur_mode), cur_mode, "none"), true,
-			  {keys=values, save_pref=true, pref_key=cur_mode_key})
 
   print('<tr><th colspan=2 class="info">'..i18n("prefs.zmq_interfaces")..'</th></tr>')
 
@@ -323,7 +294,7 @@ function printAlerts()
 			   "row_toggle_ip_reassignment_alerts", "row_toggle_dropped_flows_alerts", "row_alerts_informative_header",
 			   "row_toggle_device_first_seen_alert", "row_toggle_device_activation_alert", "row_toggle_pool_activation_alert", "row_toggle_quota_exceeded_alert", "row_toggle_mining_alerts", "row_toggle_device_protocols_alerts",
 			   "row_toggle_longlived_flows_alerts", "longlived_flow_duration", "row_toggle_elephant_flows_alerts", "elephant_flow_local_to_remote_bytes", "elephant_flow_remote_to_local_bytes",
-         "row_toggle_data_exfiltration", "row_toggle_ids_alerts", "row_toggle_potentially_dangerous_protocols_alerts"
+         "row_toggle_data_exfiltration", "row_toggle_external_alerts", "row_toggle_potentially_dangerous_protocols_alerts"
 			}
  
  if not subpage_active.entries["toggle_mysql_check_open_files_limit"].hidden then
@@ -414,8 +385,8 @@ function printAlerts()
   })
 
   prefsToggleButton(subpage_active, {
-    field = "toggle_ids_alerts",
-    pref = "ids_alerts",
+    field = "toggle_external_alerts",
+    pref = "external_alerts",
     default = "1",
     hidden = not showElements,
   })
@@ -552,19 +523,6 @@ function printExternalAlertsReport()
 
   local alert_sev_labels = {i18n("prefs.errors"), i18n("prefs.errors_and_warnings"), i18n("prefs.all")}
   local alert_sev_values = {"error", "warning", "info"}
-
-  print('<tr><th colspan="2" class="info">'..i18n("prefs.alerts_notifications")..'</th></tr>')
-
-  prefsToggleButton(subpage_active, {
-    field = "toggle_external_alerts",
-    pref = "alerts.external_notifications_enabled",
-    default = "0",
-    hidden = not showElements,
-  })
-
-  local external_alerts_enabled = ntop.getPref("ntopng.prefs.alerts.external_notifications_enabled") == "1"
-
-  if external_alerts_enabled then
 
      if ntop.sendMail then -- only if sendmail is defined, and thus, supported
 	print('<tr><th colspan="2" class="info">'..i18n("prefs.email_notification")..'</th></tr>')
@@ -761,8 +719,6 @@ function printExternalAlertsReport()
 
     print('<tr id="webhook_test" style="' .. ternary(showWebhookNotificationPrefs, "", "display:none;").. '"><td><button class="btn btn-default disable-on-dirty" type="button" onclick="sendTestWebhook();" style="width:230px; float:left;">'..i18n("prefs.send_test_webhook")..'</button></td></tr>')
 
-  end
-  
   print('<tr><th colspan=2 style="text-align:right;"><button type="submit" class="btn btn-primary" style="width:115px" disabled="disabled">'..i18n("save")..'</button></th></tr>')
   print('</table>')
   print [[<input name="csrf" type="hidden" value="]] print(ntop.getRandomCSRFValue()) print [[" />
@@ -946,7 +902,8 @@ function printRecording()
       ..ternary(n2disk_info.systemid ~= nil, i18n("prefs.n2disk_license_systemid", {systemid=n2disk_info.systemid}), ""),
     "ntopng.prefs.", "n2disk_license",
     ternary(n2disk_info.license ~= nil, n2disk_info.license, ""),
-    false, nil, nil, nil, {style={width="25em;"}, min = 50, max = 64 })
+    false, nil, nil, nil, {style={width="25em;"}, min = 50, max = 64,
+    pattern = getLicensePattern()})
 
   print('<tr><th colspan=2 class="info">'..i18n("traffic_recording.settings")..'</th></tr>')
 
@@ -987,6 +944,24 @@ end
 
 -- ================================================================================
 
+function printDataRetention()
+  print('<form method="post">')
+  print('<table class="table">')
+
+  print('<tr><th colspan=2 class="info">'..i18n("prefs.data_retention")..'</th></tr>')
+
+  prefsInputFieldPrefs(subpage_active.entries["data_retention"].title,
+		       subpage_active.entries["data_retention"].description,
+		       "ntopng.prefs.", "data_retention_days", data_retention_utils.getDefaultRetention(), "number", nil, nil, nil, {min=1, max=365 * 10})
+
+  print('<tr><th colspan=2 style="text-align:right;"><button type="submit" class="btn btn-primary" style="width:115px" disabled="disabled">'..i18n("save")..'</button></th></tr>')
+  print('</table>')
+  print [[<input name="csrf" type="hidden" value="]] print(ntop.getRandomCSRFValue()) print [[" />
+    </form>]]
+end
+
+-- ================================================================================
+
 function printMisc()
   print('<form method="post">')
   print('<table class="table">')
@@ -1014,15 +989,6 @@ function printMisc()
 		       "google_apis_browser_key",
 		       "", false, nil, nil, nil, {style={width="25em;"}, attributes={spellcheck="false"} --[[ Note: Google API keys can vary in format ]] })
 
-  -- ######################
-
-  print('<tr><th colspan=2 class="info">'..i18n("prefs.databases")..'</th></tr>')
-
-  --default value
-  minute_top_talkers_retention = 365
-  prefsInputFieldPrefs(subpage_active.entries["minute_top_talkers_retention"].title, subpage_active.entries["minute_top_talkers_retention"].description,
-      "ntopng.prefs.", "minute_top_talkers_retention", minute_top_talkers_retention, "number", nil, nil, nil, {min=1, max=365*10})
-  
   -- ######################
 
   print('<tr><th colspan=2 class="info">'..i18n("prefs.report")..'</th></tr>')
@@ -1340,12 +1306,9 @@ function printInMemory()
 		       "ntopng.prefs.", "flow_max_idle", prefs.flow_max_idle, "number", nil, nil, nil,
 		       {min=1, max=3600, tformat="smh"})
 
-  local has_high_resolution = ((tonumber(ntop.getPref("ntopng.prefs.ts_write_steps")) or 0) > 0)
-
   prefsInputFieldPrefs(subpage_active.entries["housekeeping_frequency"].title,
-		       subpage_active.entries["housekeeping_frequency"].description ..
-			  ternary(has_high_resolution, "<br>"..i18n("prefs.note_update_frequency_disabled", {pref=i18n("prefs.timeseries_resolution_resolution_title")}), ""),
-		       "ntopng.prefs.", "housekeeping_frequency", prefs.housekeeping_frequency, "number", nil, nil, nil, {min=1, max=60, disabled=has_high_resolution})
+		       subpage_active.entries["housekeeping_frequency"].description,
+		       "ntopng.prefs.", "housekeeping_frequency", prefs.housekeeping_frequency, "number", nil, nil, nil, {min = 1, max = 60})
 
   print('<tr><th colspan=2 style="text-align:right;"><button type="submit" class="btn btn-primary" style="width:115px" disabled="disabled">'..i18n("save")..'</button></th></tr>')
   print('</table>')
@@ -1461,8 +1424,10 @@ function printStatsTimeseries()
 		       "influx_password", "",
            "password", auth_enabled, nil, nil,  {attributes={spellcheck="false"}, pattern="[^\\s]+"})
 
-  local ts_slots_labels = {"10s", "30s", "1m"}
-  local ts_slots_values = {"10", "30", "60"}
+  local ts_slots_labels = {"10s", "30s", "1m", "5m"}
+  local ts_slots_values = {"10", "30", "60", "300"}
+  -- Currently, high-resolution-timeseries seem to only work when the default housekeeping frequency is in place.
+  -- As a TODO, it would be nice to relax this assumption.
   local has_custom_housekeeping = (tonumber(ntop.getPref("ntopng.prefs.housekeeping_frequency")) or 5) ~= 5
 
   multipleTableButtonPrefs(subpage_active.entries["timeseries_resolution_resolution"].title,
@@ -1473,16 +1438,6 @@ function printStatsTimeseries()
 				    "ts_high_resolution",
 				    "ntopng.prefs.ts_high_resolution", has_custom_housekeeping,
 				    nil, nil, nil, influx_active)
-
-  local default_influx_retention = 365
-  prefsInputFieldPrefs(subpage_active.entries["influxdb_storage"].title, subpage_active.entries["influxdb_storage"].description .. "<br>" ..
-      i18n("prefs.influxdb_storage_note", {interval=influxdb.getShardGroupDuration(tonumber(_POST["influx_retention"] or ntop.getPref("ntopng.prefs.influx_retention")) or default_influx_retention), url="https://docs.influxdata.com/influxdb/v1.7/query_language/database_management/#description-of-syntax-1"}),
-      "ntopng.prefs.", "influx_retention", default_influx_retention, "number", influx_active, nil, nil, {min=0, max=365*10})
-
-  prefsInputFieldPrefs(subpage_active.entries["rrd_files_retention"].title, subpage_active.entries["rrd_files_retention"].description,
-		       "ntopng.prefs.", "old_rrd_files_retention", 365, "number",
-		       not influx_active,
-		       nil, nil, {min=1, max=365*10})
 
   print('<tr><th colspan=2 class="info">'..i18n('prefs.interfaces_timeseries')..'</th></tr>')
 
@@ -1781,21 +1736,6 @@ function printFlowDBDump()
 		       prefs.max_num_aggregated_flows_per_export, "number", showElement, false, nil,
 		       {min = 1000, max = 2^32-1})
 
-  print('<tr><th colspan=2 class="info">'..i18n("prefs.databases")..'</th></tr>')
-
-  if hasNindexSupport() then
-    -- nIndex specific settings
-    local cur_retention, max_retention, default_retention = nindex_utils.getRetention()
-
-    prefsInputFieldPrefs(subpage_active.entries["nindex_retention"].title, subpage_active.entries["nindex_retention"].description,
-        "ntopng.prefs.", "nindex_retention_days", default_retention, "number", nil, nil, nil, {min=1, max=max_retention})
-  else
-    -- MySQL specific settings
-    local mysql_retention = 7
-    prefsInputFieldPrefs(subpage_active.entries["mysql_retention"].title, subpage_active.entries["mysql_retention"].description .. "-F mysql;&lt;host|socket&gt;;&lt;dbname&gt;;&lt;table name&gt;;&lt;user&gt;;&lt;pw&gt;.",
-    "ntopng.prefs.", "mysql_retention", mysql_retention, "number", not subpage_active.entries["mysql_retention"].hidden, nil, nil, {min=1, max=365*5, --[[ TODO check min/max ]]})
-  end
-
   print('<tr><th colspan=2 style="text-align:right;"><button type="submit" class="btn btn-primary" style="width:115px" disabled="disabled">'..i18n("save")..'</button></th></tr>')
 
   print [[<input name="csrf" type="hidden" value="]] print(ntop.getRandomCSRFValue()) print [[" />
@@ -1909,9 +1849,14 @@ if(tab == "remote_assistance") then
    printRemoteAssitance()
 end
 
+if(tab == "retention") then
+   printDataRetention()
+end
+
 if(tab == "misc") then
    printMisc()
 end
+
 if(tab == "auth") then
    printAuthentication()
 end
@@ -1944,24 +1889,23 @@ aysHandleForm("form", {
 $("form[id!='search-host-form']").validator({disable:true});
 </script>]])
 
-if tonumber(_POST["ts_high_resolution"]) ~= nil then
+local high_res_secs = tonumber(_POST["ts_high_resolution"])      
+if high_res_secs then
   -- update ts_write_slots
   local driver = ntop.getPref("ntopng.prefs.timeseries_driver")
   local new_slots = 0
   local new_steps = 0
 
-  if driver == "influxdb" then
-    new_slots = 60 / tonumber(_POST["ts_high_resolution"])
+  -- high_res_secs must be <= 60 to be considered high-resolution
+  -- the only other option is 300 seconds (5 minutes) and there's
+  -- no need to use timeseries rings
 
-    if new_slots == 1 then
-      -- no slots needed in this case
-      new_slots = 0
-    else
-      new_steps = 60 / new_slots / 5
+  if driver == "influxdb" and high_res_secs <= 60 then
+    new_slots = 60 / high_res_secs
+    new_steps = 60 / new_slots / 5 -- TODO: remove this hardcoded 5
 
-      -- important: add one extra slots to give "buffer" time to the writer
-      new_slots = new_slots + 1
-    end
+    -- important: add one extra slots to give "buffer" time to the writer
+    new_slots = new_slots + 1
   end
 
   -- When high resolution timeseries are enabled, the ntopng C core creates
@@ -1984,6 +1928,9 @@ if tonumber(_POST["ts_high_resolution"]) ~= nil then
   --
   ntop.setPref("ntopng.prefs.ts_write_slots", tostring(math.ceil(new_slots)))
   ntop.setPref("ntopng.prefs.ts_write_steps", tostring(math.ceil(new_steps)))
+
+--  tprint(ntop.getPref("ntopng.prefs.ts_write_slots"))
+--  tprint(ntop.getPref("ntopng.prefs.ts_write_steps"))
 end
 
 if(_SERVER["REQUEST_METHOD"] == "POST") then

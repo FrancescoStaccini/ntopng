@@ -15,7 +15,6 @@ local alerts_api = {}
 
 -- NOTE: sqlite can handle about 10-50 alerts/sec
 local MAX_NUM_ENQUEUED_ALERT_PER_INTERFACE = 256
-local ALERT_CHECKS_MODULES_BASEDIR = dirs.installdir .. "/scripts/callbacks/interface/alerts"
 
 -- Just helpers
 local str_2_periodicity = {
@@ -505,7 +504,7 @@ end
 
 function alerts_api.thresholdCrossType(granularity, metric, value, operator, threshold)
   return({
-    alert_type = alert_consts.alert_types.threshold_cross,
+    alert_type = alert_consts.alert_types.alert_threshold_cross,
     alert_subtype = string.format("%s_%s", granularity, metric),
     alert_granularity = alert_consts.alerts_granularities[granularity],
     alert_severity = alert_consts.alert_severities.error,
@@ -520,7 +519,7 @@ end
 
 function alerts_api.synFloodType(granularity, metric, value, operator, threshold)
   return({
-    alert_type = alert_consts.alert_types.tcp_syn_flood,
+    alert_type = alert_consts.alert_types.alert_tcp_syn_flood,
     alert_subtype = metric,
     alert_granularity = alert_consts.alerts_granularities[granularity],
     alert_severity = alert_consts.alert_severities.error,
@@ -535,7 +534,7 @@ end
 
 function alerts_api.flowFloodType(granularity, metric, value, operator, threshold)
   return({
-    alert_type = alert_consts.alert_types.flows_flood,
+    alert_type = alert_consts.alert_types.alert_flows_flood,
     alert_subtype = metric,
     alert_granularity = alert_consts.alerts_granularities[granularity],
     alert_severity = alert_consts.alert_severities.error,
@@ -550,7 +549,7 @@ end
 
 function alerts_api.pingIssuesType(value, threshold, ip)
   return({
-    alert_type = alert_consts.alert_types.ping_issues,
+    alert_type = alert_consts.alert_types.alert_ping_issues,
     alert_severity = alert_consts.alert_severities.warning,
     alert_granularity = alert_consts.alerts_granularities.min,
     alert_type_params = {
@@ -576,7 +575,7 @@ end
 
 function alerts_api.loginFailedType()
   return({
-    alert_type = alert_consts.alert_types.login_failed,
+    alert_type = alert_consts.alert_types.alert_login_failed,
     alert_severity = alert_consts.alert_severities.warning,
     alert_type_params = {},
   })
@@ -586,7 +585,7 @@ end
 
 function alerts_api.processNotificationType(event_type, severity, msg_details)
   return({
-    alert_type = alert_consts.alert_types.process_notification,
+    alert_type = alert_consts.alert_types.alert_process_notification,
     alert_severity = alert_consts.alert_severities[alertSeverityRaw(severity)],
     alert_type_params = {
       msg_details = msg_details,
@@ -599,7 +598,7 @@ end
 
 function alerts_api.listDownloadFailedType(list_name, last_error)
   return({
-    alert_type = alert_consts.alert_types.list_download_failed,
+    alert_type = alert_consts.alert_types.alert_list_download_failed,
     alert_severity = alert_consts.alert_severities.error,
     alert_type_params = {
       name=list_name, err=last_error
@@ -611,7 +610,7 @@ end
 
 function alerts_api.influxdbDroppedPointsType(influxdb_url)
   return({
-    alert_type = alert_consts.alert_types.influxdb_export_failure,
+    alert_type = alert_consts.alert_types.alert_influxdb_export_failure,
     alert_severity = alert_consts.alert_severities.error,
     alert_granularity = alert_consts.alerts_granularities.min,
     alert_type_params = {
@@ -624,7 +623,7 @@ end
 
 function alerts_api.newDeviceType(device_name)
   return({
-    alert_type = alert_consts.alert_types.new_device,
+    alert_type = alert_consts.alert_types.alert_new_device,
     alert_severity = alert_consts.alert_severities.warning,
     alert_type_params = {
       device = device_name,
@@ -636,7 +635,7 @@ end
 
 function alerts_api.deviceHasConnectedType(device_name)
   return({
-    alert_type = alert_consts.alert_types.device_connection,
+    alert_type = alert_consts.alert_types.alert_device_connection,
     alert_severity = alert_consts.alert_severities.info,
     alert_type_params = {
       device = device_name,
@@ -648,7 +647,7 @@ end
 
 function alerts_api.deviceHasDisconnectedType(device_name)
   return({
-    alert_type = alert_consts.alert_types.device_disconnection,
+    alert_type = alert_consts.alert_types.alert_device_disconnection,
     alert_severity = alert_consts.alert_severities.info,
     alert_type_params = {
       device = device_name,
@@ -662,7 +661,7 @@ function alerts_api.poolQuotaExceededType(pool, proto, subtype, value, quota)
   local host_pools_utils = require("host_pools_utils")
 
   return({
-    alert_type = alert_consts.alert_types.quota_exceeded,
+    alert_type = alert_consts.alert_types.alert_quota_exceeded,
     alert_subtype = subtype,
     alert_severity = alert_consts.alert_severities.warning,
     alert_type_params = {
@@ -678,7 +677,7 @@ function alerts_api.poolConnectionType(pool)
   local host_pools_utils = require("host_pools_utils")
 
   return({
-    alert_type = alert_consts.alert_types.host_pool_connection,
+    alert_type = alert_consts.alert_types.alert_host_pool_connection,
     alert_severity = alert_consts.alert_severities.info,
     alert_type_params = {
       pool = host_pools_utils.getPoolName(interface.getId(), pool),
@@ -692,7 +691,7 @@ function alerts_api.poolDisconnectionType(pool)
   local host_pools_utils = require("host_pools_utils")
 
   return({
-    alert_type = alert_consts.alert_types.host_pool_disconnection,
+    alert_type = alert_consts.alert_types.alert_host_pool_disconnection,
     alert_severity = alert_consts.alert_severities.info,
     alert_type_params = {
       pool = host_pools_utils.getPoolName(interface.getId(), pool),
@@ -704,7 +703,7 @@ end
 
 function alerts_api.macIpAssociationChangeType(device, ip, old_mac, new_mac)
   return({
-    alert_type = alert_consts.alert_types.mac_ip_association_change,
+    alert_type = alert_consts.alert_types.alert_mac_ip_association_change,
     alert_severity = alert_consts.alert_severities.warning,
     alert_type_params = {
       device = device, ip = ip,
@@ -717,7 +716,7 @@ end
 
 function alerts_api.broadcastDomainTooLargeType(src_mac, dst_mac, vlan, spa, tpa)
   return({
-    alert_type = alert_consts.alert_types.broadcast_domain_too_large,
+    alert_type = alert_consts.alert_types.alert_broadcast_domain_too_large,
     alert_severity = alert_consts.alert_severities.warning,
     alert_type_params = {
       src_mac = src_mac, dst_mac = dst_mac,
@@ -730,7 +729,7 @@ end
 
 function alerts_api.nfqFlushedType(ifname, pct, tot, dropped)
   return({
-    alert_type = alert_consts.alert_types.nfq_flushed,
+    alert_type = alert_consts.alert_types.alert_nfq_flushed,
     alert_severity = alert_consts.alert_severities.error,
     alert_type_params = {
       ifname = ifname, pct = pct, tot = tot, dropped = dropped,
@@ -742,7 +741,7 @@ end
 
 function alerts_api.remoteToRemoteType(host_info, mac)
   return({
-    alert_type = alert_consts.alert_types.remote_to_remote,
+    alert_type = alert_consts.alert_types.alert_remote_to_remote,
     alert_severity = alert_consts.alert_severities.warning,
     alert_type_params = {
       host = getResolvedAddress(host_info),
@@ -755,7 +754,7 @@ end
 
 function alerts_api.slowPeriodicActivityType(duration_ms, max_duration_ms)
   return({
-    alert_type = alert_consts.alert_types.slow_periodic_activity,
+    alert_type = alert_consts.alert_types.alert_slow_periodic_activity,
     alert_severity = alert_consts.alert_severities.warning,
     alert_type_params = {
       duration_ms = duration_ms,
@@ -768,7 +767,7 @@ end
 
 function alerts_api.ipOutsideDHCPRangeType(router_info, mac, client_mac, sender_mac)
   return({
-    alert_type = alert_consts.alert_types.ip_outsite_dhcp_range,
+    alert_type = alert_consts.alert_types.alert_ip_outsite_dhcp_range,
     alert_severity = alert_consts.alert_severities.warning,
     alert_type_params = {
       router_info = hostinfo2hostkey(router_info),
@@ -782,7 +781,7 @@ end
 
 function alerts_api.snmpInterfaceStatusChangeType(device, interface, interface_name, status)
   return({
-    alert_type = alert_consts.alert_types.port_status_change,
+    alert_type = alert_consts.alert_types.alert_port_status_change,
     alert_severity = alert_consts.alert_severities.info,
     alert_type_params = {
       device = device, interface = interface,
@@ -795,7 +794,7 @@ end
 
 function alerts_api.snmpInterfaceDuplexStatusChangeType(device, interface, interface_name, status)
   return({
-    alert_type = alert_consts.alert_types.port_duplexstatus_change,
+    alert_type = alert_consts.alert_types.alert_port_duplexstatus_change,
     alert_severity = alert_consts.alert_severities.warning,
     alert_type_params = {
       device = device, interface = interface,
@@ -808,7 +807,7 @@ end
 
 function alerts_api.snmpInterfaceErrorsType(device, interface, interface_name)
   return({
-    alert_type = alert_consts.alert_types.port_errors,
+    alert_type = alert_consts.alert_types.alert_port_errors,
     alert_severity = alert_consts.alert_severities.info,
     alert_type_params = {
       device = device, interface = interface,
@@ -821,7 +820,7 @@ end
 
 function alerts_api.snmpPortLoadThresholdExceededType(device, interface, interface_name, interface_load, in_direction)
   return({
-    alert_type = alert_consts.alert_types.port_load_threshold_exceeded,
+    alert_type = alert_consts.alert_types.alert_port_load_threshold_exceeded,
     alert_severity = alert_consts.alert_severities.warning,
     alert_type_params = {
       device = device, interface = interface,
@@ -835,7 +834,7 @@ end
 
 function alerts_api.misconfiguredAppType(subtype)
   return({
-    alert_type = alert_consts.alert_types.misconfigured_app,
+    alert_type = alert_consts.alert_types.alert_misconfigured_app,
     alert_subtype = subtype,
     alert_severity = alert_consts.alert_severities.error,
     alert_granularity = alert_consts.alerts_granularities.min,
@@ -847,7 +846,7 @@ end
 
 function alerts_api.tooManyDropsType(drops, drop_perc, threshold)
   return({
-    alert_type = alert_consts.alert_types.too_many_drops,
+    alert_type = alert_consts.alert_types.alert_too_many_drops,
     alert_severity = alert_consts.alert_severities.error,
     alert_granularity = alert_consts.alerts_granularities.min,
     alert_type_params = {
@@ -860,7 +859,7 @@ end
 
 function alerts_api.slowStatsUpdateType()
   return({
-    alert_type = alert_consts.alert_types.slow_stats_update,
+    alert_type = alert_consts.alert_types.alert_slow_stats_update,
     alert_severity = alert_consts.alert_severities.warning,
     alert_granularity = alert_consts.alerts_granularities.min,
     alert_type_params = {},
@@ -871,7 +870,7 @@ end
 
 function alerts_api.requestReplyRatioType(key, requests, replies, granularity)
   return({
-    alert_type = alert_consts.alert_types.request_reply_ratio,
+    alert_type = alert_consts.alert_types.alert_request_reply_ratio,
     alert_subtype = key,
     alert_granularity = alert_consts.alerts_granularities[granularity],
     alert_severity = alert_consts.alert_severities.warning,
@@ -885,7 +884,7 @@ end
 
 function alerts_api.anomalousTCPFlagsType(num_syn, num_rst, ratio, is_sent, granularity)
   return({
-    alert_type = alert_consts.alert_types.anomalous_tcp_flags,
+    alert_type = alert_consts.alert_types.alert_anomalous_tcp_flags,
     alert_subtype = ternary(is_sent, "sent", "rcvd"),
     alert_granularity = alert_consts.alerts_granularities[granularity],
     alert_severity = alert_consts.alert_severities.warning,
@@ -902,7 +901,7 @@ end
 
 function alerts_api.misbehavingFlowsRatioType(misbehaving_flows, total_flows, ratio, is_sent, granularity)
   return({
-    alert_type = alert_consts.alert_types.misbehaving_flows_ratio,
+    alert_type = alert_consts.alert_types.alert_misbehaving_flows_ratio,
     alert_subtype = ternary(is_sent, "sent", "rcvd"),
     alert_granularity = alert_consts.alerts_granularities[granularity],
     alert_severity = alert_consts.alert_severities.warning,
@@ -919,7 +918,7 @@ end
 
 function alerts_api.ghostNetworkType(network, granularity)
   return({
-    alert_type = alert_consts.alert_types.ghost_network,
+    alert_type = alert_consts.alert_types.alert_ghost_network,
     alert_subtype = network,
     alert_granularity = alert_consts.alerts_granularities[granularity],
     alert_severity = alert_consts.alert_severities.warning,
@@ -929,181 +928,22 @@ end
 
 -- ##############################################
 
-function alerts_api.load_check_modules(subdir, str_granularity)
-  local checks_dir = os_utils.fixPath(ALERT_CHECKS_MODULES_BASEDIR .. "/" .. subdir)
-  local available_modules = {}
-
-  package.path = checks_dir .. "/?.lua;" .. package.path
-
-  for fname in pairs(ntop.readdir(checks_dir)) do
-    if ends(fname, ".lua") then
-      local modname = string.sub(fname, 1, string.len(fname) - 4)
-      local check_module = require(modname)
-
-      if check_module.check_function and check_module.key then
-	 if check_module.granularity and str_granularity then
-	    -- When the module specify one or more granularities
-	    -- at which checks have to be run, the module is only
-	    -- loaded after checking the granularity
-	    for _, gran in pairs(check_module.granularity) do
-	       if gran == str_granularity then
-		  available_modules[modname] = check_module
-		  break
-	       end
-	    end
-	 else
-	    -- When no granularity is explicitly specified
-	    -- in the module, then the check it is assumed to
-	    -- be run for every granularity and the module is
-	    -- always loaded
-	    available_modules[modname] = check_module
-	 end
-      end
-    end
-  end
-
-  return available_modules
-end
-
--- ##############################################
-
-local function get_flow_check_module_enabled_key(check_module_key)
-   return string.format("ntopng.prefs.flow_check_modules.ifid_%d.%s", interface.getId(), check_module_key)
-end
-
--- ##############################################
-
-local function refresh_flow_check_module_conf(flow_check_module)
-   if table.len(_POST) > 0 then
-      local conf_hash = get_flow_check_module_enabled_key(flow_check_module.key)
-
-      for k, v in pairs(_POST) do
-	 if k:ends(flow_check_module.key) then
-	    if k == "enabled_"..flow_check_module.key then
-	       if v == "off" then
-		  ntop.setHashCache(conf_hash, "enabled", "false")
-	       elseif v == "on" then
-		  ntop.delHashCache(conf_hash, "enabled")
-	       end
-	    end
-	 end
-      end
-   end
-end
-
--- ##############################################
-
-local function load_flow_check_module_conf(flow_check_module)
-   if not flow_check_module["conf"] then
-      flow_check_module["conf"] = {}
-   end
-
-   -- if there's a _POST we try and refresh the module conf with possibly new
-   -- submitted values
-   refresh_flow_check_module_conf(flow_check_module)
-
-   local k = get_flow_check_module_enabled_key(flow_check_module.key)
-
-   local enabled = ntop.getHashCache(k, "enabled")
-
-   if enabled ~= "false" then
-      flow_check_module["conf"]["enabled"] = true
-   else
-      flow_check_module["conf"]["enabled"] = false
-   end
-end
-
--- ##############################################
-
---
--- Flow check modules are lua scripts located into the following locations:
---  - scripts/callbacks/interface/alerts/flow for community scripts
---  - scripts/callbacks/interface/alerts/flow for pro/enterprise scripts
---
--- A script must return a lua table, with the following fields:
---  - setup(): a function to call once before processing any flow. It must return true
---    if the module is enabled, false otherwise.
---  - protocolDetected(info) (optional): a function which will be called once the flow protocol
---    has been detected or detection has been aborted. This should happen once per flow.
---  - statusChanged(info) (optional): a function which will be called *after* the protocolDetected()
---    if the flow status changes.
---
-function alerts_api.load_flow_check_modules(enabled_only)
-   local available_modules = {protocolDetected = {}, statusChanged = {}, idle = {}, periodicUpdate = {}, all = {}}
-   local check_dirs = {
-      os_utils.fixPath(ALERT_CHECKS_MODULES_BASEDIR .. "/flow"),
-   }
-
-   if ntop.isPro() then
-      check_dirs[#check_dirs + 1] = os_utils.fixPath(dirs.installdir .. "/pro/scripts/callbacks/interface/alerts/flow")
-   end
-
-   for _, checks_dir in pairs(check_dirs) do
-      package.path = checks_dir .. "/?.lua;" .. package.path
-
-      for fname in pairs(ntop.readdir(checks_dir)) do
-	 if ends(fname, ".lua") then
-	    local modname = string.sub(fname, 1, string.len(fname) - 4)
-	    local check_module = require(modname)
-	    load_flow_check_module_conf(check_module)
-
-	    if check_module.setup then
-	       local is_enabled = check_module["conf"]["enabled"]
-
-	       if is_enabled or not enabled_only then
-		  local setup_ok = check_module.setup()
-
-		  if setup_ok then
-		     if check_module.protocolDetected then available_modules["protocolDetected"][modname] = check_module end
-		     if check_module.statusChanged    then available_modules["statusChanged"][modname] = check_module end
-		     if check_module.idle             then available_modules["idle"][modname] = check_module end
-		     if check_module.periodicUpdate   then available_modules["periodicUpdate"][modname] = check_module end
-		     available_modules["all"][modname] = check_module
-		  end
-	       end
-	    end
-	 end
-      end
-   end
-
-   return available_modules
-end
-
--- ##############################################
-
--- @brief Get the default alert configuration value for the given check module
--- and granularity.
--- @param check_module a check_module returned by alerts_api.load_check_modules
--- @param granularity_str the target granularity
--- @return nil if there is not default value, the given value otherwise
-function alerts_api.getCheckModuleDefaultValue(check_module, granularity_str)
-  if((check_module.default_values ~= nil) and (check_module.default_values[granularity_str] ~= nil)) then
-    -- granularity specific default
-    return(check_module.default_values[granularity_str])
-  end
-
-  -- global default
-  return(check_module.default_value)
-end
-
--- ##############################################
-
 -- An alert check function which performs threshold checks of a value
 -- against a configured threshold and generates a threshold_cross alert
 -- if the value is above the threshold.
--- A check_module must implement:
+-- A user script (see user_scripts.lua) must implement:
 --   get_threshold_value(granularity, entity_info)
 --   A function, which returns the current value to be compared agains the threshold
--- The check_module may implement an additional threshold_type_builder function which
+-- The user_script may implement an additional threshold_type_builder function which
 -- which returns a type_info. Check alerts_api.thresholdCrossType for the threshold_type_builder signature.
 function alerts_api.threshold_check_function(params)
   local alarmed = false
-  local value = params.check_module.get_threshold_value(params.granularity, params.entity_info)
+  local value = params.user_script.get_threshold_value(params.granularity, params.entity_info)
   local threshold_config = params.alert_config
 
   local threshold_edge = tonumber(threshold_config.edge)
-  local threshold_builder = ternary(params.check_module.threshold_type_builder, params.check_module.threshold_type_builder, alerts_api.thresholdCrossType)
-  local threshold_type = threshold_builder(params.granularity, params.check_module.key, value, threshold_config.operator, threshold_edge)
+  local threshold_builder = ternary(params.user_script.threshold_type_builder, params.user_script.threshold_type_builder, alerts_api.thresholdCrossType)
+  local threshold_type = threshold_builder(params.granularity, params.user_script.key, value, threshold_config.operator, threshold_edge)
 
   if(threshold_config.operator == "lt") then
     if(value < threshold_edge) then alarmed = true end
@@ -1121,12 +961,12 @@ end
 -- ##############################################
 
 -- An alert check function which checks for anomalies.
--- The check_module key is the type of the anomaly to check.
--- The check_module must implement a anomaly_type_builder(anomaly_key) function
+-- The user_script key is the type of the anomaly to check.
+-- The user_script must implement a anomaly_type_builder(anomaly_key) function
 -- which returns a type_info for the given anomaly.
 function alerts_api.anomaly_check_function(params)
-  local anomal_key = params.check_module.key
-  local type_info = params.check_module.anomaly_type_builder(anomal_key)
+  local anomal_key = params.user_script.key
+  local type_info = params.user_script.anomaly_type_builder(anomal_key)
 
   if params.entity_info.anomalies[anomal_key] then
     return alerts_api.trigger(params.alert_entity, type_info)
@@ -1198,45 +1038,6 @@ function alerts_api.category_bytes(info, category_name)
    end
 
    return curr_val
-end
-
--- ##############################################
-
-function alerts_api.threshold_cross_input_builder(gui_conf, input_id, value)
-  value = value or {}
-  local gt_selected = ternary((value.operator or gui_conf.field_operator) == "gt", ' selected="selected"', '')
-  local lt_selected = ternary((value.operator or gui_conf.field_operator) == "lt", ' selected="selected"', '')
-  local input_op = "op_" .. input_id
-  local input_val = "value_" .. input_id
-
-  return(string.format([[<select name="%s">
-  <option value="gt"%s ]] .. (ternary(gui_conf.field_operator == "lt", "hidden", "")) .. [[>&gt;</option>
-  <option value="lt"%s ]] .. (ternary(gui_conf.field_operator == "gt", "hidden", "")) .. [[>&lt;</option>
-</select> <input type="number" class="text-right form-control" min="%s" max="%s" step="%s" style="display:inline; width:12em;" name="%s" value="%s"/> <span>%s</span>]],
-    input_op, gt_selected, lt_selected,
-    gui_conf.field_min or "0", gui_conf.field_max or "", gui_conf.field_step or "1",
-    input_val, value.edge, i18n(gui_conf.i18n_field_unit))
-  )
-end
-
--- ##############################################
-
-function alerts_api.checkbox_input_builder(gui_conf, input_id, value)
-  return(string.format([[
-  <input type="hidden", value="off", name="%s"/>
-  <input type="checkbox" name="%s" %s/>
-  ]], input_id, input_id, ternary(value, "checked", "")))
-end
-
--- ##############################################
-
-function alerts_api.flow_checkbox_input_builder(check_module)
-   local input_id = string.format("enabled_%s", check_module.key)
-
-   return(string.format([[
-  <input type="hidden", value="off", name="%s"/>
-  <input type="checkbox" name="%s" %s/>
-  ]], input_id, input_id, ternary(check_module.conf.enabled, "checked", "")))
 end
 
 -- ##############################################

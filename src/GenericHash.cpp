@@ -26,6 +26,7 @@
 GenericHash::GenericHash(NetworkInterface *_iface, u_int _num_hashes,
 			 u_int _max_hash_size, const char *_name) {
   num_hashes = _num_hashes, max_hash_size = _max_hash_size, current_size = 0;
+  last_entry_id = 0;
   purge_step = max_val(num_hashes / PURGE_FRACTION, 1);
   name = strdup(_name ? _name : "???");
 
@@ -34,8 +35,8 @@ GenericHash::GenericHash(NetworkInterface *_iface, u_int _num_hashes,
   for(u_int i = 0; i < num_hashes; i++)
     table[i] = NULL;
 
-  locks = new Mutex*[num_hashes];
-  for(u_int i = 0; i < num_hashes; i++) locks[i] = new Mutex();
+  locks = new RwLock*[num_hashes];
+  for(u_int i = 0; i < num_hashes; i++) locks[i] = new RwLock();
 
   last_purged_hash = _num_hashes - 1;
 }
@@ -77,8 +78,9 @@ bool GenericHash::add(GenericHashEntry *h, bool do_lock) {
     u_int32_t hash = (h->key() % num_hashes);
 
     if(do_lock)
-      locks[hash]->lock(__FILE__, __LINE__);
+      locks[hash]->wrlock(__FILE__, __LINE__);
 
+    h->set_hash_entry_id(last_entry_id++);
     h->set_next(table[hash]);
     table[hash] = h;
     current_size++;
@@ -95,7 +97,8 @@ bool GenericHash::add(GenericHashEntry *h, bool do_lock) {
 
 bool GenericHash::walk(u_int32_t *begin_slot,
 		       bool walk_all,
-		       bool (*walker)(GenericHashEntry *h, void *user_data, bool *entryMatched), void *user_data, bool walk_idle) {
+		       bool (*walker)(GenericHashEntry *h, void *user_data, bool *entryMatched),
+		       void *user_data, bool walk_idle) {
   bool found = false;
   u_int16_t tot_matched = 0;
 
@@ -107,19 +110,18 @@ bool GenericHash::walk(u_int32_t *begin_slot,
       ntop->getTrace()->traceEvent(TRACE_NORMAL, "[walk] Locking %d [%p]", hash_id, locks[hash_id]);
 #endif
 
-      locks[hash_id]->lock(__FILE__, __LINE__);
+      locks[hash_id]->rdlock(__FILE__, __LINE__);
       head = table[hash_id];
 
       while(head) {
-	HashEntryState head_state = head->get_state();
 	GenericHashEntry *next = head->next();
 
         /* FIXX get_state() does not always match idle() as the latter can be 
          * overriden (e.g. Flow), leading to wolking entries that are actually
          * idle even with walk_idle = false, what about using idle() here? */
 
-	if(head_state == hash_entry_state_active
-	   || (walk_idle && head_state == hash_entry_state_idle)) {
+	if(!head->idle()
+	   || (walk_idle && (head->get_state() == hash_entry_state_idle))) {
 	  bool matched = false;
 	  bool rc = walker(head, user_data, &matched);
 
@@ -171,20 +173,20 @@ bool GenericHash::walk(u_int32_t *begin_slot,
   Bucket Lifecycle
 
   Active -> Idle -> Ready to be Purged -> Purged
- */
+*/
 
 u_int GenericHash::purgeIdle(bool force_idle) {
   u_int i, num_purged = 0, buckets_checked = 0;
   time_t now = time(NULL);
   /* Visit all entries when force_idle is true */
-  u_int visit_fraction = !force_idle ? purge_step : num_hashes; 
+  u_int visit_fraction = !force_idle ? purge_step : num_hashes;
 
 #if WALK_DEBUG
-    ntop->getTrace()->traceEvent(TRACE_NORMAL, "[%s @ %s] Begin purgeIdle() [begin index: %u][purge step: %u][force_idle: %u]",
-				 name, iface->get_name(), last_purged_hash, visit_fraction, force_idle ? 1 : 0);
+  ntop->getTrace()->traceEvent(TRACE_NORMAL, "[%s @ %s] Begin purgeIdle() [begin index: %u][purge step: %u][force_idle: %u]",
+			       name, iface->get_name(), last_purged_hash, visit_fraction, force_idle ? 1 : 0);
 #endif
 
-    for(u_int j = 0; j < visit_fraction; j++) {
+  for(u_int j = 0; j < visit_fraction; j++) {
     if(++last_purged_hash == num_hashes) last_purged_hash = 0;
     i = last_purged_hash;
 
@@ -192,7 +194,9 @@ u_int GenericHash::purgeIdle(bool force_idle) {
       GenericHashEntry *head, *prev = NULL;
 
       // ntop->getTrace()->traceEvent(TRACE_NORMAL, "[purge] Locking %d", i);
-      locks[i]->lock(__FILE__, __LINE__);
+      if(!locks[i]->trywrlock(__FILE__, __LINE__))
+	continue; /* Busy, will retry next round */
+
       head = table[i];
 
       while(head) {
@@ -200,34 +204,47 @@ u_int GenericHash::purgeIdle(bool force_idle) {
 	GenericHashEntry *next = head->next();
 
 	buckets_checked++;
-	if(head_state == hash_entry_state_ready_to_be_purged) {
-	  if(!head->idle()) {
-	    /* This should never happen */
-	    ntop->getTrace()->traceEvent(TRACE_ERROR,
-	      "Inconsistent state: GenericHashEntry<%p> state=hash_entry_state_ready_to_be_purged but idle()=false", head_state);
-	  }
 
-	  if(prev == NULL) {
+	switch(head_state) {
+	case hash_entry_state_ready_to_be_purged:
+	  if(!prev)
 	    table[i] = next;
-	  } else {
+	  else
 	    prev->set_next(next);
-	  }
 
 	  num_purged++, current_size--;
 	  delete(head);
 	  head = next;
-	} else {
-	  /* Do the chores */
+	  continue;
+
+	case hash_entry_state_allocated:
+	  /* TCP flows with 3WH not yet completed fall here */
+	  if(force_idle) head->set_hash_entry_state_idle();
+	  break;
+
+	case hash_entry_state_flow_notyetdetected:
 	  head->housekeep(now);
+	  if(force_idle) head->set_hash_entry_state_idle();
+	  break;
 
-	  if(head_state == hash_entry_state_active
-	     && (head->idle()
-		 || force_idle))
+	case hash_entry_state_flow_protocoldetected:
+	  if(force_idle) head->set_hash_entry_state_idle();
+	  break;
+
+	case hash_entry_state_idle:
+	  /* Skip as this is handled by periodic activities thread */
+	  break;
+
+	case hash_entry_state_active:
+	  if(force_idle
+	     || (head->is_hash_entry_state_idle_transition_possible()
+		 && head->is_hash_entry_state_idle_transition_ready()))
 	    head->set_hash_entry_state_idle();
-
-	  prev = head;
-	  head = next;
+	  break;
 	}
+
+	prev = head;
+	head = next;
       } /* while */
 
       locks[i]->unlock(__FILE__, __LINE__);
@@ -243,25 +260,4 @@ u_int GenericHash::purgeIdle(bool force_idle) {
 #endif
 
   return(num_purged);
-}
-
-/* ************************************ */
-
-GenericHashEntry* GenericHash::findByKey(u_int32_t key) {
-  u_int32_t hash = key % num_hashes;
-  GenericHashEntry *head = table[hash];
-
-  if(head == NULL) return(NULL);
-
-  locks[hash]->lock(__FILE__, __LINE__);
-  while(head) {
-    if(!head->idle() && head->key() == key)
-      break;
-    else
-      head = head->next();
-  }
-
-  locks[hash]->unlock(__FILE__, __LINE__);
-
-  return(head);
 }

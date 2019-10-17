@@ -25,7 +25,7 @@
 
 Prefs::Prefs(Ntop *_ntop) {
   num_deferred_interfaces_to_register = 0, cli = NULL;
-  ntop = _ntop, sticky_hosts = location_none,
+  ntop = _ntop,
     ignore_vlans = false, simulate_vlans = false, ignore_macs = false;
   local_networks = strdup(CONST_DEFAULT_HOME_NET "," CONST_DEFAULT_LOCAL_NETS);
   local_networks_set = false, shutdown_when_done = false;
@@ -49,11 +49,10 @@ Prefs::Prefs(Ntop *_ntop) {
     enable_dropped_flows_alerts = true, enable_device_protocols_alerts = false,
     enable_potentially_dangerous_protocols_alerts = false,
     enable_syslog_alerts = false, enable_captive_portal = false, mac_based_captive_portal = false,
-    enabled_malware_alerts = true, enabled_ids_alerts = true,
+    enabled_malware_alerts = true, enabled_external_alerts = true,
     enable_elephant_flows_alerts = false, enable_longlived_flows_alerts = true,
     enable_arp_matrix_generation = false, enable_exfiltration_alerts = true,
     enable_informative_captive_portal = false,
-    external_notifications_enabled = false,
     override_dst_with_post_nat_dst = false, override_src_with_post_nat_src = false,
     use_ports_to_determine_src_and_dst = false;
     hostMask = no_host_mask;
@@ -112,7 +111,6 @@ Prefs::Prefs(Ntop *_ntop) {
      || !(deferred_interfaces_to_register = (char**)calloc(UNLIMITED_NUM_INTERFACES, sizeof(char*))))
     throw "Not enough memory";
 
-  dump_hosts_to_db = location_none;
   json_labels_string_format = true;
 #ifdef WIN32
   daemonize = true;
@@ -359,18 +357,6 @@ void usage() {
 #endif
 #endif
 	 "[--export-flows|-I] <endpoint>      | Export flows with the specified endpoint\n"
-	 "[--dump-hosts|-D] <mode>            | Dump hosts policy (default: none).\n"
-	 "                                    | Values:\n"
-	 "                                    | all    - Dump all hosts\n"
-	 "                                    | local  - Dump only local hosts\n"
-	 "                                    | remote - Dump only remote hosts\n"
-	 "                                    | none   - Do not dump any host\n"
-	 "[--sticky-hosts|-S] <mode>          | Don't flush hosts (default: none).\n"
-	 "                                    | Values:\n"
-	 "                                    | all    - Keep all hosts in memory\n"
-	 "                                    | local  - Keep only local hosts\n"
-	 "                                    | remote - Keep only remote hosts\n"
-	 "                                    | none   - Flush hosts when idle\n"
 	 "--hw-timestamp-mode <mode>          | Enable hw timestamping/stripping.\n"
 	 "                                    | Supported TS modes are:\n"
 	 "                                    | apcon - Timestamped pkts by apcon.com\n"
@@ -595,8 +581,7 @@ void Prefs::reloadPrefsFromRedis() {
 							      CONST_DEFAULT_ALERT_DATA_EXFILTRATION_ENABLED),
     enable_syslog_alerts  = getDefaultBoolPrefsValue(CONST_RUNTIME_PREFS_ALERT_SYSLOG, CONST_DEFAULT_ALERT_SYSLOG_ENABLED),
     enabled_malware_alerts = getDefaultBoolPrefsValue(CONST_RUNTIME_PREFS_MALWARE_ALERTS, CONST_DEFAULT_MALWARE_ALERTS_ENABLED),
-    enabled_ids_alerts = getDefaultBoolPrefsValue(CONST_RUNTIME_PREFS_IDS_ALERTS, CONST_DEFAULT_IDS_ALERTS_ENABLED),
-    external_notifications_enabled         = getDefaultBoolPrefsValue(ALERTS_MANAGER_EXTERNAL_NOTIFICATIONS_ENABLED, false),
+    enabled_external_alerts = getDefaultBoolPrefsValue(CONST_RUNTIME_PREFS_EXTERNAL_ALERTS, CONST_DEFAULT_EXTERNAL_ALERTS_ENABLED),
 
     enable_arp_matrix_generation = getDefaultBoolPrefsValue(CONST_DEFAULT_ARP_MATRIX_GENERATION, false),
 
@@ -929,11 +914,8 @@ int Prefs::setOption(int optkey, char *optarg) {
 #endif
 
   case 'D':
-    if(!strcmp(optarg, "all")) dump_hosts_to_db = location_all;
-    else if(!strcmp(optarg, "local")) dump_hosts_to_db = location_local_only;
-    else if(!strcmp(optarg, "remote")) dump_hosts_to_db = location_remote_only;
-    else if(!strcmp(optarg, "none")) dump_hosts_to_db = location_none;
-    else ntop->getTrace()->traceEvent(TRACE_ERROR, "Unknown value %s for -D", optarg);
+    ntop->getTrace()->traceEvent(TRACE_ERROR,
+				 "-D deprecated.");
     break;
 
   case 'e':
@@ -941,11 +923,10 @@ int Prefs::setOption(int optkey, char *optarg) {
     break;
 
   case 'S':
-    if(!strcmp(optarg, "all")) sticky_hosts = location_all;
-    else if(!strcmp(optarg, "local"))  sticky_hosts = location_local_only;
-    else if(!strcmp(optarg, "remote")) sticky_hosts = location_remote_only;
-    else if(!strcmp(optarg, "none"))   sticky_hosts = location_none;
-    else ntop->getTrace()->traceEvent(TRACE_ERROR, "Unknown value %s for -S", optarg);
+    ntop->getTrace()->traceEvent(TRACE_ERROR,
+				 "-S deprecated, sticky hosts no longer supported. "
+				 "Configure remote and local hosts idle timeouts "
+				 "from the preferences.");
     break;
 
   case 'g':
@@ -1654,21 +1635,9 @@ void Prefs::lua(lua_State* vm) {
   lua_push_bool_table_entry(vm, "is_dump_flows_to_es_enabled",    dump_flows_on_es);
   lua_push_bool_table_entry(vm, "is_dump_flows_to_ls_enabled", dump_flows_on_ls);
 
-  lua_push_uint64_table_entry(vm, "dump_hosts", dump_hosts_to_db);
-
   lua_push_uint64_table_entry(vm, "http.port", get_http_port());
 
   lua_push_str_table_entry(vm, "instance_name", instance_name ? instance_name : (char*)"");
-
-  /* Sticky hosts preferences */
-  if(sticky_hosts != location_none) {
-    char *location_string = NULL;
-
-    if(sticky_hosts == location_all) location_string = (char*)"all";
-    else if(sticky_hosts == location_local_only) location_string = (char*)"local";
-    else if(sticky_hosts == location_remote_only) location_string = (char*)"remote";
-    if(location_string) lua_push_str_table_entry(vm, "sticky_hosts", location_string);
-  }
 
   /* Command line options */
   lua_push_bool_table_entry(vm, "has_cmdl_trace_lvl", has_cmdl_trace_lvl);
@@ -1885,7 +1854,8 @@ bool Prefs::in_elephant_whitelist(const Flow * f) const {
 
 bool Prefs::is_longlived_flow(const Flow * f) const {
   bool ret = !in_longlived_whitelist(f)
-    && f->get_duration() > get_longlived_flow_duration();
+    && f->get_duration() > get_longlived_flow_duration()
+    && f->get_srv_ip_addr()->isNonEmptyUnicastAddress();
 
   return ret;
 }

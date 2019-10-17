@@ -3,6 +3,8 @@
 --
 
 local rtt_utils = {}
+local ts_utils = require "ts_utils_core"
+local format_utils = require "format_utils"
 
 -- ##############################################
 
@@ -11,7 +13,7 @@ local rtt_hosts_key = string.format("ntopng.prefs.ifid_%d.system_rtt_hosts", get
 -- ##############################################
 
 local function rtt_last_updates_key(key)
-  return(string.format("ntopng.cache.ifid_%d.system_rtt_hosts.last_update." .. key, getSystemInterfaceId()))
+  return string.format("ntopng.cache.ifid_%d.system_rtt_hosts.last_update." .. key, getSystemInterfaceId())
 end
 
 -- ##############################################
@@ -42,8 +44,6 @@ function rtt_utils.getLastRttUpdate(key)
       }
     end
   end
-
-  return(nil)
 end
 
 -- ##############################################
@@ -53,7 +53,7 @@ function rtt_utils.key2label(key)
 
   if((parts ~= nil) and (#parts == 3)) then
     -- TODO improve
-    return(string.format("%s [%s] (%s)", parts[1], parts[2], string.upper(parts[3])))
+    return string.format("%s [%s] (%s)", parts[1], parts[2], string.upper(parts[3]))
   end
 
   return key
@@ -72,16 +72,20 @@ function rtt_utils.deserializeHost(val)
       max_rtt = tonumber(parts[4]),
     }
 
-    return(value)
+    return value
   end
-
-  return(nil)
 end
 
 -- ##############################################
 
 function rtt_utils.getHostsSerialized()
-  return(ntop.getHashAllCache(rtt_hosts_key) or {})
+  return ntop.getHashAllCache(rtt_hosts_key) or {}
+end
+
+-- ##############################################
+
+function rtt_utils.getHostSerialized(host_key)
+   return ntop.getHashCache(rtt_hosts_key, host_key) or {}
 end
 
 -- ##############################################
@@ -94,7 +98,21 @@ function rtt_utils.getHosts()
     rv[host] = rtt_utils.deserializeHost(val)
   end
 
-  return(rv)
+  return rv
+end
+
+-- ##############################################
+
+function rtt_utils.getHost(host_key)
+   if not host_key then
+      return
+   end
+
+   res = rtt_utils.getHostSerialized(host_key)
+
+   if not isEmptyString(res) then
+      return rtt_utils.deserializeHost(res)
+   end
 end
 
 -- ##############################################
@@ -119,4 +137,4 @@ end
 
 -- ##############################################
 
-return(rtt_utils)
+return rtt_utils

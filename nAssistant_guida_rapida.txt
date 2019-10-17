@@ -1,0 +1,36 @@
+				===============================
+				| nAssistant_2 - Guida Rapida |
+				===============================
+
+
+Prerequisiti:
+	- ntopng	[ https://github.com/ntop/ntopng ]
+	- Google Action	[ https://developers.google.com/assistant ]
+	- Dialogflow	[ https://dialogflow.com ]
+	
+
+nAssistant è un assistente vocale (o meglio virtuale vista la multimedialità del servizio) relativo al monitoraggio
+del traffico di rete; è implementato come una Google Action la cui struttura del dialogo è costruita con i strumenti
+offerti da dialogflow, mentre il contenuto viene aggregato e costruito all'interno di ntopng, che ha il ruolo di
+web service/fulfillment. (L'intero progetto è in divenire e viene modificato di continuo)
+
+L'agente Dialogflow, che contiene i strumenti costituenti il dialogo (entities, intent, ecc) sono all'interno del file 
+nAssistant02.zip, all'interno della cartella "ntopng". per visualizzarlo al meglio è necessario un account Google, accedere
+alla console dialogflow ed importare l'agente.
+
+Tutti gli script riguardanti l'aggregazione, presentazione e comunicazione con google assistant sono allinterno della
+cartella "ntopng/script/lua/nAssistant".
+Di seguito una breve introduzione al codice:
+	- assistant.lua:	lega i punti del dialogo, creati su dialogflow, ai relativi handler
+	- dialogflow_API.lua: 	api custom per far comunicare ntopng con i servizi google
+	- handlers.lua: 	implementazione delle funzionalità dell'assistente
+	- network_state.lua: 	aggregatore di informazioni rappresentanti lo stato della rete
+	(script di utilità ignorati)
+
+
+Molte altre informazioni sono all'interno del codice sotto forma di commenti.
+
+Una video-demo è presente nella cartella principale "ntopng".
+
+
+

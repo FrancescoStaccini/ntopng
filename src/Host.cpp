@@ -48,9 +48,10 @@ Host::Host(NetworkInterface *_iface, Mac *_mac,
 /* *************************************** */
 
 Host::~Host() {
-  if(num_uses > 0 && (!iface->isView()
-		      || !ntop->getGlobals()->isShutdownRequested() /* View hosts are not in sync with viewed flows so during shutdown it can be normal */))
-    ntop->getTrace()->traceEvent(TRACE_WARNING, "Internal error: num_uses=%u", num_uses);
+  if((getUses() > 0)
+     /* View hosts are not in sync with viewed flows so during shutdown it can be normal */
+     && (!iface->isView() || !ntop->getGlobals()->isShutdownRequested()))
+    ntop->getTrace()->traceEvent(TRACE_WARNING, "Internal error: num_uses=%u", getUses());
 
   // ntop->getTrace()->traceEvent(TRACE_NORMAL, "Deleting %s (%s)", k, localHost ? "local": "remote");
 
@@ -144,8 +145,6 @@ void Host::initialize(Mac *_mac, u_int16_t _vlanId, bool init_all) {
   prefs_loaded = false;
   mud_pref = mud_recording_disabled;
 
-  anomalous_flows_as_client_status = anomalous_flows_as_server_status = 0;
-
   // readStats(); - Commented as if put here it's too early and the key is not yet set
 
 #ifdef NTOPNG_PRO
@@ -163,12 +162,13 @@ void Host::initialize(Mac *_mac, u_int16_t _vlanId, bool init_all) {
   low_goodput_client_flows.reset(), low_goodput_server_flows.reset();
   num_active_flows_as_client.reset(), num_active_flows_as_server.reset();
   alert_score = CONST_NO_SCORE_SET;
+  active_alerted_flows = 0;
 
   flow_alert_counter = NULL;
   good_low_flow_detected = false;
   nextResolveAttempt = 0, mdns_info = NULL;
   host_label_set = false;
-  num_uses = 0, vlan_id = _vlanId % MAX_NUM_VLAN,
+  vlan_id = _vlanId % MAX_NUM_VLAN,
   first_seen = last_seen = iface->getTimeLastPktRcvd();
   memset(&names, 0, sizeof(names));
   asn = 0, asname = NULL;
@@ -425,8 +425,8 @@ void Host::lua(lua_State* vm, AddressTree *ptree,
   lua_push_uint64_table_entry(vm, "active_flows.as_server", getNumIncomingFlows());
   lua_push_uint64_table_entry(vm, "anomalous_flows.as_server", getTotalNumAnomalousIncomingFlows());
   lua_push_uint64_table_entry(vm, "anomalous_flows.as_client", getTotalNumAnomalousOutgoingFlows());
-  lua_push_uint64_table_entry(vm, "anomalous_flows_status_map.as_server", getAnomalousIncomingFlowsStatusMap());
-  lua_push_uint64_table_entry(vm, "anomalous_flows_status_map.as_client", getAnomalousOutgoingFlowsStatusMap());
+  lua_push_uint64_table_entry(vm, "anomalous_flows_status_map.as_server", getAnomalousIncomingFlowsStatusMap().get());
+  lua_push_uint64_table_entry(vm, "anomalous_flows_status_map.as_client", getAnomalousOutgoingFlowsStatusMap().get());
   lua_push_uint64_table_entry(vm, "unreachable_flows.as_server", getTotalNumUnreachableIncomingFlows());
   lua_push_uint64_table_entry(vm, "unreachable_flows.as_client", getTotalNumUnreachableOutgoingFlows());
   lua_push_uint64_table_entry(vm, "host_unreachable_flows.as_server", getTotalNumHostUnreachableIncomingFlows());
@@ -622,30 +622,7 @@ const char * Host::getOSDetail(char * const buf, ssize_t buf_len) {
 
 /* ***************************************** */
 
-bool Host::idle() {
-  if(GenericHashEntry::idle()) return(true);
-
-  if((num_uses > 0) || (!iface->is_purge_idle_interface()))
-    return(false);
-
-  switch(ntop->getPrefs()->get_host_stickiness()) {
-  case location_broadcast_domain_only:
-  case location_none:
-    break;
-
-  case location_local_only:
-    if(isLocalHost() || isSystemHost()) return(false);
-    break;
-
-  case location_remote_only:
-    if(!(isLocalHost() || isSystemHost())) return(false);
-    break;
-
-  case location_all:
-    return(false);
-    break;
-  }
-
+bool Host::is_hash_entry_state_idle_transition_ready() const {
   return(isIdle(ntop->getPrefs()->get_host_max_idle(isLocalHost())));
 };
 
@@ -820,11 +797,6 @@ TrafficShaper* Host::get_shaper(ndpi_protocol ndpiProtocol, bool isIngress) {
     return policer->getShaper(DEFAULT_SHAPER_ID);
   }
 
-  // Avoid dropping critical protocols
-  if(Utils::isCriticalNetworkProtocol(ndpiProtocol.master_protocol) ||
-	  Utils::isCriticalNetworkProtocol(ndpiProtocol.app_protocol))
-    return policer->getShaper(PASS_ALL_SHAPER_ID);
-
   shaper_id = policer->getShaperIdForPool(get_host_pool(), ndpiProtocol, isIngress, &policy_source);
 
 #ifdef SHAPER_DEBUG
@@ -990,8 +962,8 @@ void Host::reloadHostBlacklist() {
   char *ip_str = ip.print(ipbuf, sizeof(ipbuf));
   unsigned long category;
 
-  blacklisted_host = ((ndpi_get_custom_category_match(iface->get_ndpi_struct(), ip_str, &category) == 0) &&
-    (category == CUSTOM_CATEGORY_MALWARE));
+  blacklisted_host = ((ndpi_get_custom_category_match(iface->get_ndpi_struct(),
+    ip_str, strlen(ip_str), &category) == 0) && (category == CUSTOM_CATEGORY_MALWARE));
 }
 
 /* *************************************** */
@@ -1136,10 +1108,15 @@ bool Host::statsResetRequested() {
 /* *************************************** */
 
 void Host::updateStats(update_stats_user_data_t *update_hosts_stats_user_data) {
+  char buf[64];
   struct timeval *tv = update_hosts_stats_user_data->tv;
   Mac *cur_mac = getMac();
 
   if(get_state() == hash_entry_state_idle) {
+    if(getUses() > 0 && !ntop->getGlobals()->isShutdownRequested())
+      /* During shutdown it is acceptable to have a getUses() > 0 as all the hosts are forced as idle */
+      ntop->getTrace()->traceEvent(TRACE_WARNING, "Internal error: num_uses=%u [%s]", getUses(), get_ip()->print(buf, sizeof(buf)));
+    
     set_hash_entry_state_ready_to_be_purged();
 
     if(getNumTriggeredAlerts()

@@ -1946,6 +1946,8 @@ bool Ntop::isExistingInterface(const char * const name) const {
 
 NetworkInterface* Ntop::getNetworkInterface(const char *name, lua_State* vm) {
   char allowed_ifname[MAX_INTERFACE_NAME_LEN] = {0};
+  char *bad_num = NULL;
+  int if_id;
 
   if(vm && getInterfaceAllowed(vm, allowed_ifname)) {
     ntop->getTrace()->traceEvent(TRACE_DEBUG, "Forcing allowed interface. [requested: %s][selected: %s]",
@@ -1956,15 +1958,14 @@ NetworkInterface* Ntop::getNetworkInterface(const char *name, lua_State* vm) {
   if(name == NULL)
     return(NULL);
 
-  /* This method accepts both interface names or Ids */
-  int if_id = atoi(name);
-  char str[8];
+  /* This method accepts both interface names or Ids.
+   * Due to bad Lua number formatting, a float number may be received. */
+  if_id = strtof(name, &bad_num);
 
   if((if_id == SYSTEM_INTERFACE_ID) || !strcmp(name, SYSTEM_INTERFACE_NAME))
     return(getSystemInterface());
 
-  snprintf(str, sizeof(str), "%d", if_id);
-  if (strcmp(name, str) == 0) {
+  if((bad_num == NULL) || (*bad_num == '\0')) {
     /* name is a number */
     return(getInterfaceById(if_id));
   }
@@ -1996,7 +1997,6 @@ int Ntop::getInterfaceIdByName(lua_State *vm, const char * const name) {
 /* ****************************************** */
 
 bool Ntop::registerInterface(NetworkInterface *_if) {
-
   for(int i = 0; i < num_defined_interfaces; i++) {
     if(strcmp(iface[i]->get_name(), _if->get_name()) == 0) {
       ntop->getTrace()->traceEvent(TRACE_WARNING,
@@ -2026,7 +2026,7 @@ bool Ntop::registerInterface(NetworkInterface *_if) {
 void Ntop::initInterface(NetworkInterface *_if) {
   if(_if->initFlowDump(num_dump_interfaces))
     num_dump_interfaces++;
-  _if->checkAggregationMode();
+  _if->checkDisaggregationMode();
   _if->startDBLoop();
 }
 

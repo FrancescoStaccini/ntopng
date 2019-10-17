@@ -94,7 +94,7 @@ class NetworkInterface : public AlertableEntity {
   ViewInterface *viewed_by; /* Whether this interface is 'viewed' by a ViewInterface */
 
   /* Disaggregations */
-  u_int16_t numVirtualInterfaces;
+  u_int16_t numSubInterfaces;
   set<u_int32_t>  flowHashingIgnoredInterfaces;
   FlowHashingEnum flowHashingMode;
   FlowHashing *flowHashing;
@@ -125,13 +125,15 @@ class NetworkInterface : public AlertableEntity {
   string ip_addresses;
   AddressTree interface_networks;
   int id;
-  bool bridge_interface, is_dynamic_interface, is_traffic_mirrored, is_loopback;
+  bool bridge_interface;
+  bool is_dynamic_interface, show_dynamic_interface_traffic;
+  bool is_traffic_mirrored, is_loopback;
   bool reload_custom_categories, reload_hosts_blacklist;
 #ifdef NTOPNG_PRO
   L7Policer *policer;
 #ifndef HAVE_NEDGE
   FlowProfiles  *flow_profiles, *shadow_flow_profiles;
-  SubInterfaces *sub_interfaces, *shadow_sub_interfaces;
+  SubInterfaces *sub_interfaces;
 #endif
   CustomAppStats *custom_app_stats;
   FlowInterfacesStats *flow_interfaces_stats;
@@ -146,7 +148,7 @@ class NetworkInterface : public AlertableEntity {
   pthread_t pollLoop;
   bool pollLoopCreated, has_too_many_hosts, has_too_many_flows, mtuWarningShown;
   bool slow_stats_update, flow_dump_disabled;
-  u_int32_t ifSpeed, numL2Devices, numHosts, numLocalHosts, scalingFactor;
+  u_int32_t ifSpeed, numL2Devices, numFlows, numHosts, numLocalHosts, scalingFactor;
   u_int64_t checkpointPktCount, checkpointBytesCount, checkpointPktDropCount; /* Those will hold counters at checkpoints */
   u_int16_t ifMTU;
   int cpu_affinity; /**< Index of physical core where the network interface works. */
@@ -162,9 +164,6 @@ class NetworkInterface : public AlertableEntity {
   TcpFlowStats tcpFlowStats;
   TcpPacketStats tcpPacketStats;
   ThroughputStats bytes_thpt, pkts_thpt;
-
-  /* Custom categories */
-  std::list<std::string> new_custom_categories, custom_categories_to_purge;
 
   /* Frequent Items */
   FrequentTrafficItems *frequentProtocols;
@@ -210,6 +209,7 @@ class NetworkInterface : public AlertableEntity {
 
   void init();
   void deleteDataStructures();
+
   NetworkInterface* getDynInterface(u_int32_t criteria, bool parser_interface);
   Flow* getFlow(Mac *srcMac, Mac *dstMac, u_int16_t vlan_id,
 		u_int32_t deviceIP, u_int16_t inIndex, u_int16_t outIndex,
@@ -267,7 +267,7 @@ class NetworkInterface : public AlertableEntity {
   void checkMacIPAssociation(bool triggerEvent, u_char *_mac, u_int32_t ipv4);
   void checkDhcpIPRange(Mac *sender_mac, struct dhcp_packet *dhcp_reply, u_int16_t vlan_id);
   bool checkBroadcastDomainTooLarge(u_int32_t bcast_mask, u_int16_t vlan_id, const u_int8_t *src_mac, const u_int8_t *dst_mac, u_int32_t spa, u_int32_t tpa) const;
-  void pollQueuedeBPFEvents();
+  void pollQueuedeCompanionEvents();
 
  public:
   /**
@@ -297,7 +297,7 @@ class NetworkInterface : public AlertableEntity {
 		      void *user_data,
 		      bool walk_idle = false /* Should never walk idle unless in ViewInterface::flowPollLoop */);
 
-  void checkAggregationMode();
+  void checkDisaggregationMode();
   inline void setCPUAffinity(int core_id)      { cpu_affinity = core_id; };
   inline void getIPv4Address(bpf_u_int32 *a, bpf_u_int32 *m) { *a = ipv4_network, *m = ipv4_network_mask; };
   virtual void startPacketPolling();
@@ -353,7 +353,7 @@ class NetworkInterface : public AlertableEntity {
   inline void setSeenPods()                    { has_seen_pods = true; }
   inline bool hasSeenContainers() const        { return(has_seen_containers); }
   inline void setSeenContainers()              { has_seen_containers = true; }
-  inline struct ndpi_detection_module_struct* get_ndpi_struct() { return(ndpi_struct);         };
+  inline struct ndpi_detection_module_struct* get_ndpi_struct() const { return(ndpi_struct); };
   inline bool is_purge_idle_interface()        { return(purge_idle_flows_hosts);               };
   int dumpFlow(time_t when, Flow *f);
 #ifdef NTOPNG_PRO
@@ -368,6 +368,7 @@ class NetworkInterface : public AlertableEntity {
   inline void incOOOPkts(u_int32_t num)             { tcpPacketStats.incOOO(num);  };
   inline void incLostPkts(u_int32_t num)            { tcpPacketStats.incLost(num); };
   virtual void checkPointCounters(bool drops_only);
+  bool registerSubInterface(NetworkInterface *sub_iface, u_int32_t criteria);
 
   virtual u_int64_t getCheckPointNumPackets();
   virtual u_int64_t getCheckPointNumBytes();
@@ -412,16 +413,18 @@ class NetworkInterface : public AlertableEntity {
   inline EthStats* getStats()      { return(&ethStats);          };
   inline int get_datalink()        { return(pcap_datalink_type); };
   inline void set_datalink(int l)  { pcap_datalink_type = l;     };
-  inline int isRunning()	   { return running;             };
+  bool isRunning() const;
   inline bool isTrafficMirrored()  { return is_traffic_mirrored; };
+  inline bool showDynamicInterfaceTraffic() { return show_dynamic_interface_traffic; };
   void  updateTrafficMirrored();
+  void updateDynIfaceTrafficPolicy();
   void updateFlowDumpDisabled();
   bool restoreHost(char *host_ip, u_int16_t vlan_id);
   u_int printAvailableInterfaces(bool printHelp, int idx, char *ifname, u_int ifname_len);
   void findFlowHosts(u_int16_t vlan_id,
 		     Mac *src_mac, IpAddress *_src_ip, Host **src,
 		     Mac *dst_mac, IpAddress *_dst_ip, Host **dst);
-  virtual Flow* findFlowByKey(u_int32_t key, AddressTree *allowed_hosts);
+  virtual Flow* findFlowByKeyAndHashId(u_int32_t key, u_int hash_id, AddressTree *allowed_hosts);
   virtual Flow* findFlowByTuple(u_int16_t vlan_id,
 				IpAddress *src_ip,  IpAddress *dst_ip,
 				u_int16_t src_port, u_int16_t dst_port,
@@ -449,9 +452,8 @@ class NetworkInterface : public AlertableEntity {
 		     const u_char *packet,
 		     u_int16_t *ndpiProtocol,
 		     Host **srcHost, Host **dstHost, Flow **flow);
-  void processFlow(ParsedFlow *zflow);
   void processInterfaceStats(sFlowInterfaceStats *stats);
-  void getActiveFlowsStats(nDPIStats *stats, FlowStats *status_stats, AddressTree *allowed_hosts, const char *host_ip, u_int16_t vlan_id);
+  void getActiveFlowsStats(nDPIStats *stats, FlowStats *status_stats, AddressTree *allowed_hosts, Host *h, Paginator *p);
   virtual u_int32_t periodicStatsUpdateFrequency();
   void periodicStatsUpdate();
   virtual u_int32_t getFlowMaxIdle();
@@ -530,9 +532,9 @@ class NetworkInterface : public AlertableEntity {
 		const char *groupColumn);
   int dropFlowsTraffic(AddressTree *allowed_hosts, Paginator *p);
 
-  virtual void purgeIdle(time_t when);
-  u_int purgeIdleFlows();
-  u_int purgeIdleHostsMacsASesVlans();
+  virtual void purgeIdle(time_t when, bool force_idle = false);
+  u_int purgeIdleFlows(bool force_idle);
+  u_int purgeIdleHostsMacsASesVlans(bool force_idle);
 
   virtual u_int64_t getNumPackets();
   virtual u_int64_t getNumBytes();
@@ -627,7 +629,7 @@ class NetworkInterface : public AlertableEntity {
   inline FlowProfile* getFlowProfile(Flow *f)  { return(flow_profiles ? flow_profiles->getFlowProfile(f) : NULL);           }
   inline bool checkProfileSyntax(char *filter) { return(flow_profiles ? flow_profiles->checkProfileSyntax(filter) : false); }
 
-  void updateSubInterfaces();
+  inline bool checkSubInterfaceSyntax(char *filter) { return(sub_interfaces ? sub_interfaces->checkSyntax(filter) : false); }
 #endif
 
   bool passShaperPacket(TrafficShaper *a_shaper, TrafficShaper *b_shaper, struct pcap_pkthdr *h);
@@ -682,6 +684,8 @@ class NetworkInterface : public AlertableEntity {
   bool getCountryInfo(lua_State* vm, const char *country);
   bool getVLANInfo(lua_State* vm, u_int16_t vlan_id);
   bool getArpStatsMatrixInfo(lua_State* vm);
+  inline void incNumFlows() { numFlows++; };
+  inline void decNumFlows() { numFlows--; };
   inline void incNumHosts(bool local) { if(local) numLocalHosts++; numHosts++; };
   inline void decNumHosts(bool local) { if(local) numLocalHosts--; numHosts--; };
   inline void incNumL2Devices()       { numL2Devices++; }
@@ -722,8 +726,8 @@ class NetworkInterface : public AlertableEntity {
   void topProtocolsAdd(u_int16_t pool_id, u_int16_t protocol, u_int32_t bytes);
   inline void luaTopPoolsProtos(lua_State *vm) { frequentProtocols->luaTopPoolsProtocols(vm); }
   void topMacsAdd(Mac *mac, u_int16_t protocol, u_int32_t bytes);
-  inline bool isDynamicInterface()                { return(is_dynamic_interface);            };
-  inline void setDynamicInterface()               { is_dynamic_interface = true;             };
+  inline bool isSubInterface()                { return(is_dynamic_interface);            };
+  inline void setSubInterface()               { is_dynamic_interface = true;             };
   bool isLocalBroadcastDomainHost(Host * const h, bool is_inline_call);
   inline void luaTopMacsProtos(lua_State *vm) { frequentMacs->luaTopMacsProtocols(vm); }
   inline MDNS* getMDNS() { return(mdns); }
@@ -748,7 +752,9 @@ class NetworkInterface : public AlertableEntity {
   inline uint32_t getMaxSpeed() const        { return(ifSpeed);     }
   inline bool isLoopback() const             { return(is_loopback); }
 
-  virtual bool read_from_pcap_dump()         { return(false); };
+  virtual bool read_from_pcap_dump()      const { return(false); };
+  virtual bool read_from_pcap_dump_done() const { return(false); };
+  virtual void set_read_from_pcap_dump_done()   { ; };
   virtual void updateDirectionStats()        { ; }
   void makeTsPoint(NetworkInterfaceTsPoint *pt);
   void tsLua(lua_State* vm);
@@ -769,9 +775,9 @@ class NetworkInterface : public AlertableEntity {
   void nDPILoadIPCategory(char *category, ndpi_protocol_category_t id);
   void nDPILoadHostnameCategory(char *category, ndpi_protocol_category_t id);
 
-  inline void incNumAlertedFlows()                        { num_active_alerted_flows++;                               };
-  inline void decNumAlertedFlows()                        { num_idle_alerted_flows++;                                 };
-  virtual u_int64_t getNumActiveAlertedFlows()      const { return num_active_alerted_flows - num_idle_alerted_flows; };
+  void incNumAlertedFlows(Flow *f);
+  void decNumAlertedFlows(Flow *f);
+  virtual u_int64_t getNumActiveAlertedFlows()      const;
   inline void setHasAlerts(bool has_stored_alerts)        { this->has_stored_alerts = has_stored_alerts; }
   inline void incNumAlertsEngaged(ScriptPeriodicity p)    { num_alerts_engaged[(u_int)p]++; }
   inline void decNumAlertsEngaged(ScriptPeriodicity p)    { num_alerts_engaged[(u_int)p]--; }

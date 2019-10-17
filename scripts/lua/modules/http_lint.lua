@@ -1,5 +1,5 @@
 --
--- (C) 2017-18 - ntop.org
+-- (C) 2017-19 - ntop.org
 --
 
 local pragma_once = 1
@@ -201,9 +201,9 @@ local function whereCleanup(p)
    return(p:gsub('%W><!()','_'))
 end
 
+-- NOTE: keep in sync with getLicensePattern()
 local function validateLicense(p)
-   -- A password (e.g. used in ntopng authentication)
-   return string.match(p,"[%l%u%d/+]+=*") == p or validateEmpty(p)
+   return string.match(p,"[%l%u%d/+=]+") == p or validateEmpty(p)
 end
 
 local function validatePassword(p)
@@ -343,7 +343,8 @@ end
 local function validateBroadcastUnicast(mode)
    local modes = {"unicast", "broadcast_multicast",
 		  "one_way",
-		  "one_way_unicast", "one_way_broadcast_multicast"}
+		  "one_way_unicast", "one_way_broadcast_multicast",
+		  "bidirectional"}
 
    return validateChoice(modes, mode)
 end
@@ -1091,7 +1092,8 @@ local known_parameters = {
    ["err_counters_since"]      = validateCounterSince,          -- Select actual or absolute counters
    ["err_counters_filter"]     = validateErrorsFilter,          -- Filter by errrrs, discards, both
    ["country"]                 = validateCountry,               -- Country code
-   ["flow_key"]                = validateNumber,                -- The ID of a flow hash
+   ["flow_key"]                = validateNumber,                -- The key of the flow
+   ["flow_hash_id"]            = validateNumber,                -- The ID uniquely identifying the flow in the hash table
    ["pool"]                    = validateNumber,                -- A pool ID
    ["direction"]               = validateDirection,             -- Sent or Received direction
    ["stats_type"]              = validateStatsType,             -- A mode for historical stats queries
@@ -1107,8 +1109,6 @@ local known_parameters = {
    ["entity"]                  = validateNumber,                -- An alert entity type
    ["entity_excludes"]         = validateListOfTypeInline(validateNumber),
    ["asn"]                     = validateNumber,                -- An ASN number
-   ["client_asn"]              = validateNumber,                -- A client ASN number
-   ["server_asn"]              = validateNumber,                -- A server ASN number
    ["module"]                  = validateTopModule,             -- A top script module
    ["step"]                    = validateNumber,                -- A step value
    ["cf"]                      = validateConsolidationFunction, -- An RRD consolidation function
@@ -1149,9 +1149,11 @@ local known_parameters = {
 -- PREFERENCES - see prefs.lua for details
    -- Toggle Buttons
    ["interface_rrd_creation"]                      = validateBool,
+   ["interface_one_way_hosts_rrd_creation"]        = validateBool,
    ["interface_top_talkers_creation"]              = validateBool,
    ["interface_flow_dump"]                         = validateBool,
    ["is_mirrored_traffic"]                         = validateBool,
+   ["show_dyn_iface_traffic"]                      = validateBool,
    ["interface_network_discovery"]                 = validateBool,
    ["dynamic_iface_vlan_creation"]                 = validateBool,
    ["toggle_mysql_check_open_files_limit"]         = validateBool,
@@ -1164,7 +1166,7 @@ local known_parameters = {
    ["toggle_remote_to_remote_alerts"]              = validateBool,
    ["toggle_dropped_flows_alerts"]                 = validateBool,
    ["toggle_malware_probing"]                      = validateBool,
-   ["toggle_ids_alerts"]                           = validateBool,
+   ["toggle_external_alerts"]                      = validateBool,
    ["toggle_potentially_dangerous_protocols_alerts"] = validateBool,
    ["toggle_device_protocols_alerts"]              = validateBool,
    ["toggle_elephant_flows_alerts"]                = validateBool,
@@ -1230,12 +1232,7 @@ local known_parameters = {
 
    -- Input fields
    ["companion_interface"]                         = validateEmptyOr(validateInterface),
-   ["minute_top_talkers_retention"]                = validateNumber,
-   ["nindex_retention_days"]                       = validateNumber,
-   ["mysql_retention"]                             = validateNumber,
-   ["influx_retention"]                            = validateNumber,
-   ["old_rrd_files_retention"]                     = validateNumber,
-   ["minute_top_talkers_retention"]                = validateNumber,
+   ["data_retention_days"]                         = validateNumber,
    ["max_num_alerts_per_entity"]                   = validateNumber,
    ["elephant_flow_remote_to_local_bytes"]         = validateNumber,
    ["elephant_flow_local_to_remote_bytes"]         = validateNumber,
@@ -1329,7 +1326,7 @@ local known_parameters = {
    ["file_id"]                                     = validateNumber,
    ["job_action"]                                  = validateExtractionJobAction,
    ["job_id"]                                      = validateNumber,
-   ["n2disk_license"]                              = validateSingleAlphanumericWord,
+   ["n2disk_license"]                              = {licenseCleanup, validateLicense},
    ["record_traffic"]                              = validateBool,
    ["max_extracted_pcap_bytes"]                    = validateNumber,
    ["traffic_recording_provider"]                  = validateTrafficRecordingProvider,
@@ -1501,6 +1498,7 @@ local known_parameters = {
    ["hosts_only"]              = validateBool,
    ["rtt_hosts"]               = validateListOfTypeInline(validateSingleWord), -- TODO
    ["rtt_host"]                = validateSingleWord,
+   ["rtt_max"]                 = validateEmptyOr(validateNumber),
    ["disabled_status"]         = validateListOfTypeInline(validateNumber),
 
    -- Containers

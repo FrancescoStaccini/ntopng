@@ -73,8 +73,8 @@ class Prefs {
   bool enable_mining_alerts;
   bool enable_dropped_flows_alerts, enable_device_protocols_alerts;
   bool enable_potentially_dangerous_protocols_alerts;
-  bool enable_syslog_alerts, external_notifications_enabled;
-  bool enabled_malware_alerts, enabled_ids_alerts;
+  bool enable_syslog_alerts;
+  bool enabled_malware_alerts, enabled_external_alerts;
   bool enable_captive_portal, enable_informative_captive_portal, mac_based_captive_portal;
   bool override_dst_with_post_nat_dst, override_src_with_post_nat_src;
   bool use_ports_to_determine_src_and_dst;
@@ -95,7 +95,6 @@ class Prefs {
   u_int8_t num_ts_slots, ts_num_steps;
   HostMask hostMask;
 
-  LocationPolicy dump_hosts_to_db, sticky_hosts;
   u_int32_t max_num_hosts, max_num_flows;
   u_int32_t attacker_max_num_flows_per_sec, victim_max_num_flows_per_sec;
   u_int32_t attacker_max_num_syn_per_sec, victim_max_num_syn_per_sec;
@@ -174,7 +173,6 @@ class Prefs {
   }
   time_t pro_edition_demo_ends_at();
   inline char* get_local_networks()                     { if (!local_networks_set) return NULL; return(local_networks); };
-  inline LocationPolicy get_host_stickiness()            { return(sticky_hosts);           };
   inline void disable_dns_resolution()                  { enable_dns_resolution = false;  };
   inline void resolve_all_hosts()                       { resolve_all_host_ip = true;     };
   inline bool is_dns_resolution_enabled_for_all_hosts() { return(resolve_all_host_ip);    };
@@ -256,8 +254,6 @@ class Prefs {
   void add_default_interfaces();
   int loadFromCLI(int argc, char *argv[]);
   int loadFromFile(const char *path);
-  inline void set_dump_hosts_to_db_policy(LocationPolicy p)   { dump_hosts_to_db = p;               };
-  inline LocationPolicy get_dump_hosts_to_db_policy()         { return(dump_hosts_to_db);           };
   void add_network_interface(char *name, char *description);
   inline bool json_labels_as_strings()                        { return(json_labels_string_format);       };
   inline void set_json_symbolic_labels_format(bool as_string) { json_labels_string_format = as_string;   };
@@ -330,9 +326,8 @@ class Prefs {
   inline bool are_device_protocols_alerts_enabled()      { return(enable_device_protocols_alerts);      };
   inline bool are_potentially_dangerous_protocols_alerts_enabled() { return(enable_potentially_dangerous_protocols_alerts); };
   inline bool are_alerts_syslog_enabled()                { return(enable_syslog_alerts);                };
-  inline bool are_ext_alerts_notifications_enabled()     { return(external_notifications_enabled);      };
   inline bool are_malware_alerts_enabled()               { return(enabled_malware_alerts);              };
-  inline bool are_ids_alerts_enabled()                   { return(enabled_ids_alerts);              };
+  inline bool are_external_alerts_enabled()              { return(enabled_external_alerts);              };
   inline bool are_elephant_flows_alerts_enabled()        { return(enable_elephant_flows_alerts);        };
   inline bool are_longlived_flows_alerts_enabled()       { return(enable_longlived_flows_alerts);       };
   inline bool are_exfiltration_alerts_enabled()          { return(enable_exfiltration_alerts);          };

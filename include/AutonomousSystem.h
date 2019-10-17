@@ -62,7 +62,6 @@ class AutonomousSystem : public GenericHashEntry, public GenericTrafficElement, 
   }
 
   void updateRoundTripTime(u_int32_t rtt_msecs);
-  bool idle();
   void lua(lua_State* vm, DetailsLevel details_level, bool asListElement);
 
   inline void deserialize(json_object *obj) {

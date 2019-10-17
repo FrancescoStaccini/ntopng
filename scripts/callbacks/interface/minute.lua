@@ -24,12 +24,12 @@ local _ifname = ifstats.name
 
 ts_dump.run_min_dump(_ifname, ifstats, iface_ts, config, when, verbose)
 
-if ts_utils.hasHighResolutionTs() then
+if interface.hasHighResTs() then
    local ts_5min_dump = require "ts_5min_dump_utils"
    local time_threshold = when - (when % 60) --[[ align ]] + 50 --[[ margin ]]
    local config = ts_5min_dump.getConfig()
 
-   ts_5min_dump.run_5min_dump(_ifname, ifstats, config, when, time_threshold, false--[[ skip ts]], true--[[ skip alerts]], verbose)
+   ts_5min_dump.run_5min_dump(_ifname, ifstats, config, when, time_threshold, verbose)
 end
 
 -- ########################################################

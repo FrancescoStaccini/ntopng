@@ -92,12 +92,12 @@ for entity_id, values in pairsByKeys(entitites) do
     local disabled_alerts = alerts_api.getEntityAlertsDisabled(ifid, entity_id, entity_value)
 
     for _, alert in pairs(alert_consts.alert_types) do
-      if ntop.bitmapIsSet(disabled_alerts, alert.alert_id) then
+      if((alert.alert_id > 0) and ntop.bitmapIsSet(disabled_alerts, alert.alert_id)) then
         totalRows = totalRows + 1
         local idx = totalRows
 
         data[idx] = {
-          entity_formatted = firstToUpper(alert_consts.formatAlertEntity(ifid, alertEntityRaw(entity_id), entity_value)),
+          entity_formatted = firstToUpper(formatAlertEntity(ifid, alertEntityRaw(entity_id), entity_value)),
           entity_id = entity_id,
           entity_value = entity_value,
           alert = alert,
@@ -130,7 +130,7 @@ for key in pairsByValues(sort_to_key, sOrder) do
     local item = data[key]
 
     res[#res + 1] = {
-      column_entity_formatted = firstToUpper(alert_consts.formatAlertEntity(ifid, alertEntityRaw(item.entity_id), item.entity_value)),
+      column_entity_formatted = firstToUpper(formatAlertEntity(ifid, alertEntityRaw(item.entity_id), item.entity_value)),
       column_type = alertTypeLabel(item.alert.alert_id),
       column_count = item.count,
       column_entity_id = item.entity_id,

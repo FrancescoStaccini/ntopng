@@ -340,7 +340,7 @@ void ZMQCollectorInterface::collect_flows() {
               recvStats.num_flows += parseTLVFlow(uncompressed, uncompressed_len, subscriber_id, this);
             else {
 	      uncompressed[uncompressed_len] = '\0';
-              recvStats.num_flows += parseJSONFlow(uncompressed, uncompressed_len, subscriber_id, this);
+              recvStats.num_flows += parseJSONFlow(uncompressed, uncompressed_len, subscriber_id);
 	    }
             break;
 
@@ -433,13 +433,13 @@ void ZMQCollectorInterface::lua(lua_State* vm) {
 
 /* **************************************************** */
 
-void ZMQCollectorInterface::purgeIdle(time_t when) {
+void ZMQCollectorInterface::purgeIdle(time_t when, bool force_idle) {
   NetworkInterface::purgeIdle(when);
 
   if(flowHashing) {
     FlowHashing *current, *tmp;
     HASH_ITER(hh, flowHashing, current, tmp)
-      static_cast<NetworkInterface*>(current->iface)->purgeIdle(when);
+      static_cast<NetworkInterface*>(current->iface)->purgeIdle(when, force_idle);
   }
 }
 

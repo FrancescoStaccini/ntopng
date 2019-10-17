@@ -93,7 +93,7 @@ class GenericHashEntry {
   time_t first_seen;   /**< Time of first seen. */
   time_t last_seen;    /**< Time of last seen. */
   NetworkInterface *iface; /**< Pointer of network interface. */
-  virtual bool isIdle(u_int max_idleness);
+  bool isIdle(u_int max_idleness) const;
 
  public:
   /**
@@ -133,6 +133,12 @@ class GenericHashEntry {
    */
   inline GenericHashEntry* next()    { return(hash_next); };
   /**
+   * @brief Set and id to uniquely identify this
+   * hash entry into the hash table (class GenericHash)
+   * it belongs to.
+   */
+  virtual void set_hash_entry_id(u_int hash_entry_id) { };
+  /**
    * @brief Set the next hash entry.
    * @details Inline method.
    * 
@@ -156,19 +162,63 @@ class GenericHashEntry {
   inline void set_hash_entry_state_ready_to_be_purged() {
     set_state(hash_entry_state_ready_to_be_purged);
   };
-  HashEntryState get_state();
+
+  /**
+   * @brief Set the hash entry state to active
+   */
+  inline void set_hash_entry_state_active() {
+    set_state(hash_entry_state_active);
+  };  
+
+  /**
+   * @brief Set the hash entry state to not yet detected (nDPI)
+   */
+  inline void set_hash_entry_state_flow_notyetdetected() {
+    set_state(hash_entry_state_flow_notyetdetected);
+  };  
+
+  /**
+   * @brief Set the hash entry state to protocol detected (nDPI).
+   * Note that unknown (protocol) is a valid protocol
+  */
+  inline void set_hash_entry_state_flow_protocoldetected() {
+    set_state(hash_entry_state_flow_protocoldetected);
+  };
+
+  /**
+   * @brief Set the hash entry state to allocated
+   */
+  inline void set_hash_entry_state_allocated() {
+    /*
+      We don't check anything here as it's used by flows to step back
+      to the initial state
+    */
+    hash_entry_state = hash_entry_state_allocated;
+  };  
+
+  /**
+   * @brief Determine whether this entry is ready for the transition to the idle state
+   * 
+   */
+  virtual bool is_hash_entry_state_idle_transition_ready() const;
+  /**
+   * @brief Determine whether it is possible to perform the idle transition for this entry
+   * 
+   */
+  bool is_hash_entry_state_idle_transition_possible() const;
+  HashEntryState get_state() const;
   void updateSeen();
   void updateSeen(time_t _last_seen);
   bool equal(GenericHashEntry *b)         { return((this == b) ? true : false); };  
   inline NetworkInterface* getInterface() { return(iface);                      };
-  virtual bool idle();
+  bool idle() const;
   virtual void housekeep(time_t t)     { return;                 };
   inline u_int get_duration()          { return((u_int)(1+last_seen-first_seen)); };
   virtual u_int32_t key()              { return(0);         };  
   virtual char* get_string_key(char *buf, u_int buf_len) const { buf[0] = '\0'; return(buf); };
   void incUses()                       { num_uses++;      }
   void decUses()                       { num_uses--;      }
-  u_int16_t getUses()                  { return num_uses; }
+  u_int16_t getUses()            const { return num_uses; }
 
   virtual void deserialize(json_object *obj);
   virtual void getJSONObject(json_object *obj, DetailsLevel details_level);

@@ -1,5 +1,5 @@
 --
--- (C) 2013-18 - ntop.org
+-- (C) 2013-19 - ntop.org
 --
 
 local dirs = ntop.getDirs()
@@ -557,14 +557,10 @@ print('<div style=\"display:none;\" id=\"flow_purged\" class=\"alert alert-dange
 
 throughput_type = getThroughputType()
 
-flow_key = _GET["flow_key"]
+local flow_key = _GET["flow_key"]
+local flow_hash_id = _GET["flow_hash_id"]
 
-interface.select(ifname)
-if(flow_key == nil) then
-   flow = nil
-else
-   flow = interface.findFlowByKey(tonumber(flow_key))
-end
+flow = interface.findFlowByKeyAndHashId(tonumber(flow_key), tonumber(flow_hash_id))
 
 local ifid = interface.name2id(ifname)
 local label = getFlowLabel(flow)
@@ -858,7 +854,7 @@ else
       if(flow["protos.ssl.server_certificate"] ~= nil) then
 	 print(i18n("flow_details.server_certificate")..": <A HREF=\"http://"..flow["protos.ssl.server_certificate"].."\">"..flow["protos.ssl.server_certificate"].."</A>")
 
-	 if(flow["flow.status"] == flow_consts.status_ssl_certificate_mismatch) then
+	 if(flow["flow.status"] == flow_consts.status_types.status_ssl_certificate_mismatch.status_id) then
 	    print("\n<br><i class=\"fa fa-warning fa-lg\" style=\"color: #f0ad4e;\"></i> <b><font color=\"#f0ad4e\">"..i18n("flow_details.certificates_not_match").."</font></b>")
 	 end
       end
@@ -868,10 +864,16 @@ else
 
    if((flow["protos.ssl.ja3.client_hash"] ~= nil) or (flow["protos.ssl.ja3.server_hash"] ~= nil)) then
       print('<tr><th width=30%><A HREF="https://github.com/salesforce/ja3">JA3</A></th><td>')
+      if(flow["protos.ssl.ja3.client_malicious"]) then
+        print('<i class="fa fa-ban" title="'.. i18n("alerts_dashboard.malicious_signature_detected") ..'"></i> ')
+      end
       ja3url(flow["protos.ssl.ja3.client_hash"], nil)
       print("</td><td>")
+      if(flow["protos.ssl.ja3.server_malicious"]) then
+        print('<i class="fa fa-ban" title="'.. i18n("alerts_dashboard.malicious_signature_detected") ..'"></i> ')
+      end
       ja3url(flow["protos.ssl.ja3.server_hash"], flow["protos.ssl.ja3.server_unsafe_cipher"])
-      print(cipher2str(flow["protos.ssl.ja3.server_cipher"]))
+      --print(cipher2str(flow["protos.ssl.ja3.server_cipher"]))
       print("</td></tr>")
    end
 
@@ -953,6 +955,8 @@ else
 
    -- ######################################
 
+   local alerted_status = nil
+
    if flow["flow.alerted"] then
       local message = nil
 
@@ -963,27 +967,39 @@ else
          local res = performAlertsQuery("SELECT *", "historical-flows", {row_id = flow["flow.alert_rowid"]})
 
          if((res ~= nil) and (#res == 1)) then
-            message = formatAlertMessage(ifid, res[1], true --[[ skip peers, we are already showing the flow ]])
+            local alert_json = json.decode(res[1]["alert_json"])
+
+            if(alert_json ~= nil) and (alert_json["status_info"] ~= nil)then
+               alerted_status = tonumber(res[1].flow_status)
+               message = flow_consts.getStatusDescription(alerted_status, alert_json["status_info"])
+            end
          end
       end
 
       print(message)
       print("</td></tr>\n")
    end
+   
+   local additional_status = flow["status_map"]
 
-   local status_icon = ""
+   additional_status = ntop.bitmapClear(additional_status, flow_consts.status_types.status_normal.status_id)
 
-   if(flow["status_map"] ~= 0) then
-      status_icon = "<i class=\"fa fa-exclamation-circle\" aria-hidden=true style=\"color: orange;\" \"></i> "
+   if(alerted_status ~= nil) then
+      additional_status = ntop.bitmapClear(additional_status, alerted_status)
    end
 
-   print("<tr><th width=30%>"..status_icon..i18n("flow_details.flow_status").."</th><td colspan=2>")
-   for id, t in pairs(flow_consts.flow_status_types) do
-      if ntop.bitmapIsSet(flow["status_map"], id) then
-         print(getFlowStatus(id, flow2statusinfo(flow)).."<br />")
+   if(additional_status ~= 0) then
+      local status_icon = "<i class=\"fa fa-exclamation-circle\" aria-hidden=true style=\"color: orange;\" \"></i> "
+
+      print("<tr><th width=30%>"..status_icon..i18n("flow_details.additional_flow_status").."</th><td colspan=2>")
+      for _, t in pairs(flow_consts.status_types) do
+	 local id = t.status_id
+         if ntop.bitmapIsSet(additional_status, id) then
+            print(flow_consts.getStatusDescription(id, flow2statusinfo(flow)).."<br />")
+         end
       end
+      print("</td></tr>\n")
    end
-   print("</td></tr>\n")
 
    if debug_score then
      if(flow["score"] > 0) then
@@ -1015,7 +1031,7 @@ else
 
       local width  = 1024
       local height = 200
-      local url = ntop.getHttpPrefix().."/lua/get_flow_process_tree.lua?flow_key="..flow_key
+      local url = ntop.getHttpPrefix().."/lua/get_flow_process_tree.lua?flow_key="..flow_key.."&flow_hash_id="..flow_hash_id
       epbf_utils.draw_flow_processes_graph(width, height, url)
 
       print('</th></tr>\n')
@@ -1071,11 +1087,18 @@ else
    end
 
    if(flow["protos.http.last_url"] ~= nil) then
-      print("<tr><th width=30% rowspan=4>"..i18n("http").."</th>")
-      print("<th>"..i18n("flow_details.http_method").."</th><td>"..(flow["protos.http.last_method"] or '').."</td>")
-      print("</tr>")
+      local rowspan = 2
+      if(not isEmptyString(flow["protos.http.last_method"])) then rowspan = rowspan + 1 end
+      if not have_nedge and flow["protos.http.last_return_code"] and flow["protos.http.last_return_code"] ~= 0 then rowspan = rowspan + 1 end
 
-      print("<tr><th>"..i18n("flow_details.server_name").."</th><td colspan=2>")
+      print("<tr><th width=30% rowspan="..rowspan..">"..i18n("http").."</th>")
+      if(not isEmptyString(flow["protos.http.last_method"])) then
+        print("<th>"..i18n("flow_details.http_method").."</th><td>"..(flow["protos.http.last_method"] or '').."</td>")
+        print("</tr>")
+        print("<tr>")
+      end
+
+      print("<th>"..i18n("flow_details.server_name").."</th><td colspan=2>")
       local s = flowinfo2hostname(flow,"srv")
       if(not isEmptyString(flow["host_server_name"])) then
 	 s = flow["host_server_name"]
@@ -1091,7 +1114,7 @@ else
       print(flow["protos.http.last_url"].."\">"..shortenString(flow["protos.http.last_url"] or '', 64).."</A> <i class=\"fa fa-external-link\">")
       print("</td></tr>\n")
 
-      if not have_nedge then
+      if not have_nedge and flow["protos.http.last_return_code"] and flow["protos.http.last_return_code"] ~= 0 then
         print("<tr><th>"..i18n("flow_details.response_code").."</th><td colspan=2>"..(flow["protos.http.last_return_code"] or '').."</td></tr>\n")
       end
    else
@@ -1210,9 +1233,12 @@ function update () {
 		    url: ']]
 print (ntop.getHttpPrefix())
 print [[/lua/flow_stats.lua',
-		    data: { ifid: "]] print(tostring(ifid)) print [[", flow_key: "]] print(flow_key) print [[" },
+		    data: { ifid: "]] print(tostring(ifid)) print [[", ]]
+print [[flow_key: "]] print(string.format("%u", flow_key)) print [[", ]]
+print [[flow_hash_id: "]] print(string.format("%u", flow_hash_id)) print [[", ]]
+print[[ },
 		    success: function(content) {
-                        if(content == "{}") {
+			if(content == "{}") {
    ]]
 
 -- If the flow is already idle, another error message is already shown

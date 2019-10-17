@@ -27,7 +27,6 @@ require "graph_utils"
 require "alert_utils"
 require "db_utils"
 local ts_utils = require "ts_utils"
-local flow_callbacks_utils = require "flow_callbacks_utils"
 local recording_utils = require "recording_utils"
 local companion_interface_utils = require "companion_interface_utils"
 local storage_utils = require "storage_utils"
@@ -45,6 +44,8 @@ ifid = _GET["ifid"]
 
 ifname_clean = "iface_"..tostring(ifid)
 msg = ""
+
+local disaggregation_criterion_key = "ntopng.prefs.dynamic_sub_interfaces.ifid_"..tostring(ifid)..".mode"
 
 function inline_input_form(name, placeholder, tooltip, value, can_edit, input_opts, input_class)
    if(can_edit) then
@@ -271,6 +272,14 @@ if _SERVER["REQUEST_METHOD"] == "POST" and _POST["companion_interface"] ~= nil t
    companion_interface_utils.setCompanion(ifstats.id, _POST["companion_interface"])
 end
 
+if _SERVER["REQUEST_METHOD"] == "POST" and _POST["disaggregation_criterion"] ~= nil then
+   if _POST["disaggregation_criterion"] == "none" then
+      ntop.delCache(disaggregation_criterion_key)
+   else
+      ntop.setCache(disaggregation_criterion_key, _POST["disaggregation_criterion"])
+   end
+end
+
 if _SERVER["REQUEST_METHOD"] == "POST" and not isEmptyString(_POST["traffic_recording_provider"]) then
    local prev_provider = recording_utils.getCurrentTrafficRecordingProvider(ifstats.id)
 
@@ -336,10 +345,18 @@ if(isAdministrator()) then
    elseif not is_pcap_dump then
       print("\n<li><a href=\""..url.."&page=config\"><i class=\"fa fa-cog fa-lg\"></i></a></li>")
    end
-   if(page == "flow_callbacks") then
-      print("\n<li class=\"active\"><a href=\"#\"><i class=\"fa fa-superpowers\"></i></a></li>\n")
+   if(page == "callbacks") then
+      print("\n<li class=\"active\"><a href=\"#\"><i class=\"fa fa-superpowers fa-lg\"></i></a></li>\n")
    else
-      print("\n<li><a href=\""..url.."&page=flow_callbacks\"><i class=\"fa fa-superpowers\"></i></a></li>")
+      print("\n<li><a href=\""..url.."&page=callbacks\"><i class=\"fa fa-superpowers fa-lg\"></i></a></li>")
+   end
+end
+
+if(isAdministrator() and ntop.isEnterprise() and not ifstats.isDynamic) and isEmptyString(ntop.getCache(disaggregation_criterion_key)) then
+   if(page == "sub_interfaces") then
+      print("\n<li class=\"active\"><a href=\"#\"><i class=\"fa fa-code-fork fa-lg\"></i></a></li>\n")
+   else
+      print("\n<li><a href=\""..url.."&page=sub_interfaces\"><i class=\"fa fa-code-fork fa-lg\"></i></a></li>")
    end
 end
 
@@ -360,9 +377,9 @@ if isAdministrator() then
 
    if not have_nedge then
       if(page == "pools") then
-         print("\n<li class=\"active\"><a href=\"#\"><i class=\"fa fa-users\"></i> "..label.."</a></li>\n")
+         print("\n<li class=\"active\"><a href=\"#\"><i class=\"fa fa-users fa-lg\"></i> "..label.."</a></li>\n")
       else
-         print("\n<li><a href=\""..url.."&page=pools\"><i class=\"fa fa-users\"></i> "..label.."</a></li>")
+         print("\n<li><a href=\""..url.."&page=pools\"><i class=\"fa fa-users fa-lg\"></i> "..label.."</a></li>")
       end
    end
 end
@@ -672,6 +689,22 @@ if((page == "overview") or (page == nil)) then
 
       print("<tr><th nowrap>"..i18n("http_page.traffic_sent")..ternary(txrx_chart_available, " <A HREF='"..url.."&page=historical&ts_schema=iface:traffic_rxtx'><i class='fa fa-area-chart fa-sm'></i></A>", "").."</th><td width=20%><span id=if_out_bytes>"..bytesToSize(ifstats.eth.egress.bytes).."</span> [<span id=if_out_pkts>".. formatValue(ifstats.eth.egress.packets) .. " ".. label .."</span>] <span id=pkts_out_trend></span></td>")
       print("<th nowrap>"..i18n("http_page.traffic_received")..ternary(txrx_chart_available, " <A HREF='"..url.."&page=historical&ts_schema=iface:traffic_rxtx'><i class='fa fa-area-chart fa-sm'></i></A>", "").."</th><td width=20%><span id=if_in_bytes>"..bytesToSize(ifstats.eth.ingress.bytes).."</span> [<span id=if_in_pkts>".. formatValue(ifstats.eth.ingress.packets) .. " ".. label .."</span>] <span id=pkts_in_trend></span><td></td></tr>")
+   end
+  
+   if not interface.isPacketInterface() then 
+      local external_json_stats = ntop.getCache(getRedisIfacePrefix(ifid)..".external_stats")
+      if not isEmptyString(external_json_stats) then
+         local external_stats = json.decode(external_json_stats)
+         if external_stats ~= nil then
+            print("<tr><th colspan=7 nowrap>"..i18n("external_stats.title").."</th></tr>\n")
+            for key, value in pairsByKeys(external_stats, asc) do
+               print("<tr>")
+               print("<th nowrap>"..ternary(i18n("external_stats."..key), i18n("external_stats."..key), key).."</th>")
+               print("<td colspan=4>"..ternary(type(value) == "number", formatValue(value), value).."</td>")
+               print("</tr>")
+            end
+         end
+      end
    end
 
    if(prefs.is_dump_flows_enabled and ifstats.isView == false) then
@@ -1309,8 +1342,7 @@ elseif(page == "traffic_recording" and has_traffic_recording_page) then
    print('</div></div>')
 elseif(page == "alerts") then
 
-   drawAlertSourceSettings("interface", ifname_clean,
-      i18n("show_alerts.iface_delete_config_btn", {iface=if_name}), "show_alerts.iface_delete_config_confirm",
+   printAlertTables("interface", ifname_clean,
       "if_stats.lua", {ifid=ifid}, if_name, "interface")
 
 elseif(page == "config") then
@@ -1349,7 +1381,7 @@ elseif(page == "config") then
    print[[
    <form id="iface_config" lass="form-inline" method="post">
    <input name="csrf" type="hidden" value="]] print(ntop.getRandomCSRFValue()) print[[" />
-   <table class="table table-bordered table-striped">]]
+   <table id="iface_config_table" class="table table-bordered table-striped">]]
 
    if ((not is_pcap_dump) and
        (ifstats.name ~= nil) and
@@ -1418,7 +1450,7 @@ elseif(page == "config") then
    local serialize_by_mac
    local serialize_by_mac_key = string.format("ntopng.prefs.ifid_%u.serialize_local_broadcast_hosts_as_macs", ifId)
 
-   if _SERVER["REQUEST_METHOD"] == "POST" then
+   if(_POST["lbd_hosts_as_macs"] ~= nil) then
       serialize_by_mac = _POST["lbd_hosts_as_macs"]
 
       if ntop.getPref(serialize_by_mac_key) ~= serialize_by_mac then
@@ -1484,8 +1516,43 @@ elseif(page == "config") then
    print [[<tr>
          <th>]] print(i18n("if_stats_config.interface_rrd_creation")) print[[</th>
          <td>
-            <input name="interface_rrd_creation" type="checkbox" value="1" ]] print(interface_rrd_creation_checked) print[[>
+            <input id="interface_rrd_creation" name="interface_rrd_creation" type="checkbox" value="1" ]] print(interface_rrd_creation_checked) print[[>
          </td>
+      </tr>
+
+      <script type="text/javascript">
+        $("#interface_rrd_creation").change(function(){
+          var self = this;
+          $("#iface_config_table tr.rrd_creation").toggle(self.checked); 
+        }).change();
+     </script>
+]]
+
+   -- Skip timeseries for hosts with unidirectional traffic
+   local interface_one_way_hosts_rrd_creation = true
+   local interface_one_way_hosts_rrd_creation_checked = "checked"
+
+   if _SERVER["REQUEST_METHOD"] == "POST" then
+      if _POST["interface_one_way_hosts_rrd_creation"] ~= "1" then
+	 interface_one_way_hosts_rrd_creation = false
+	 interface_one_way_hosts_rrd_creation_checked = ""
+      end
+
+      ntop.setPref("ntopng.prefs.ifid_"..ifId..".interface_one_way_hosts_rrd_creation", tostring(interface_one_way_hosts_rrd_creation))
+   else
+      interface_one_way_hosts_rrd_creation = ntop.getPref("ntopng.prefs.ifid_"..ifId..".interface_one_way_hosts_rrd_creation")
+
+      if interface_one_way_hosts_rrd_creation == "false" then
+	 interface_one_way_hosts_rrd_creation = false
+	 interface_one_way_hosts_rrd_creation_checked = ""
+      end
+   end
+
+   print [[<tr class="rrd_creation" ]] if not interface_rrd_creation then print("style='display:none;'") end print[[>
+	 <th>]] print(i18n("if_stats_config.interface_one_way_hosts_rrd_creation")) print[[</th>
+	 <td>
+	    <input name="interface_one_way_hosts_rrd_creation" type="checkbox" value="1" ]] print(interface_one_way_hosts_rrd_creation_checked) print[[>
+	 </td>
       </tr>]]
 
    -- per-interface Top-Talkers generation
@@ -1525,7 +1592,7 @@ elseif(page == "config") then
       </tr>]]
    end
 
-   -- per-interface Network Discovery
+   -- Mirrored Traffic
    if not ntop.isnEdge() and interface.isPacketInterface() then
       local is_mirrored_traffic = false
       local is_mirrored_traffic_checked = ""
@@ -1650,6 +1717,97 @@ elseif(page == "config") then
       end
    end
 
+   if not ifstats.isDynamic then
+      local cur_mode = ntop.getCache(disaggregation_criterion_key)
+      if isEmptyString(cur_mode) then
+         cur_mode = "none"
+      end
+
+      local labels = {
+	i18n("prefs.none"),
+	i18n("prefs.vlan"),
+	i18n("prefs.probe_ip_address"),
+	i18n("prefs.flow_interface"),
+	i18n("prefs.ingress_flow_interface"),
+	i18n("prefs.ingress_vrf_id")
+      }
+
+      local values = {}
+      if is_packet_interface then
+        values = {
+ 	  "none",
+	  "vlan"
+        }
+      else
+        values = {
+ 	  "none",
+	  "vlan",
+	  "probe_ip",
+	  "iface_idx",
+	  "ingress_iface_idx",
+	  "ingress_vrf_id"
+        }
+      end
+
+      print [[
+       <tr>
+	 <th>]] print(i18n("prefs.dynamic_interfaces_creation_title")) print[[</th>
+	 <td>
+	   <select name="disaggregation_criterion" class="form-control" style="width:36em; display:inline;">]]
+
+	 for k, value in ipairs(values) do
+	    local label = labels[k]
+	    print[[<option value="]] print(value) print[[" ]] if cur_mode == value then print('selected="selected"') end print[[">]] print(label) print[[</option>]]
+	 end
+
+	 print[[
+	   </select>
+	  ]] 
+         print ("<br><br><small><p><b>"..i18n("notes").."</b><ul>"..
+		"<li>"..i18n("prefs.dynamic_interfaces_creation_description").."</li>"..
+		"<li>"..i18n("prefs.dynamic_interfaces_creation_note_0").."</li>"..
+		"<li>"..i18n("prefs.dynamic_interfaces_creation_note_4").."</li>"..
+		"<li>"..i18n("prefs.dynamic_interfaces_creation_note_1").."</li>")
+         if not is_packet_interface then
+            print("<li>"..i18n("prefs.dynamic_interfaces_creation_note_2").."</li>"..
+		  "<li>"..i18n("prefs.dynamic_interfaces_creation_note_3").."</li>")
+         end
+         print [[
+           </ul></small>
+	 </td>
+       </tr>]]
+
+      -- Show dynamic traffic in the master interface
+      local show_dyn_iface_traffic = false
+      local show_dyn_iface_traffic_checked = ""
+      local show_dyn_iface_traffic_pref = string.format("ntopng.prefs.ifid_%d.show_dynamic_interface_traffic", ifId)
+
+      if _SERVER["REQUEST_METHOD"] == "POST" then
+	 if _POST["show_dyn_iface_traffic"] == "1" then
+	    show_dyn_iface_traffic = true
+	    show_dyn_iface_traffic_checked = "checked"
+	 end
+
+	 ntop.setPref(show_dyn_iface_traffic_pref,
+		      ternary(show_dyn_iface_traffic == true, '1', '0'))
+	 interface.updateDynIfaceTrafficPolicy()
+      else
+	 show_dyn_iface_traffic = ternary(ntop.getPref(show_dyn_iface_traffic_pref) == '1', true, false)
+
+	 if show_dyn_iface_traffic then
+	    show_dyn_iface_traffic_checked = "checked"
+	 end
+      end
+
+      print [[<tr>
+	 <th>]] print(i18n("if_stats_config.show_dyn_iface_traffic")) print[[</th>
+	 <td>
+           <input type="checkbox" name="show_dyn_iface_traffic" value="1" ]] print(show_dyn_iface_traffic_checked) print[[>
+           <br><br><small><p><b>]] print(i18n("notes")) print [[</b><ul><li>]] print(i18n("if_stats_config.show_dyn_iface_traffic_note")) print [[</li></ul></p></small>
+	 </td>
+      </tr>]]
+
+   end
 
       print[[
    </table>
@@ -1659,12 +1817,14 @@ elseif(page == "config") then
       aysHandleForm("#iface_config");
    </script>]]
 
-elseif(page == "flow_callbacks") then
+elseif(page == "callbacks") then
    if(not isAdministrator()) then
       return
    end
 
-   flow_callbacks_utils.print_callbacks_config()
+   drawAlertSourceSettings("interface", ifname_clean,
+      i18n("show_alerts.iface_delete_config_btn", {iface=if_name}), "show_alerts.iface_delete_config_confirm",
+      "if_stats.lua", {ifid=ifid}, if_name, "interface")
 
 elseif(page == "snmp_bind") then
    if ((not hasSnmpDevices(ifstats.id)) or (not is_packet_interface)) then
@@ -1823,6 +1983,10 @@ elseif(page == "snmp_bind") then
       snmp_recheck_selection();
    });
 </script>]]
+elseif(page == "sub_interfaces") then
+   if(isAdministrator() and ntop.isEnterprise()) then
+      dofile(dirs.installdir .. "/pro/scripts/lua/enterprise/sub_interfaces.lua")
+   end
 elseif(page == "pools") then
     dofile(dirs.installdir .. "/scripts/lua/admin/host_pools.lua")
 elseif(page == "dhcp") then

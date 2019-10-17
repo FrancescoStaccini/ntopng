@@ -339,8 +339,7 @@ int AlertsManager::storeAlert(time_t tstart, time_t tend, int granularity, Alert
 bool AlertsManager::notifyFlowAlert(u_int64_t rowid) {
   bool rv = false;
 
-  if(!ntop->getPrefs()->are_alerts_disabled()
-	  && ntop->getPrefs()->are_ext_alerts_notifications_enabled()) {
+  if(!ntop->getPrefs()->are_alerts_disabled()) {
     json_object *notif = json_object_new_object();
 
     if(notif) {
@@ -388,7 +387,7 @@ int AlertsManager::storeFlowAlert(Flow *f) {
     u_int64_t cur_rowid = (u_int64_t)-1, cur_counter;
     u_int64_t cur_cli2srv_bytes, cur_srv2cli_bytes, cur_cli2srv_packets, cur_srv2cli_packets = 0;
     FlowStatus status;
-    FlowStatusMap status_map;
+    Bitmap status_map;
  
     if(!store_initialized || !store_opened || !f)
       return(-1);
@@ -399,7 +398,7 @@ int AlertsManager::storeFlowAlert(Flow *f) {
     status = f->getFlowStatus(&status_map);
 
     alert_type = Utils::flowStatus2AlertType(status);
-    alert_severity = Utils::flowStatus2AlertLevel(status, f->getIDSAlertSeverity());
+    alert_severity = Utils::flowStatus2AlertLevel(status, f->getExternalAlertSeverity());
 
     cli = f->get_cli_host(), srv = f->get_srv_host();
     cli_ip_addr = f->get_cli_ip_addr(), srv_ip_addr = f->get_srv_ip_addr();
@@ -565,7 +564,7 @@ int AlertsManager::storeFlowAlert(Flow *f) {
     m.unlock(__FILE__, __LINE__);
 
     if((rc == 0) && (cur_rowid != (u_int64_t)-1)) {
-      f->setFlowAlerted(cur_rowid);
+      f->setFlowAlertId(cur_rowid);
       notifyFlowAlert(cur_rowid);
     }
 
@@ -602,7 +601,7 @@ int AlertsManager::storeFlowAlert(Flow *f, AlertType alert_type, AlertLevel aler
     u_int64_t cur_rowid = (u_int64_t)-1, cur_counter;
     u_int64_t cur_cli2srv_bytes, cur_srv2cli_bytes, cur_cli2srv_packets, cur_srv2cli_packets = 0;
     FlowStatus status;
-    FlowStatusMap status_map;
+    Bitmap status_map;
  
     if(!store_initialized || !store_opened || !f)
       return(-1);
@@ -620,11 +619,13 @@ int AlertsManager::storeFlowAlert(Flow *f, AlertType alert_type, AlertLevel aler
     if(srv_ip_addr)
       srv_ip = srv_ip_addr->print(srv_ip_buf, sizeof(srv_ip_buf));
 
+    json_object *status_info = f->flow2statusinfojson();
+
     if((alert_json_obj = json_object_new_object()) == NULL)
       return(-1);
 
     json_object_object_add(alert_json_obj, "info", json_object_new_string(info ? info : (char*)""));
-    json_object_object_add(alert_json_obj, "status_info", json_object_new_string(status_info ? status_info : (char*)""));
+    json_object_object_add(alert_json_obj, "status_info", status_info ? status_info : json_object_new_object());
     alert_json = json_object_to_json_string(alert_json_obj);
 
     m.lock(__FILE__, __LINE__);
@@ -774,7 +775,7 @@ int AlertsManager::storeFlowAlert(Flow *f, AlertType alert_type, AlertLevel aler
     m.unlock(__FILE__, __LINE__);
 
     if((rc == 0) && (cur_rowid != (u_int64_t)-1)) {
-      f->setFlowAlerted(cur_rowid);
+      f->setFlowAlertId(cur_rowid);
       notifyFlowAlert(cur_rowid);
     }
 

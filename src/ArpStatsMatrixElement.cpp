@@ -44,21 +44,6 @@ ArpStatsMatrixElement::~ArpStatsMatrixElement() {
 
 /* *************************************** */
 
-bool ArpStatsMatrixElement::idle() {
-  bool rc;
-
-  if(GenericHashEntry::idle()) return(true);
-  
-  if((num_uses > 0) || (!iface->is_purge_idle_interface()))
-    return(false);
-
-  rc = isIdle(MAX_LOCAL_HOST_IDLE);
-
-  return(rc);
-}
-
-/* *************************************** */
-
 bool ArpStatsMatrixElement::equal(const u_int8_t _src_mac[6],
 				  const u_int32_t _src_ip, const u_int32_t _dst_ip,
 				  bool * const src2dst) {

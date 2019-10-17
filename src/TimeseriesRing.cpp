@@ -87,6 +87,18 @@ void TimeseriesRing::lua(lua_State* vm) {
 
 /* *************************************** */
 
+bool TimeseriesRing::isRingEnabled(const NetworkInterface *_iface) {
+  if(!_iface || !_iface->isPacketInterface())
+    return false; /* Only for packet interfaces */
+
+  if(!ntop->getPrefs())
+    return false; /* Preferences not instantiated (-h?) */
+
+  return ntop->getPrefs()->getNumTsSlots() > 0;
+}
+
+/* *************************************** */
+
 /* NOTE: same format as TimeseriesRingStatus::lua */
 void TimeseriesRing::luaSinglePoint(lua_State* vm, NetworkInterface *iface,
 				    TimeseriesPoint *pt) {

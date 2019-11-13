@@ -7,10 +7,6 @@ local ts_utils = require "ts_utils_core"
 local format_utils = require "format_utils"
 local user_scripts = require("user_scripts")
 require "ts_5min"
----------
-local arp_matrix_utils = require "arp_matrix_utils"
-local dropbox = require "dropbox_utils"
----------
 
 -- Set to true to debug host timeseries points timestamps
 local enable_debug = false
@@ -44,77 +40,6 @@ function ts_dump.l2_device_update_stats_rrds(when, devicename, device, ifstats, 
         when,verbose)
 end
 
--- ########################################################
-
---WIP--WIP--WIP--WIP--WIP--WIP--WIP--WIP--WIP--WIP--WIP--WIP
-
---TODO: SINCRONIZZA A MANO CON IL FILE ORIGINALE DEL REPO DI NTOP
---      ricontrolla i nomi delle utils e anche in generale che alcune cosine sono cambiate
---      per pulizia: in ts_dump.run_5min_dump(...) la table.merge al volo non è elegantissima
---note: sono divise in gruppi (max 3 per limiti dovuti al grafico delle ts)
---      potrei rtattare i tipi di device come le ndpi_categories, però poi dovrei organizzare a modo la vicualizzazione nell'interfaccia (l'elenco a scorrimento coi nomi delle label)
-
---WIP--WIP--WIP--WIP--WIP--WIP--WIP--WIP--WIP--WIP--WIP--WIP
-function ts_dump.l2_device_update_talkers_stats_rrds( when, devicename, device, ifstats, verbose, talkers)
-  local tt = arp_matrix_utils.talkersTot(talkers)
-
-  if tt > 0 then 
-    ts_utils.append("mac:local_talkers", {ifid=ifstats.id, mac=devicename,
-                num_talkers = tt,
-                },
-          when, verbose)
-
-    if talkers["Router/Switch"] or talkers["Wireless Network"] then 
-      ts_utils.append("mac:local_talkers_network_devices", {ifid=ifstats.id, mac=devicename,
-                  num_router_or_switch = ternary(talkers["Router/Switch"], talkers["Router/Switch"], 0),
-                  num_wireless_network = ternary(talkers["Wireless Network"], talkers["Wireless Network"], 0),
-                  },
-      when, verbose)
-    end
-
-    if talkers["Laptop"] or talkers["Tablet"] or talkers["Phone"] then 
-      ts_utils.append("mac:local_talkers_mobile_devices", {ifid=ifstats.id, mac=devicename,
-                  num_laptop = ternary(talkers["Laptop"], talkers["Laptop"], 0),
-                  num_tablet = ternary(talkers["Tablet"], talkers["Tablet"], 0),
-                  num_phone = ternary(talkers["Phone"], talkers["Phone"], 0),
-                  },
-      when, verbose)
-    end
-
-    if talkers["Video"] or talkers["TV"] or talkers["Multimedia"] then 
-      ts_utils.append("mac:local_talkers_media_devices", {ifid=ifstats.id, mac=devicename,
-                  num_video = ternary(talkers["Video"], talkers["Video"], 0),
-                  num_tv = ternary(talkers["TV"], talkers["TV"], 0),
-                  num_multimedia = ternary(talkers["Multimedia"], talkers["Multimedia"], 0),
-                  },
-      when, verbose)
-    end
-
-    if talkers["NAS"] or talkers["Printer"] or talkers["Computer"] then 
-    ts_utils.append("mac:local_talkers_work_devices", {ifid=ifstats.id, mac=devicename,
-                num_nas = ternary(talkers["NAS"], talkers["NAS"], 0),
-                num_printer = ternary(talkers["Printer"], talkers["Printer"], 0),
-                num_computer = ternary(talkers["Computer"], talkers["Computer"], 0),
-                },
-    when, verbose)
-    end
-
-    if talkers["IoT"] then 
-      ts_utils.append("mac:local_talkers_iot_devices", {ifid=ifstats.id, mac=devicename,
-                  num_iot = talkers["IoT"],
-                  },
-      when, verbose)  
-    end
-
-    if talkers["Unknown"] then 
-    ts_utils.append("mac:local_talkers_unknow_devices", {ifid=ifstats.id, mac=devicename,
-                  num_unknow = talkers["Unknown"],
-                  },
-    when, verbose)
-    end
-
-  end
-end
 -- ########################################################
 
 function ts_dump.asn_update_rrds(when, ifstats, verbose)
@@ -261,10 +186,6 @@ function ts_dump.getConfig()
   config.vlan_rrd_creation = ntop.getPref("ntopng.prefs.vlan_rrd_creation")
   config.tcp_retr_ooo_lost_rrd_creation = ntop.getPref("ntopng.prefs.tcp_retr_ooo_lost_rrd_creation")
   config.ndpi_flows_timeseries_creation = ntop.getPref("ntopng.prefs.ndpi_flows_rrd_creation")
-
-  --WIP--WIP--WIP
-  config.arp_matrix_timseries_rrd_creation = ntop.getPref("ntopng.prefs.is_arp_matrix_generation_enabled")
-  --WIP--WIP--WIP
 
   -- ########################################################
   -- Populate some defaults
@@ -494,13 +415,13 @@ function ts_dump.run_5min_dump(_ifname, ifstats, config, when, time_threshold, v
   local dumped_hosts = {}
 
   -- Save hosts stats (if enabled from the preferences)
-  if (is_rrd_creation_enabled and (config.host_rrd_creation ~= "0")) then
-    local is_one_way_hosts_rrd_creation_enabled = (ntop.getPref("ntopng.prefs.ifid_"..ifstats.id..".interface_one_way_hosts_rrd_creation") ~= "false")
+  if is_rrd_creation_enabled and config.host_rrd_creation ~= "0" then
+     local is_one_way_hosts_rrd_creation_enabled = (ntop.getPref("ntopng.prefs.ifid_"..ifstats.id..".interface_one_way_hosts_rrd_creation") ~= "false")
 
-    local in_time = callback_utils.foreachLocalRRDHost(_ifname, time_threshold, is_rrd_creation_enabled, function (hostname, host_ts)
+     local in_time = callback_utils.foreachLocalRRDHost(_ifname, time_threshold, true --[[ timeseries ]], is_one_way_hosts_rrd_creation_enabled, function (hostname, host_ts)
       local host_key = host_ts.tskey
 
-      if(is_rrd_creation_enabled and (dumped_hosts[host_key] == nil)) then
+      if(dumped_hosts[host_key] == nil) then
         local min_host_instant = min_instant
 
         if(host_ts.initial_point ~= nil) then
@@ -523,17 +444,16 @@ function ts_dump.run_5min_dump(_ifname, ifstats, config, when, time_threshold, v
           local instant = host_point.instant
 
           if instant >= min_host_instant then
-            --WIP--WIP--WIP
-            ts_dump.host_update_rrd(instant, host_key, table.merge( host_point, {hostname = hostname}), ifstats, verbose, config) --wip: hostname added in "host_point" for the dropbpox share timeseries
+            ts_dump.host_update_rrd(instant, host_key, host_point, ifstats, verbose, config)
           elseif enable_debug then
-            traceError(TRACE_NORMAL, TRACE_CONSOLE, "Skipping point: instant=" .. instant .. " but min_host_instant=" .. min_host_instant)            
+            traceError(TRACE_NORMAL, TRACE_CONSOLE, "Skipping point: instant=" .. instant .. " but min_host_instant=" .. min_host_instant)
           end
         end
 
         -- mark the host as dumped
         dumped_hosts[host_key] = true
       end
-      
+
       num_processed_hosts = num_processed_hosts + 1
     end)
 
@@ -546,31 +466,13 @@ function ts_dump.run_5min_dump(_ifname, ifstats, config, when, time_threshold, v
   --tprint("Dump of ".. num_processed_hosts .. " hosts: completed in " .. (os.time() - dump_tstart) .. " seconds")
 
   if is_rrd_creation_enabled then
-    if config.l2_device_rrd_creation ~= "0" then 
-
-      --WIP--WIP-- outside the callback the heavy computational stuff
-      if config.arp_matrix_timseries_rrd_creation then
-        arp_matrix_talkers_table = arp_matrix_utils.getLocalTalkersDeviceType()
-        arp_matrix_utils.dumpArpMatrix(_ifname)
-      end
-      --WIP--WIP--WIP
-
+    if config.l2_device_rrd_creation ~= "0" then
       local in_time = callback_utils.foreachDevice(_ifname, time_threshold, function (devicename, device)
         ts_dump.l2_device_update_stats_rrds(when, devicename, device, ifstats, verbose)
 
         if config.l2_device_ndpi_timeseries_creation == "per_category" then
           ts_dump.l2_device_update_categories_rrds(when, devicename, device, ifstats, verbose)
         end
-
-        --WIP--WIP--WIP-- inside the callback the particular stuff
-        if config.arp_matrix_timseries_rrd_creation then
-          local device_talkers = {}
-          if arp_matrix_talkers_table and arp_matrix_talkers_table[devicename] then
-            device_talkers = arp_matrix_talkers_table[devicename].talkersDevices
-          end
-          ts_dump.l2_device_update_talkers_stats_rrds( when, devicename, device, ifstats, verbose, device_talkers )
-        end
-        --WIP--WIP--WIP
       end)
 
       if not in_time then
@@ -620,3 +522,7 @@ end
 -- ########################################################
 
 return ts_dump
+
+
+
+

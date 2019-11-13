@@ -715,8 +715,8 @@ end
 
 --#########################################################################################################
 
---TODO: non sarebbe malemettere info specifiche dentro "status" in network_state.get_hosts_flow_misbehaving_stats()
-      --con quelle info potrei dire belle cosine! guarda su ntopng  cosa lui dice riguardo ad ogni mis_flow
+--TODO: non sarebbe male mettere info specifiche dentro "status" in network_state.get_hosts_flow_misbehaving_stats()
+      --con quelle info potrei dire belle cosine! guarda su ntopng dettagli/descrizioni riguardo ad ogni mis_flow
 
 function handlers_module.get_host_misbehaving_flows_info(user_request)
   local flow_consts = require "flow_consts"

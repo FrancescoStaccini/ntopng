@@ -24,7 +24,9 @@
 /* ***************************************** */
 
 GenericHashEntry::GenericHashEntry(NetworkInterface *_iface) {
-  hash_next = NULL, iface = _iface, first_seen = last_seen = 0, num_uses = 0;
+  hash_next = NULL, iface = _iface, first_seen = last_seen = 0;
+  num_inc_uses = num_dec_uses = 0;
+  hash_table = NULL;
 
   hash_entry_state = hash_entry_state_active; /* Default for all but Flow */
   
@@ -58,10 +60,14 @@ void GenericHashEntry::updateSeen() {
 /* ***************************************** */
 
 void GenericHashEntry::set_state(HashEntryState s) {
-  if((int)s < (int)hash_entry_state
+  if((s < hash_entry_state /* Can't go back */
+      || (s != hash_entry_state + 1 /* Only ahead, one state at time */
+	  /* Only exception is for flows, which can go from allocated to protocoldetected without 
+	     stepping on not yet detected */
+	  && !(hash_entry_state == hash_entry_state_allocated && s == hash_entry_state_flow_protocoldetected)))
      && (!iface || iface->isRunning()))
     ntop->getTrace()->traceEvent(TRACE_ERROR, "Internal error: invalid state transition %d -> %d",
-				 (int)hash_entry_state, (int)s);
+				 hash_entry_state, s);
   else
     hash_entry_state = s;
 };
@@ -86,6 +92,23 @@ bool GenericHashEntry::is_hash_entry_state_idle_transition_possible() const {
 
   return true;
 };
+
+/* ***************************************** */
+
+void GenericHashEntry::periodic_hash_entry_state_update(void *user_data, bool quick)  {
+  if(get_state() == hash_entry_state_idle) {
+    if(!idle() && !ntop->getGlobals()->isShutdown()) {
+      /* This should never happen */
+      ntop->getTrace()->traceEvent(TRACE_ERROR,
+				   "Inconsistent state: GenericHashEntry<%p> state=hash_entry_state_idle but idle()=false", this);
+    }
+  }
+}
+
+/* ***************************************** */
+
+void GenericHashEntry::periodic_stats_update(void *user_data, bool quick)  {
+}
 
 /* ***************************************** */
 

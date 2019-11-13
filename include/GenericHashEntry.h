@@ -24,6 +24,8 @@
 
 #include "ntop_includes.h"
 
+class Generichash;
+
 /** @class GenericHashEntry
  *  @brief Base hash entry class.
  *  @details Defined the base hash entry class for ntopng.
@@ -81,6 +83,8 @@ class GenericHashEntry {
  private:
   GenericHashEntry *hash_next; /**< Pointer of next hash entry.*/
   HashEntryState hash_entry_state;
+  GenericHash *hash_table;
+
   /**
    * @brief Set one of the states of the hash entry in its lifecycle.
    *
@@ -89,13 +93,15 @@ class GenericHashEntry {
   void set_state(HashEntryState s);
   
  protected:
-  u_int32_t num_uses;  /* Don't use 16 bits as we might run out of space on large networks with MACs, VLANs etc. */
+  u_int64_t num_inc_uses;  /* Don't use 16 bits as we might run out of space on large networks with MACs, VLANs etc. */
+  u_int64_t num_dec_uses;  /* Don't use 16 bits as we might run out of space on large networks with MACs, VLANs etc. */
   time_t first_seen;   /**< Time of first seen. */
   time_t last_seen;    /**< Time of last seen. */
   NetworkInterface *iface; /**< Pointer of network interface. */
   bool isIdle(u_int max_idleness) const;
 
  public:
+
   /**
     * @brief A Constructor
     * @details Creating a new GenericHashEntry.
@@ -104,6 +110,7 @@ class GenericHashEntry {
     * @return A new Instance of GenericHashEntry.
     */
   GenericHashEntry(NetworkInterface *_iface);
+
   /**
    * @brief A destructor.
    * @details Virtual method.
@@ -111,6 +118,7 @@ class GenericHashEntry {
    * @return Delete the instance.
    */
   virtual ~GenericHashEntry();
+
   /**
    * @brief Get the first seen time.
    * @details Inline method.
@@ -118,6 +126,7 @@ class GenericHashEntry {
    * @return Time of first seen.
    */
   inline time_t get_first_seen() const { return(first_seen); };
+
   /**
    * @brief Get the last seen time.
    * @details Inline method.
@@ -125,6 +134,7 @@ class GenericHashEntry {
    * @return Time of last seen.
    */
   inline time_t get_last_seen()  const { return(last_seen); };
+
   /**
    * @brief Get the next hash entry.
    * @details Inline method.
@@ -132,12 +142,20 @@ class GenericHashEntry {
    * @return Return the next hash entry.
    */
   inline GenericHashEntry* next()    { return(hash_next); };
+
+  /**
+   * @brief Set a pointer to the hash table this entry
+   * hash been added to
+   */
+  void set_hash_table(GenericHash *gh) { hash_table = gh; };
+
   /**
    * @brief Set and id to uniquely identify this
    * hash entry into the hash table (class GenericHash)
    * it belongs to.
    */
   virtual void set_hash_entry_id(u_int hash_entry_id) { };
+
   /**
    * @brief Set the next hash entry.
    * @details Inline method.
@@ -145,6 +163,7 @@ class GenericHashEntry {
    * @param n Hash entry to set as next hash entry.
    */
   inline void set_next(GenericHashEntry *n) { hash_next = n;           };
+
   /**
    * @brief Set the hash entry state to idle. Must be called inline
    * with packets/flows processing.
@@ -152,15 +171,6 @@ class GenericHashEntry {
    */
   virtual void set_hash_entry_state_idle() {
     set_state(hash_entry_state_idle);
-  };
-  /**
-   * @brief Set the hash entry state to ready to be purged. Must be called NON-inline
-   * with packets/flows processing.
-   * @details Inline method.
-   * 
-   */
-  inline void set_hash_entry_state_ready_to_be_purged() {
-    set_state(hash_entry_state_ready_to_be_purged);
   };
 
   /**
@@ -206,6 +216,22 @@ class GenericHashEntry {
    * 
    */
   bool is_hash_entry_state_idle_transition_possible() const;
+  /**
+   * @brief Function in charge of hash entry offline state updates
+   *
+   * @param user_date A pointer to user submitted data potentially necessary for the update
+   * @param quick Only perform minimal operations to ensure FSM advancements
+   * 
+   */
+  virtual void periodic_hash_entry_state_update(void *user_data, bool quick);
+  /**
+   * @brief Function in charge of updating periodic entry stats (e.g., its throughput or L7 traffic)
+   *
+   * @param user_date A pointer to user submitted data potentially necessary for the update
+   * @param quick Only perform minimal operations
+   * 
+   */
+  virtual void periodic_stats_update(void *user_data, bool quick);
   HashEntryState get_state() const;
   void updateSeen();
   void updateSeen(time_t _last_seen);
@@ -213,12 +239,12 @@ class GenericHashEntry {
   inline NetworkInterface* getInterface() { return(iface);                      };
   bool idle() const;
   virtual void housekeep(time_t t)     { return;                 };
-  inline u_int get_duration()          { return((u_int)(1+last_seen-first_seen)); };
+  inline u_int get_duration()    const { return((u_int)(1+last_seen-first_seen)); };
   virtual u_int32_t key()              { return(0);         };  
   virtual char* get_string_key(char *buf, u_int buf_len) const { buf[0] = '\0'; return(buf); };
-  void incUses()                       { num_uses++;      }
-  void decUses()                       { num_uses--;      }
-  u_int16_t getUses()            const { return num_uses; }
+  void incUses()                       { num_inc_uses++;                     }
+  void decUses()                       { num_dec_uses++;                     }
+  u_int32_t getUses()            const { return num_inc_uses - num_dec_uses; }
 
   virtual void deserialize(json_object *obj);
   virtual void getJSONObject(json_object *obj, DetailsLevel details_level);

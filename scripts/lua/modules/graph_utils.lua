@@ -12,6 +12,7 @@ local os_utils = require "os_utils"
 local have_nedge = ntop.isnEdge()
 
 local ts_utils = require("ts_utils")
+local ts_common = require("ts_common")
 
 -- Keep global, need to be accessed from nv_graph_utils
 schemas_graph_options = {}
@@ -58,6 +59,37 @@ local graph_colors = {
    '#17becf',
    '#9edae5'
 }
+
+-- ########################################################
+
+-- @brief Ensure that the provided series have the same number of points. This is a
+-- requirement for the charts.
+-- @param series a list of series to fix. The format of each serie is the one
+-- returned by ts_utils.query
+-- @note the series are modified in place
+function normalizeSeriesPoints(series)
+  local max_count = 0
+  local min_step = math.huge
+
+  for _, serie in pairs(series) do
+    max_count = math.max(max_count, #serie.series[1].data)
+    min_step = math.min(min_step, serie.step)
+  end
+
+  if max_count > 0 then
+    for _, serie in pairs(series) do
+      local count = #serie.series[1].data
+
+      if count ~= max_count then
+        for _, serie in pairs(serie.series) do
+          serie.data = ts_common.upsampleSerie(serie.data, max_count)
+          serie.step = min_step
+          serie.count = max_count
+        end
+      end
+    end
+  end
+end
 
 -- ########################################################
 
@@ -267,10 +299,13 @@ end
 -- ########################################################
 
 local function getEntryStep(schema_name)
+   if(starts(schema_name, "custom:") and (getCustomSchemaStep ~= nil)) then
+      return(getCustomSchemaStep(schema_name))
+   end
+
    if(starts(schema_name, "top:")) then
       schema_name = split(schema_name, "top:")[2]
    end
-   -- TODO handle custom schemas?
 
    local schema_obj = ts_utils.getSchema(schema_name)
 
@@ -295,7 +330,7 @@ local graph_menu_entries = {}
 --      the entry will be shown but will be grayed out (disabled state)
 --    - If timeseries exist for the entry in the visualized interval, the
 --      entry will be shown and will be clickable
-function populateGraphMenuEntry(label, base_url, params, tab_id, needs_separator, separator_label, pending)
+function populateGraphMenuEntry(label, base_url, params, tab_id, needs_separator, separator_label, pending, extra_params)
    local url = getPageUrl(base_url, params)
    local step = nil
 
@@ -318,6 +353,7 @@ function populateGraphMenuEntry(label, base_url, params, tab_id, needs_separator
       separator_label = separator_label,
       pending = pending, -- true for batched operations
       step = step,
+      extra_params = extra_params,
    }
 
    graph_menu_entries[#graph_menu_entries + 1] = entry
@@ -342,12 +378,14 @@ end
 
 function graphMenuGetActive(schema, params)
    -- These tags are used to determine the active timeseries entry
-   local match_tags = {ts_schema=1, ts_query=1, protocol=1, category=1, snmp_port_idx=1, exporter_ifname=1, l4proto=1}
+   local match_tags = {ts_schema=1, ts_query=1, protocol=1, category=1, snmp_port_idx=1, exporter_ifname=1, l4proto=1, command=1}
 
    for _, entry in pairs(graph_menu_entries) do
+      local extra_params = entry.extra_params or {}
+
       if entry.schema == schema and entry.params then
 	 for k, v in pairs(params) do
-	    if match_tags[k] and tostring(entry.params[k]) ~= tostring(v) then
+	    if (match_tags[k] or extra_params[k]) and tostring(entry.params[k]) ~= tostring(v) then
 	       goto continue
 	    end
 	 end
@@ -511,7 +549,7 @@ function printSeries(options, tags, start_time, end_time, base_url, params)
          local v = serie.label
          local exists = false
          local entry_tags = tags
-         local entry_params = params
+         local entry_params = table.merge(params, serie.extra_params)
          local entry_baseurl = base_url
          local override_link = nil
 
@@ -574,7 +612,7 @@ function printSeries(options, tags, start_time, end_time, base_url, params)
 
          if exists then
             local entry = populateGraphMenuEntry(v, entry_baseurl, table.merge(entry_params, {ts_schema=k}), nil,
-               needs_separator, separator_label, #batch_ids --[[ pending ]], nil)
+               needs_separator, separator_label, #batch_ids --[[ pending ]], serie.extra_params)
 
             if entry then
                for _, batch_id in pairs(batch_ids) do

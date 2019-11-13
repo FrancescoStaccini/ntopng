@@ -6,7 +6,6 @@ local alerts_api = require("alerts_api")
 local user_scripts = require("user_scripts")
 
 local script = {
-  key = "idle",
   local_only = true,
 
   hooks = {
@@ -24,7 +23,7 @@ local script = {
 -- #################################################################
 
 function script.get_threshold_value(granularity, info)
-  return alerts_api.host_delta_val(script.key, granularity, os.time() - info["seen.last"])
+  return alerts_api.host_delta_val(script.key, granularity, os.time() - host.getTime()["seen.last"])
 end
 
 -- #################################################################

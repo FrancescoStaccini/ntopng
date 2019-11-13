@@ -2,7 +2,7 @@
 -- (C) 2019 - ntop.org
 --
 
--- Check modules provide a scriptable way to interact with the ntopng
+-- User scripts provide a scriptable way to interact with the ntopng
 -- core. Users can provide their own modules to trigger custom alerts,
 -- export data, or perform periodic tasks.
 
@@ -23,6 +23,7 @@ user_scripts.field_units = {
   syn_sec = "field_units.syn_sec",
   flow_sec = "field_units.flow_sec",
   percentage = "field_units.percentage",
+  syn_min = "field_units.syn_min",
 }
 
 local CALLBACKS_DIR = dirs.installdir .. "/scripts/callbacks"
@@ -81,39 +82,39 @@ end
 
 -- ##############################################
 
-local function getCheckModuleConfHash(ifid, subdir, module_key)
-   return string.format("ntopng.prefs.user_scripts.conf.%s.ifid_%d.%s", subdir, ifid, module_key)
+local function getUserScriptDisabledKey(ifid, subdir, module_key)
+   return string.format("ntopng.prefs.user_scripts.conf.%s.ifid_%d.%s.disabled", subdir, ifid, module_key)
 end
 
 -- ##############################################
 
--- @brief Enables a check module
+-- @brief Enables a user script
 function user_scripts.enableModule(ifid, subdir, module_key)
-   local hkey = getCheckModuleConfHash(ifid, subdir, module_key)
-   ntop.delHashCache(hkey, "disabled")
+   local key = getUserScriptDisabledKey(ifid, subdir, module_key)
+   ntop.delCache(key)
 end
 
 -- ##############################################
 
--- @brief Disables a check module
+-- @brief Disables a user script
 function user_scripts.disableModule(ifid, subdir, module_key)
-   local hkey = getCheckModuleConfHash(ifid, subdir, module_key)
-   ntop.setHashCache(hkey, "disabled", "1")
+   local key = getUserScriptDisabledKey(ifid, subdir, module_key)
+   ntop.setPref(key, "1")
 end
 
 -- ##############################################
 
--- @brief Checks if a check module is enabled.
+-- @brief Checks if a user script is enabled.
 -- @return true if disabled, false otherwise
 -- @notes Modules are neabled by default. The user can manually turn them off.
 function user_scripts.isEnabled(ifid, subdir, module_key)
-   local hkey = getCheckModuleConfHash(ifid, subdir, module_key)
-   return(ntop.getHashCache(hkey, "disabled") ~= "1")
+   local key = getUserScriptDisabledKey(ifid, subdir, module_key)
+   return(ntop.getPref(key) ~= "1")
 end
 
 -- ##############################################
 
--- @brief Get the default configuration value for the given check module
+-- @brief Get the default configuration value for the given user script
 -- and granularity.
 -- @param user_script a user_script returned by user_scripts.load
 -- @param granularity_str the target granularity
@@ -141,9 +142,9 @@ end
 -- @return function(...) wrapper ready to be called for the execution of hook_fn
 local function benchmark_hook_fn(subdir, mod_k, hook, hook_fn)
    return function(...)
-      local start  = os.clock()
+      local start  = ntop.getticks()
       local result = {hook_fn(...)}
-      local finish = os.clock()
+      local finish = ntop.getticks()
       local elapsed = finish - start
 
       -- Update benchmark results by addin a function call and the elapsed time of this call
@@ -170,29 +171,83 @@ end
 --
 -- @return function(...) wrapper ready to be called for the execution of hook_fn
 local function benchmark_init(subdir, mod_k, hook, hook_fn)
-   -- Prepare the benchmark table fo the hook_fn which is being benchmarked
-   if not benchmarks[subdir] then
-      benchmarks[subdir] = {}
-   end
+   -- NOTE: 5min/hour/day are not monitored. They would collide in the user_scripts_benchmarks_key.
+   if((hook ~= "5min") and (hook ~= "hour") and (hook ~= "day")) then
+      -- Prepare the benchmark table fo the hook_fn which is being benchmarked
+      if not benchmarks[subdir] then
+	 benchmarks[subdir] = {}
+      end
 
-   if not benchmarks[subdir][mod_k] then
-      benchmarks[subdir][mod_k] = {}
-   end
+      if not benchmarks[subdir][mod_k] then
+	 benchmarks[subdir][mod_k] = {}
+      end
 
-   if not benchmarks[subdir][mod_k][hook] then
-      benchmarks[subdir][mod_k][hook] = {tot_num_calls = 0, tot_elapsed = 0}
-   end
+      if not benchmarks[subdir][mod_k][hook] then
+	 benchmarks[subdir][mod_k][hook] = {tot_num_calls = 0, tot_elapsed = 0}
+      end
 
-   -- Finally prepare and return the hook_fn wrapped with benchmark facilities
-   return benchmark_hook_fn(subdir, mod_k, hook, hook_fn)
+      -- Finally prepare and return the hook_fn wrapped with benchmark facilities
+      return benchmark_hook_fn(subdir, mod_k, hook, hook_fn)
+   else
+      return(hook_fn)
+   end
 end
 
 -- ##############################################
 
-local function user_scripts_benchmarks_key(subdir, mod_k, hook)
-   local ifid = interface.getId()
+--~ schema_prefix: "flow_user_script" or "elem_user_script"
+function user_scripts.ts_dump(when, ifid, verbose, schema_prefix, all_scripts)
+   local ts_utils = require("ts_utils_core")
 
-   return string.format("ntopng.cache.ifid_%d.user_scripts_benchmarks.subdir_%s.mod_%s.hook_%s", ifid, subdir, mod_k, hook)
+   for subdir, script_type in pairs(all_scripts) do
+      local rv = user_scripts.getAggregatedStats(ifid, script_type, subdir)
+      local total = {tot_elapsed = 0, tot_num_calls = 0}
+
+      for modkey, stats in pairs(rv) do
+	 ts_utils.append(schema_prefix .. ":duration", {ifid = ifid, user_script = modkey, subdir = subdir, num_ms = stats.tot_elapsed * 1000}, when, verbose)
+	 ts_utils.append(schema_prefix .. ":num_calls", {ifid = ifid, user_script = modkey, subdir = subdir, num_calls = stats.tot_num_calls}, when, verbose)
+
+	 total.tot_elapsed = total.tot_elapsed + stats.tot_elapsed
+	 total.tot_num_calls = total.tot_num_calls + stats.tot_num_calls
+      end
+
+      ts_utils.append(schema_prefix .. ":total_stats", {ifid = ifid, subdir = subdir, num_ms = total.tot_elapsed * 1000, num_calls = total.tot_num_calls}, when, verbose)
+   end
+end
+
+-- ##############################################
+
+local function user_scripts_benchmarks_key(ifid, subdir)
+   return string.format("ntopng.cache.ifid_%d.user_scripts_benchmarks.subdir_%s", ifid, subdir)
+end
+
+-- ##############################################
+
+-- @brief Returns the benchmark stats, aggregating them by module
+function user_scripts.getAggregatedStats(ifid, script_type, subdir)
+   local bencmark = ntop.getCache(user_scripts_benchmarks_key(ifid, subdir))
+   local rv = {}
+
+   if(not isEmptyString(bencmark)) then
+      bencmark = json.decode(bencmark)
+
+      if(bencmark ~= nil) then
+	 for scriptk, hooks in pairs(bencmark) do
+	    local aggr_val = {tot_num_calls = 0, tot_elapsed = 0}
+
+	    for _, hook_benchmark in pairs(hooks) do
+	       aggr_val.tot_elapsed = aggr_val.tot_elapsed + hook_benchmark.tot_elapsed
+	       aggr_val.tot_num_calls = hook_benchmark.tot_num_calls + aggr_val.tot_num_calls
+	    end
+
+	    if(aggr_val.tot_num_calls > 0) then
+	       rv[scriptk] = aggr_val
+	    end
+	 end
+      end
+   end
+
+   return(rv)
 end
 
 -- ##############################################
@@ -200,62 +255,36 @@ end
 -- @brief Save benchmarks results and possibly print them to stdout
 --
 -- @param to_stdout dump results also to stdout
-function user_scripts.benchmark_dump(to_stdout)
+function user_scripts.benchmark_dump(ifid, to_stdout)
+   -- Convert ticks to seconds
    for subdir, modules in pairs(benchmarks) do
+      local rv = {}
+
       for mod_k, hooks in pairs(modules) do
 	 for hook, hook_benchmark in pairs(hooks) do
 	    if hook_benchmark["tot_num_calls"] > 0 then
-	       local k = user_scripts_benchmarks_key(subdir, mod_k, hook)
-	       ntop.setCache(k, json.encode(hook_benchmark), 3600 --[[ 1 hour --]])
+	       hook_benchmark["tot_elapsed"] = hook_benchmark["tot_elapsed"] / ntop.gettickspersec()
+
+	       rv[mod_k] = rv[mod_k] or {}
+	       rv[mod_k][hook] = hook_benchmark
 
 	       if to_stdout then
 		  traceError(TRACE_NORMAL,TRACE_CONSOLE,
-			     string.format("[%s] %s() [check: %s][elapsed: %.4f][num: %u][speed: %.4f]\n",
+			     string.format("[%s] %s() [script: %s][elapsed: %.4f][num: %u][speed: %.4f]\n",
 					   subdir, hook, mod_k, hook_benchmark["tot_elapsed"], hook_benchmark["tot_num_calls"],
 					   hook_benchmark["tot_elapsed"] / hook_benchmark["tot_num_calls"]))
 	       end
 	    end
 	 end
       end
+
+      ntop.setCache(user_scripts_benchmarks_key(ifid, subdir), json.encode(rv), 3600 --[[ 1 hour --]])
    end
 end
 
 -- ##############################################
 
--- @brief Load benchmarks results 
---
--- @param subdir the modules subdir
--- @param mod_k the key of the user script
-local function benchmark_load(subdir, mod_k, hook)
-   local k = user_scripts_benchmarks_key(subdir, mod_k, hook)
-   local res = ntop.getCache(k)
-
-   if res and res ~= "" then
-      local b = json.decode(res)
-
-      if b and b["tot_num_calls"] > 0 and b["tot_elapsed"] > 0 then
-	 b["avg_speed"] = b["tot_num_calls"] / b["tot_elapsed"]
-      end
-
-      return b
-   end
-end
-
--- ##############################################
-
--- @brief Load the check modules.
--- @params script_type one of user_scripts.script_types
--- @params ifid the interface ID
--- @params subdir the modules subdir
--- @params hook_filter if non nil, only load the check modules for the specified hook
--- @params ignore_disabled if true, also returns disabled check modules
--- @param do_benchmark if true, computes benchmarks for every hook
--- @return {modules = key->user_script, hooks = user_script->function}
-function user_scripts.load(script_type, ifid, subdir, hook_filter, ignore_disabled, do_benchmark)
-   local rv = {modules = {}, hooks = {}}
-   local is_nedge = ntop.isnEdge()
-   local alerts_disabled = (not areAlertsEnabled())
-
+local function getScriptsDirectories(script_type, subdir)
    local check_dirs = {
       user_scripts.getSubdirectoryPath(script_type, subdir),
       user_scripts.getSubdirectoryPath(script_type, subdir) .. "/alerts",
@@ -264,11 +293,69 @@ function user_scripts.load(script_type, ifid, subdir, hook_filter, ignore_disabl
    if ntop.isPro() then
       check_dirs[#check_dirs + 1] = user_scripts.getSubdirectoryPath(script_type, subdir, true --[[ pro ]])
       check_dirs[#check_dirs + 1] = user_scripts.getSubdirectoryPath(script_type, subdir, true --[[ pro ]]) .. "/alerts"
+
+      if ntop.isEnterprise() then
+         check_dirs[#check_dirs + 1] = user_scripts.getSubdirectoryPath(script_type, subdir, true --[[ pro ]]) .. "/enterprise"
+      end
+   end
+
+   return(check_dirs)
+end
+
+-- ##############################################
+
+-- @brief Lists available user scripts.
+-- @params script_type one of user_scripts.script_types
+-- @params subdir the modules subdir
+-- @return a list of available module names
+function user_scripts.listScripts(script_type, subdir)
+   local check_dirs = getScriptsDirectories(script_type, subdir)
+   local rv = {}
+
+   for _, checks_dir in pairs(check_dirs) do
+      for fname in pairs(ntop.readdir(checks_dir)) do
+         if string.ends(fname, ".lua") then
+            local mod_fname = string.sub(fname, 1, string.len(fname) - 4)
+            rv[#rv + 1] = mod_fname
+         end
+      end
+   end
+
+   return rv
+end
+
+-- ##############################################
+
+-- @brief Load the user scripts.
+-- @params script_type one of user_scripts.script_types
+-- @params ifid the interface ID
+-- @params subdir the modules subdir
+-- @params hook_filter if non nil, only load the user scripts for the specified hook
+-- @params ignore_disabled if true, also returns disabled user scripts
+-- @param do_benchmark if true, computes benchmarks for every hook
+-- @param return_all if true, returns all the scripts, even those with filters not matching the current configuration
+-- @return {modules = key->user_script, hooks = user_script->function}
+function user_scripts.load(script_type, ifid, subdir, hook_filter, ignore_disabled, do_benchmark, return_all)
+   local rv = {modules = {}, hooks = {}}
+   local is_nedge = ntop.isnEdge()
+   local alerts_disabled = (not areAlertsEnabled())
+   local old_ifid = interface.getId()
+
+   if(old_ifid ~= ifid) then
+      interface.select(ifid) -- required for interface.isPacketInterface() below
    end
 
    for _, hook in pairs(script_type.hooks) do
       rv.hooks[hook] = {}
    end
+
+   local check_dirs = getScriptsDirectories(script_type, subdir)
+   local scripts_benchmarks = ntop.getCache(user_scripts_benchmarks_key(ifid, subdir))
+
+   if(not isEmptyString(scripts_benchmarks)) then
+      scripts_benchmarks = json.decode(scripts_benchmarks)
+   end
+   scripts_benchmarks = scripts_benchmarks or {}
 
    for _, checks_dir in pairs(check_dirs) do
       package.path = checks_dir .. "/?.lua;" .. package.path
@@ -276,33 +363,37 @@ function user_scripts.load(script_type, ifid, subdir, hook_filter, ignore_disabl
       local is_alert_path = string.ends(checks_dir, "alerts")
 
       for fname in pairs(ntop.readdir(checks_dir)) do
-         if ends(fname, ".lua") then
+         if string.ends(fname, ".lua") then
             local mod_fname = string.sub(fname, 1, string.len(fname) - 4)
             local user_script = require(mod_fname)
             local setup_ok = true
 
-            traceError(TRACE_DEBUG, TRACE_CONSOLE, string.format("Loading check module '%s'", mod_fname))
+            traceError(TRACE_DEBUG, TRACE_CONSOLE, string.format("Loading user script '%s'", mod_fname))
 
-            if(user_script == nil) then
+            if(type(user_script) ~= "table") then
                traceError(TRACE_ERROR, TRACE_CONSOLE, string.format("Loading '%s' failed", checks_dir.."/"..fname))
-            end
-
-            if(user_script.key == nil) then
-               traceError(TRACE_ERROR, TRACE_CONSOLE, string.format("Missing 'key' in check module '%s'", mod_fname))
                goto next_module
             end
+
+	    -- Key is an alias for the module name
+	    user_script.key = mod_fname
 
             if(rv.modules[user_script.key]) then
                traceError(TRACE_ERROR, TRACE_CONSOLE, string.format("Skipping duplicate module '%s'", user_script.key))
                goto next_module
             end
 
-            if(user_script.nedge_exclude and is_nedge) then
+            if((not return_all) and user_script.packet_interface_only and (not interface.isPacketInterface())) then
+               traceError(TRACE_DEBUG, TRACE_CONSOLE, string.format("Skipping module '%s' for non packet interface", user_script.key))
+               goto next_module
+            end
+
+            if((not return_all) and ((user_script.nedge_exclude and is_nedge) or (user_script.nedge_only and (not is_nedge)))) then
                goto next_module
             end
 
             if(table.empty(user_script.hooks)) then
-               traceError(TRACE_WARNING, TRACE_CONSOLE, string.format("No 'hooks' defined in check module '%s'", user_script.key))
+               traceError(TRACE_WARNING, TRACE_CONSOLE, string.format("No 'hooks' defined in user script '%s'", user_script.key))
                -- This guarantees that the "hooks" field is always available
                user_script.hooks = {}
             end
@@ -310,12 +401,13 @@ function user_scripts.load(script_type, ifid, subdir, hook_filter, ignore_disabl
             -- Augument with additional attributes
             user_script.enabled = user_scripts.isEnabled(ifid, subdir, user_script.key)
             user_script.is_alert = is_alert_path
+            user_script.path = os_utils.fixPath(checks_dir .. "/" .. fname)
 
-            if(alerts_disabled and user_script.is_alert) then
+            if((not return_all) and alerts_disabled and user_script.is_alert) then
                goto next_module
             end
 
-            if((not user_script.enabled) and (not ignore_disabled)) then
+            if((not return_all) and (not user_script.enabled) and (not ignore_disabled)) then
                traceError(TRACE_DEBUG, TRACE_CONSOLE, string.format("Skipping disabled module '%s'", user_script.key))
                goto next_module
             end
@@ -333,12 +425,12 @@ function user_scripts.load(script_type, ifid, subdir, hook_filter, ignore_disabl
                setup_ok = user_script.setup()
             end
 
-            if(not setup_ok) then
+            if((not return_all) and (not setup_ok)) then
                traceError(TRACE_DEBUG, TRACE_CONSOLE, string.format("Skipping module '%s' as setup() returned %s", user_script.key, setup_ok))
                goto next_module
             end
 
-	    user_script["benchmark"] = {}
+	    user_script["benchmark"] = scripts_benchmarks[mod_fname]
 
             -- Populate hooks fast lookup table
             for hook, hook_fn in pairs(user_script.hooks) do
@@ -347,8 +439,6 @@ function user_scripts.load(script_type, ifid, subdir, hook_filter, ignore_disabl
                if(hook == "all") then
                   -- Register for all the hooks
                   for _, hook in pairs(script_type.hooks) do
-		     user_script["benchmark"][hook] = benchmark_load(subdir, user_script.key, hook)
-
 		     if do_benchmark then
 			rv.hooks[hook][user_script.key] = benchmark_init(subdir, user_script.key, hook, hook_fn)
 		     else
@@ -361,8 +451,6 @@ function user_scripts.load(script_type, ifid, subdir, hook_filter, ignore_disabl
                elseif(rv.hooks[hook] == nil) then
                   traceError(TRACE_WARNING, TRACE_CONSOLE, string.format("Unknown hook '%s' in module '%s'", hook, user_script.key))
                else
-		  user_script["benchmark"][hook] = benchmark_load(subdir, user_script.key, hook)
-
 		  if do_benchmark then
 		     rv.hooks[hook][user_script.key] = benchmark_init(subdir, user_script.key, hook, hook_fn)
 		  else
@@ -376,6 +464,10 @@ function user_scripts.load(script_type, ifid, subdir, hook_filter, ignore_disabl
 
          ::next_module::
       end
+   end
+
+   if(old_ifid ~= ifid) then
+      interface.select(old_ifid)
    end
 
    return(rv)
@@ -500,14 +592,15 @@ end
 
 -- @brief Teardown function, to be called at the end of the VM
 function user_scripts.teardown(available_modules, do_benchmark, do_print_benchmark)
-   for _, check in pairs(available_modules.modules) do
-      if check.teardown then
-         check.teardown()
+   for _, script in pairs(available_modules.modules) do
+      if script.teardown then
+         script.teardown()
       end
    end
 
    if do_benchmark then
-      user_scripts.benchmark_dump(do_print_benchmark)
+      local ifid = interface.getId()
+      user_scripts.benchmark_dump(ifid, do_print_benchmark)
    end
 end
 

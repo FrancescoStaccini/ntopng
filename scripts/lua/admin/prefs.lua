@@ -25,7 +25,7 @@ local influxdb = require("influxdb")
 local alert_endpoints = require("alert_endpoints_utils")
 local nindex_utils = nil
 
-local email_peer_pattern = [[^(([A-Za-z0-9._%+-]|\s)+<)?[A-Za-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,4}>?$]]
+local email_peer_pattern = [[^(([A-Za-z0-9._%+-]|\s)+<)?[A-Za-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,6}>?$]]
 
 if(ntop.isPro()) then
   package.path = dirs.installdir .. "/scripts/lua/pro/?.lua;" .. package.path
@@ -166,7 +166,7 @@ if(haveAdminPrivileges()) then
    for k, v in pairs(_POST) do
     if starts(k, "slack_ch_") then
       local alert_entity = tonumber(split(k, "slack_ch_")[2])
-      local alert_entity_raw = alertEntityRaw(alert_entity)
+      local alert_entity_raw = alert_consts.alertEntityRaw(alert_entity)
 
       if alert_entity_raw then
         -- map entity -> channel name
@@ -287,14 +287,12 @@ function printAlerts()
       showElements = false
   end
 
- local elementToSwitch = { "max_num_alerts_per_entity", "max_num_flow_alerts", "row_toggle_alert_probing",
-			   "row_toggle_malware_probing", "row_toggle_dns_alerts",
-			   "row_toggle_flow_alerts_iface", "row_alerts_retention_header", "row_alerts_settings_header", "row_alerts_security_header",
-			   "row_toggle_ssl_alerts", "row_toggle_dns_alerts", "row_toggle_remote_to_remote_alerts",
-			   "row_toggle_ip_reassignment_alerts", "row_toggle_dropped_flows_alerts", "row_alerts_informative_header",
-			   "row_toggle_device_first_seen_alert", "row_toggle_device_activation_alert", "row_toggle_pool_activation_alert", "row_toggle_quota_exceeded_alert", "row_toggle_mining_alerts", "row_toggle_device_protocols_alerts",
-			   "row_toggle_longlived_flows_alerts", "longlived_flow_duration", "row_toggle_elephant_flows_alerts", "elephant_flow_local_to_remote_bytes", "elephant_flow_remote_to_local_bytes",
-         "row_toggle_data_exfiltration", "row_toggle_external_alerts", "row_toggle_potentially_dangerous_protocols_alerts"
+ local elementToSwitch = { "max_num_alerts_per_entity", "max_num_flow_alerts",
+			   "row_alerts_retention_header", "row_alerts_settings_header", "row_alerts_security_header",
+			   "row_toggle_remote_to_remote_alerts",
+			   "row_toggle_ip_reassignment_alerts", "row_alerts_informative_header",
+			   "row_toggle_device_first_seen_alert", "row_toggle_device_activation_alert", "row_toggle_pool_activation_alert", "row_toggle_quota_exceeded_alert",
+			   "longlived_flow_duration", "elephant_flow_local_to_remote_bytes", "elephant_flow_remote_to_local_bytes"
 			}
  
  if not subpage_active.entries["toggle_mysql_check_open_files_limit"].hidden then
@@ -327,27 +325,6 @@ function printAlerts()
   print('><th colspan=2 class="info">'..i18n("prefs.security_alerts")..'</th></tr>')
 
   prefsToggleButton(subpage_active, {
-    field = "toggle_alert_probing",
-    pref = "probing_alerts",
-    default = "0",
-    hidden = not showElements,
-  })
-
-  prefsToggleButton(subpage_active, {
-    field = "toggle_ssl_alerts",
-    pref = "ssl_alerts",
-    default = "0",
-    hidden = not showElements,
-  })
-
-  prefsToggleButton(subpage_active, {
-    field = "toggle_dns_alerts",
-    pref = "dns_alerts",
-    default = "0",
-    hidden = not showElements,
-  })
-
-  prefsToggleButton(subpage_active, {
   field = "toggle_ip_reassignment_alerts",
   pref = "ip_reassignment_alerts",
   default = "0",
@@ -361,85 +338,20 @@ function printAlerts()
     hidden = not showElements,
   })
 
-  if ntop.isnEdge() then
-     prefsToggleButton(subpage_active, {
-  field = "toggle_dropped_flows_alerts",
-  pref = "dropped_flows_alerts",
-  default = "0",
-  hidden = not showElements,
-     })
-  end
-
-  prefsToggleButton(subpage_active, {
-    field = "toggle_mining_alerts",
-    pref = "mining_alerts",
-    default = "1",
-    hidden = not showElements,
-  })
-
-  prefsToggleButton(subpage_active, {
-    field = "toggle_malware_probing",
-    pref = "host_blacklist",
-    default = "1",
-    hidden = not showElements,
-  })
-
-  prefsToggleButton(subpage_active, {
-    field = "toggle_external_alerts",
-    pref = "external_alerts",
-    default = "1",
-    hidden = not showElements,
-  })
-
-  prefsToggleButton(subpage_active, {
-    field = "toggle_potentially_dangerous_protocols_alerts",
-    pref = "potentially_dangerous_protocols_alerts",
-    default = "1",
-    hidden = not showElements,
-  })
-
-  prefsToggleButton(subpage_active, {
-    field = "toggle_device_protocols_alerts",
-    pref = "device_protocols_alerts",
-    default = "0",
-    hidden = not showElements,
-  })
-
-  prefsToggleButton(subpage_active, {
-    field = "toggle_longlived_flows_alerts",
-    pref = "longlived_flows_alerts",
-    default = ternary(prefs.are_longlived_flows_alerts_enabled, "1", "0"),
-    hidden = not showElements,
-  })
-
   prefsInputFieldPrefs(subpage_active.entries["longlived_flow_duration"].title, 
-     subpage_active.entries["longlived_flow_duration"].description,
-    "ntopng.prefs.", "longlived_flow_duration", prefs.longlived_flow_duration, 
-    "number", showElements, nil, nil, {min=1, max=60*60*24*7, tformat="mhd"})
-
-  prefsToggleButton(subpage_active, {
-    field = "toggle_elephant_flows_alerts",
-    pref = "elephant_flows_alerts",
-    default = "0",
-    hidden = not showElements,
-  })
+		       subpage_active.entries["longlived_flow_duration"].description,
+		       "ntopng.prefs.", "longlived_flow_duration", 12 * 60 * 60 --[[ 12 hours --]],
+		       "number", showElements, nil, nil, {min=1, max=60*60*24*7, tformat="mhd"})
 
   prefsInputFieldPrefs(subpage_active.entries["elephant_flow_local_to_remote_bytes"].title, 
-     subpage_active.entries["elephant_flow_local_to_remote_bytes"].description,
-    "ntopng.prefs.", "elephant_flow_local_to_remote_bytes", prefs.elephant_flow_local_to_remote_bytes, 
-    "number", showElements, nil, nil, {min=1024, format_spec = FMT_TO_DATA_BYTES, tformat="kmg"})
+		       subpage_active.entries["elephant_flow_local_to_remote_bytes"].description,
+		       "ntopng.prefs.", "elephant_flow_local_to_remote_bytes", 1024 * 1024 * 1024 --[[ 1 GB --]],
+		       "number", showElements, nil, nil, {min=1024, format_spec = FMT_TO_DATA_BYTES, tformat="kmg"})
 
   prefsInputFieldPrefs(subpage_active.entries["elephant_flow_remote_to_local_bytes"].title, 
-     subpage_active.entries["elephant_flow_remote_to_local_bytes"].description,
-    "ntopng.prefs.", "elephant_flow_remote_to_local_bytes", prefs.elephant_flow_remote_to_local_bytes, 
-    "number", showElements, nil, nil, {min=1024, format_spec = FMT_TO_DATA_BYTES, tformat="kmg"})
-
-  prefsToggleButton(subpage_active, {
-    field = "toggle_data_exfiltration",
-    pref = "data_exfiltration_alerts",
-    default = "1",
-    hidden = not showElements,
-  })
+		       subpage_active.entries["elephant_flow_remote_to_local_bytes"].description,
+		       "ntopng.prefs.", "elephant_flow_remote_to_local_bytes",  1024 * 1024 * 1024 --[[ 1 GB --]],
+		       "number", showElements, nil, nil, {min=1024, format_spec = FMT_TO_DATA_BYTES, tformat="kmg"})
 
   print('<tr id="row_alerts_informative_header" ')
   if (showElements == false) then print(' style="display:none;"') end
@@ -598,8 +510,8 @@ function printExternalAlertsReport()
     print('<tr id="slack_channels" style="' .. ternary(showSlackNotificationPrefs, "", "display:none;").. '"><td><strong>' .. i18n("prefs.slack_channel_names") .. '</strong><p><small>' .. i18n("prefs.slack_channel_names_descr") .. '</small></p></td><td><table class="table table-bordered table-condensed"><tr><th>'.. i18n("prefs.alert_entity") ..'</th><th>' .. i18n("prefs.slack_channel") ..'</th></tr>')
 
     for entity_type_raw, entity in pairsByKeys(alert_consts.alert_entities) do
-      local entity_type = alertEntity(entity_type_raw)
-      local label = alertEntityLabel(entity_type)
+      local entity_type = alert_consts.alertEntity(entity_type_raw)
+      local label = alert_consts.alertEntityLabel(entity_type)
       local channel = slack_utils.getChannelName(entity_type_raw)
 
       print('<tr><td>'.. label ..'</td><td><div class="form-group" style="margin:0"><input class="form-control input-sm" name="slack_ch_'.. entity_type ..'" pattern="[^\' \']*" value="'.. channel ..'"></div></td></tr>')
@@ -1263,7 +1175,7 @@ function printInMemory()
     field = "toggle_local_host_cache_enabled",
     default = "1",
     pref = "is_local_host_cache_enabled",
-    to_switch = {"local_host_cache_duration"},
+    to_switch = {"local_host_cache_duration","row_toggle_active_local_host_cache_enabled","active_local_host_cache_interval"},
   })
 
   local showLocalHostCacheInterval = false

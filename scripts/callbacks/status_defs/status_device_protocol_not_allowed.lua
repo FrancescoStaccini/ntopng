@@ -9,7 +9,7 @@ local alert_consts = require("alert_consts")
 local function formatSuspiciousDeviceProtocol(status, flowstatus_info)
    local msg, devtype
 
-   if not flowstatus_info then
+   if ((not flowstatus_info) or (flowstatus_info == "")) then
       return i18n("alerts_dashboard.suspicious_device_protocol")
    end
 
@@ -22,6 +22,10 @@ local function formatSuspiciousDeviceProtocol(status, flowstatus_info)
    else
       msg = "flow_details.suspicious_server_device_protocol"
       devtype = flowstatus_info["srv.devtype"]
+   end
+
+   if(devtype == nil) then
+      return i18n("alerts_dashboard.suspicious_device_protocol")
    end
 
    local label = discover.devtype2string(devtype)

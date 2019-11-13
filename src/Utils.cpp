@@ -289,7 +289,59 @@ bool Utils::isIPAddress(char *ip) {
 
 /* ****************************************************** */
 
+#ifdef __linux__
+
+int Utils::setAffinityMask(char *cores_list, cpu_set_t *mask) {
+  int ret = 0;
+#ifdef HAVE_LIBCAP
+  char *core_id_s, *tmp = NULL;
+  u_int num_cores = ntop->getNumCPUs();
+
+  CPU_ZERO(mask);
+
+  if (cores_list == NULL)
+    return 0;
+
+  if (num_cores <= 1) 
+    return 0;
+
+  core_id_s = strtok_r(cores_list, ",", &tmp);
+
+  while (core_id_s) {
+    long core_id = atoi(core_id_s);
+    u_long core = core_id % num_cores;
+
+    CPU_SET(core, mask);
+
+    core_id_s = strtok_r(NULL, ",", &tmp);
+  }
+#endif
+
+  return ret;
+}
+#endif
+
+/* ****************************************************** */
+
+#ifdef __linux__
+int Utils::setThreadAffinityWithMask(pthread_t thread, cpu_set_t *mask) {
+  int ret = -1;
+
+  if (mask == NULL || CPU_COUNT(mask) == 0)
+    return(0);
+
+#ifdef HAVE_LIBCAP
+  ret = pthread_setaffinity_np(thread, sizeof(cpu_set_t), mask);
+#endif
+
+  return(ret);
+}
+#endif
+
+/* ****************************************************** */
+
 int Utils::setThreadAffinity(pthread_t thread, int core_id) {
+#ifdef __linux__
   if(core_id < 0)
     return(0);
   else {
@@ -302,12 +354,15 @@ int Utils::setThreadAffinity(pthread_t thread, int core_id) {
     if(num_cores > 1) {
       CPU_ZERO(&cpu_set);
       CPU_SET(core, &cpu_set);
-      ret = pthread_setaffinity_np(thread, sizeof(cpu_set_t), &cpu_set);
+      ret = setThreadAffinityWithMask(thread, &cpu_set);
     }
-
 #endif
-    return ret;
+
+    return(ret);
   }
+#else
+  return(0);
+#endif  
 }
 
 /* ****************************************************** */
@@ -599,140 +654,6 @@ int Utils::mkdir(const char *path, mode_t mode) {
   
   return(rc);
 #endif
-}
-
-/* **************************************************** */
-
-// TODO: remove from C?
-AlertLevel Utils::flowStatus2AlertLevel(FlowStatus s, u_int8_t ext_severity /* e.g. IDS severity */) {
-  AlertLevel default_level = alert_level_warning;
-  AlertLevel level = default_level;
-
-  switch(s) {
-  case status_normal:
-    level = alert_level_none;
-    break;
-  case status_blocked:
-    level = alert_level_info;
-    break;
-  case status_malicious_signature:
-    level = alert_level_warning;
-    break;
-  case status_blacklisted:
-  case status_potentially_dangerous:
-    level = alert_level_error;
-    break;
-  case status_external_alert:
-    if(ext_severity == 1)
-      level = alert_level_error;
-    break;
-  default:
-    level = default_level;
-  }
-
-  return(level);
-}
-
-/* **************************************************** */
-
-// TODO: remove from C
-AlertType Utils::flowStatus2AlertType(FlowStatus s) {
-  switch(s) {
-  case status_normal:
-  case num_flow_status:
-  case status_flow_when_interface_alerted: /* TODO replace with new status */
-  case status_custom_1:
-  case status_custom_2:
-  case status_custom_3:
-  case status_custom_4:
-  case status_custom_5:
-    return(alert_none);
-  case status_slow_tcp_connection:
-  case status_slow_application_header:
-  case status_slow_data_exchange:
-  case status_low_goodput:
-  case status_tcp_connection_issues:
-  case status_tcp_severe_connection_issues:
-  case status_not_purged: /* Move to new type? */
-    return(alert_connection_issues);
-  case status_suspicious_tcp_syn_probing:
-  case status_suspicious_tcp_probing:
-  case status_tcp_connection_refused:
-  case status_dns_invalid_query:
-    return(alert_suspicious_activity);
-  case status_elephant_local_to_remote:
-  case status_data_exfiltration:
-  case status_elephant_remote_to_local:
-  case status_longlived:
-    return(alert_flow_misbehaviour);
-  case status_malicious_signature:
-    return(alert_malicious_signature);
-  case status_remote_to_remote:
-    return(alert_remote_to_remote);
-  case status_web_mining_detected:
-    return(alert_flow_web_mining);
-  case status_blacklisted:
-    return(alert_flow_blacklisted);
-  case status_blocked:
-    return(alert_flow_blocked);
-  case status_device_protocol_not_allowed:
-    return(alert_device_protocol_not_allowed);
-  case status_potentially_dangerous:
-  case status_ssl_certificate_mismatch:
-  case status_ssl_unsafe_ciphers:
-  case status_ssl_old_protocol_version:
-    return(alert_potentially_dangerous_protocol);
-  case status_external_alert:
-    return(alert_external);
-  }
-
-  /* Should be never reached */
-  return(alert_none);
-}
-
-/* **************************************************** */
-
-bool Utils::dumpFlowStatus(FlowStatus s) {
-  switch(s) {
-  case status_not_purged:
-    return(true);
-  case status_web_mining_detected:
-    return(ntop->getPrefs()->are_mining_alerts_enabled());
-  case status_malicious_signature:
-  case status_blacklisted:
-    return(ntop->getPrefs()->are_malware_alerts_enabled());
-  case status_suspicious_tcp_syn_probing:
-  case status_suspicious_tcp_probing:
-  case status_tcp_connection_refused:
-    return(ntop->getPrefs()->are_probing_alerts_enabled());
-  case status_ssl_certificate_mismatch:
-  case status_ssl_unsafe_ciphers:
-  case status_ssl_old_protocol_version:
-    return(ntop->getPrefs()->are_ssl_alerts_enabled());
-  case status_dns_invalid_query:
-    return(ntop->getPrefs()->are_dns_alerts_enabled());
-  case status_remote_to_remote:
-    return(ntop->getPrefs()->are_remote_to_remote_alerts_enabled());
-#ifdef HAVE_NEDGE
-  case status_blocked:
-    return(ntop->getPrefs()->are_dropped_flows_alerts_enabled());
-#endif
-  case status_device_protocol_not_allowed:
-    return(ntop->getPrefs()->are_device_protocols_alerts_enabled());
-  case status_potentially_dangerous:
-    return(ntop->getPrefs()->are_potentially_dangerous_protocols_alerts_enabled());
-  case status_elephant_local_to_remote:
-  case status_elephant_remote_to_local:
-    return(ntop->getPrefs()->are_elephant_flows_alerts_enabled());
-  case status_longlived:
-    return(ntop->getPrefs()->are_longlived_flows_alerts_enabled());
-  case status_data_exfiltration:
-    return(ntop->getPrefs()->are_exfiltration_alerts_enabled());
-  case status_external_alert:
-    return(ntop->getPrefs()->are_external_alerts_enabled());
-  default:
-    return(false);
-  }
 }
 
 /* **************************************************** */
@@ -2177,6 +2098,26 @@ ticks Utils::getticks() {
 
 /* **************************************** */
 
+ticks Utils::gettickspersec() {
+#if !(defined(__arm__) || defined(__mips__))
+  ticks tick_start, tick_delta;
+
+  /* computing usleep delay */
+  tick_start = Utils::getticks();
+  usleep(1);
+  tick_delta = Utils::getticks() - tick_start;
+
+  /* computing CPU freq */
+  tick_start = Utils::getticks();
+  usleep(1001);
+  return (Utils::getticks() - tick_start - tick_delta) * 1000 /*kHz -> Hz*/;
+#else
+  return CLOCKS_PER_SEC;
+#endif
+}
+
+/* **************************************** */
+
 static bool scan_dir(const char * dir_name,
 		     list<pair<struct dirent *, char * > > *dirlist,
 		     unsigned long *total) {
@@ -3224,16 +3165,14 @@ bool Utils::maskHost(bool isLocalIP) {
 
 bool Utils::getCpuLoad(cpu_load_stats *out) {
 #if !defined(__FreeBSD__) && !defined(__NetBSD__) & !defined(__OpenBSD__) && !defined(__APPLE__) && !defined(WIN32)
-  long unsigned int user, nice, system, idle, iowait, irq, softirq;
+  float load;
   FILE *fp;
 
-  if((fp = fopen("/proc/stat", "r"))) {
-    fscanf(fp,"%*s %lu %lu %lu %lu %lu %lu %lu",
-     &user, &nice, &system, &idle, &iowait, &irq, &softirq);
+  if((fp = fopen("/proc/loadavg", "r"))) {
+    fscanf(fp,"%f", &load);
     fclose(fp);
 
-    out->active = user + nice + system + iowait + irq + softirq;
-    out->idle = idle;
+    out->load = load;
 
     return(true);
   }
@@ -4131,4 +4070,22 @@ json_object *Utils::cloneJSONSimple(json_object *src) {
   }
 
   return obj;
+}
+
+/* ****************************************************** */
+
+/**
+ * Computes the next power of 2.
+ * @param v The number to round up.
+ * @return The next power of 2.
+ */
+u_int32_t Utils::pow2(u_int32_t v) {
+  v--;
+  v |= v >> 1;
+  v |= v >> 2;
+  v |= v >> 4;
+  v |= v >> 8;
+  v |= v >> 16;
+  v++;
+  return v;
 }

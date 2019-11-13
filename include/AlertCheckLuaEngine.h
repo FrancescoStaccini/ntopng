@@ -26,10 +26,9 @@ class AlertCheckLuaEngine : public LuaEngine {
  private:
   ScriptPeriodicity p;
   char script_path[MAX_PATH];
-#ifdef LUA_PROFILING
   u_int num_calls;
-  struct timeval t_begin, t_end;
-#endif
+  ticks total_ticks;
+  virtual void lua_stats_skipped(lua_State *vm) const {};
 
  public:
   AlertCheckLuaEngine(AlertEntity alert_entity, ScriptPeriodicity p, NetworkInterface *iface);
@@ -39,6 +38,8 @@ class AlertCheckLuaEngine : public LuaEngine {
 
   ScriptPeriodicity getPeriodicity() const;
   const char * getGranularity() const;
+
+  void lua_stats(const char * key, lua_State *vm);
 };
 
 #endif

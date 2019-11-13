@@ -6,7 +6,6 @@ local alerts_api = require("alerts_api")
 local user_scripts = require("user_scripts")
 
 local script = {
-  key = "p2p",
   local_only = true,
 
   hooks = {
@@ -18,13 +17,17 @@ local script = {
     i18n_description = "alerts_thresholds_config.alert_p2p_description",
     i18n_field_unit = user_scripts.field_units.bytes,
     input_builder = user_scripts.threshold_cross_input_builder,
+  },
+
+  env = {
+     p2p_app_id = interface.getnDPICategoryId("FileSharing")
   }
 }
 
 -- #################################################################
 
 function script.get_threshold_value(granularity, info)
-  return alerts_api.host_delta_val(script.key, granularity, alerts_api.category_bytes(info, "FileSharing"))
+  return alerts_api.host_delta_val(script.key, granularity, host.getCategoryBytes(script.env.p2p_app_id)["bytes"])
 end
 
 -- #################################################################

@@ -8,8 +8,6 @@ local user_scripts = require("user_scripts")
 -- #################################################################
 
 local script = {
-   key = "mud",
-
    -- NOTE: hooks defined below
    hooks = {},
 
@@ -22,14 +20,8 @@ local script = {
 
 -- #################################################################
 
-function script.setup()
-  return(mud_utils.isMUDRecordingEnabled(interface.getId()))
-end
-
--- #################################################################
-
-function script.hooks.protocolDetected(params)
-  mud_utils.handleFlow(params.flow_info)
+function script.hooks.protocolDetected(now)
+  mud_utils.handleFlow()
 end
 
 -- #################################################################

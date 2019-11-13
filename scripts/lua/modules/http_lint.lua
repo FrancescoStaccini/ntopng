@@ -5,7 +5,6 @@
 local pragma_once = 1
 local http_lint = {}
 local json = require "dkjson"
-local alert_consts = require "alert_consts"
 local tracker = require "tracker"
 
 -- #################################################################
@@ -179,7 +178,7 @@ end
 
 local function validateUsername(p)
    -- A username (e.g. used in ntopng authentication)
-   return validateSingleWord(p)
+   return(validateSingleWord(p) and (string.find(p, "%.") == nil))
 end
 
 local function licenseCleanup(p)
@@ -1100,6 +1099,10 @@ local known_parameters = {
    ["alertstats_type"]         = validateAlertStatsType,        -- A mode for alerts stats queries
    ["flowhosts_type"]          = validateFlowHostsType,         -- A filter for local/remote hosts in each of the two directions
    ["status"]                  = validateAlertStatus,           -- An alert type to filter
+   ["hash_table"]              = validateSingleWord,            -- An internal ntopng hash_table
+   ["periodic_script"]         = validateSingleWord,            -- A script under callbacks/interface executed by ntopng
+   ["user_script"]             = validateSingleWord,            -- A user script key
+   ["subdir"]                  = validateSingleWord,            -- A user script subdir
    ["profile"]                 = http_lint.validateTrafficProfile,        -- Traffic Profile name
    ["delete_profile"]          = http_lint.validateTrafficProfile,        -- A Traffic Profile to delete
    ["alert_type"]              = validateNumber,                -- An alert type enum
@@ -1300,6 +1303,7 @@ local known_parameters = {
    ["topk_heuristic_precision"]                    = validateChoiceInline({"disabled", "more_accurate", "accurate", "aggressive"}),
    ["bridging_policy_target_type"]                 = validateChoiceInline({"per_protocol", "per_category", "both"}),
    ["timeseries_driver"]                           = validateChoiceInline({"rrd", "influxdb", "prometheus"}),
+   ["edition"]                                     = validateEmptyOr(validateChoiceInline({"community", "pro", "enterprise"})),
    ["ts_high_resolution"]                          = validateNumber,
    ["lbd_hosts_as_macs"]                           = validateBool,
    ["toggle_arp_matrix_generation"]                = validateBool,
@@ -1500,6 +1504,7 @@ local known_parameters = {
    ["rtt_host"]                = validateSingleWord,
    ["rtt_max"]                 = validateEmptyOr(validateNumber),
    ["disabled_status"]         = validateListOfTypeInline(validateNumber),
+   ["redis_command"]           = validateSingleWord,
 
    -- Containers
    ["pod"]                     = validateSingleWord,

@@ -24,6 +24,8 @@
 
 #include "ntop_includes.h"
 
+class GenericHashEntry;
+
 /** @defgroup MonitoringData Monitoring Data
  * This is the group that contains all classes and datastructures that handle monitoring data.
  */
@@ -37,18 +39,27 @@
  */
 class GenericHash {
  protected:
-  GenericHashEntry **table; /**< Entry table. It is used for maintain an update history.*/
+  GenericHashEntry **table; /**< Entry table. It is used for maintain an update history */
   char *name;
-  u_int32_t num_hashes; /**< Number of hash.*/
-  u_int32_t current_size; /**< Current size of hash (including idle or ready-to-purge elements).*/
-  u_int32_t max_hash_size; /**< Max size of hash.*/
+  u_int32_t num_hashes; /**< Number of hash */
+  u_int32_t current_size; /**< Current size of hash (including idle or ready-to-purge elements) */
+  u_int32_t max_hash_size; /**< Max size of hash */
   RwLock **locks;
-  NetworkInterface *iface; /**< Pointer of network interface for this generic hash.*/
-  u_int last_purged_hash; /**< Index of last purged hash.*/
+  NetworkInterface *iface; /**< Pointer of network interface for this generic hash */
+  u_int last_purged_hash; /**< Index of last purged hash */
   u_int last_entry_id; /**< An uniue identifier assigned to each entry in the hash table */
   u_int purge_step;
+  u_int walk_idle_start_hash_id; /**< The id of the hash bucket from which to start walkIdle hash table walk */
+  struct {
+    u_int64_t num_idle_transitions;
+    u_int64_t num_purged;
+  } entry_state_transition_counters;
+
+  vector<GenericHashEntry*> *idle_entries; /**< Vector used by the offline thread in charge of deleting hash table entries */
+  vector<GenericHashEntry*> *idle_entries_shadow; /**< Vector prepared by the purgeIdle and periodically swapped to idle_entries */
 
  public:
+
   /**
    * @brief A Constructor
    * @details Creating a new GenericHash.
@@ -66,6 +77,7 @@ class GenericHash {
    * @brief A Destructor
    */
   virtual ~GenericHash();
+
   /**
    * @brief Get number of entries.
    * @details Inline method.
@@ -73,6 +85,15 @@ class GenericHash {
    * @return Current size of hash.
    */
   inline u_int32_t getNumEntries() { return(current_size); };
+
+  /**
+   * @brief Get number of idle entries, that is, entries no longer in the hash table but still to be purged.
+   * @details Inline method.
+   *
+   * @return The number of idle entries.
+   */
+  int32_t getNumIdleEntries() const;
+
   /**
    * @brief Add new entry to generic hash.
    * @details If current_size < max_hash_size, this method calculate a new hash key for the new entry, add it and update the current_size value.
@@ -84,6 +105,7 @@ class GenericHash {
    *
    */
   bool add(GenericHashEntry *h, bool do_lock);
+
   /**
    * @brief generic walker for the hash.
    * @details This method uses the walker function to compare each elements of the hash with the user data.
@@ -92,10 +114,19 @@ class GenericHash {
    * @param walk_all true = walk all hash, false, walk only one (non NULL) slot
    * @param walker A pointer to the comparison function.
    * @param user_data Value to be compared with the values of hash.
-   * @param walk_idle Allows idle entries to be walked. WARNING: Should never be used unless in ViewInterface::flowPollLoop
    */
   bool walk(u_int32_t *begin_slot, bool walk_all,
-	    bool (*walker)(GenericHashEntry *h, void *user_data, bool *entryMatched), void *user_data, bool walk_idle = false);
+	    bool (*walker)(GenericHashEntry *h, void *user_data, bool *entryMatched), void *user_data);
+
+  /**
+   * @brief Hash table walker used only by an offline thread in charge of deleting idle entries
+   * @details This method walks the hash table and the idle_entries vector to perform cleanup operations
+   *          on idle entries, before calling the destructor on them
+   *
+   * @param walker A pointer to the comparison function.
+   * @param user_data Value to be compared with the values of hash.
+   */
+  void walkIdle(bool (*walker)(GenericHashEntry *h, void *user_data), void *user_data);
 
   /**
    * @brief Purge idle hash entries.
@@ -120,13 +151,32 @@ class GenericHash {
    * @return Pointer of network interface instance.
    */
   inline NetworkInterface* getInterface() { return(iface); };
+
+  /**
+   * @brief Return the name associated with the hash.
+   * @details Inline method.
+   *
+   * @return Pointer to the name
+   */
+  inline const char* getName() const { return name; };
+
   /**
    * @brief Check whether the hash has empty space
    *
    * @return true if there is space left, or false if the hash is full
    */
-  inline bool hasEmptyRoom() { return((current_size < max_hash_size) ? true : false); };
-  inline u_int32_t getCurrentSize() { return current_size;}
+  bool hasEmptyRoom();
+
+  /**
+   * @brief Populates a lua table with hash table stats, including
+   * the state transitions
+   *
+   * @param vm A lua VM
+   *
+   * @return Current size of hash.
+   */
+  void lua(lua_State* vm);
+
 };
 
 #endif /* _GENERIC_HASH_H_ */

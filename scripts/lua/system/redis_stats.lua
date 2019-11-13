@@ -10,6 +10,7 @@ active_page = "system_stats"
 require "lua_utils"
 local page_utils = require("page_utils")
 local ts_utils = require("ts_utils")
+local alert_consts = require("alert_consts")
 local system_scripts = require("system_scripts_utils")
 require("graph_utils")
 require("alert_utils")
@@ -43,6 +44,12 @@ else
    print("<li><a href=\""..url.."&page=overview\"><i class=\"fa fa-home fa-lg\"></i></a></li>")
 end
 
+if((page == "stats") or (page == nil)) then
+   print("<li class=\"active\"><a href=\"#\"><i class=\"fa fa-wrench fa-lg\"></i></a></li>\n")
+else
+   print("<li><a href=\""..url.."&page=stats\"><i class=\"fa fa-wrench fa-lg\"></i></a></li>")
+end
+
 if(page == "historical") then
    print("<li class=\"active\"><a href=\""..url.."&page=historical\"><i class='fa fa-area-chart fa-lg'></i></a></li>")
 else
@@ -50,7 +57,7 @@ else
 end
 
 if isAdministrator()
--- and system_scripts.hasAlerts({entity = alertEntity("redis")}))
+-- and system_scripts.hasAlerts({entity = alert_consts.alertEntity("redis")}))
 then
    -- if(page == "alerts") then
    --    print("\n<li class=\"active\"><a href=\"#\">")
@@ -125,14 +132,62 @@ refreshRedisStats();
  </script>
  ]]
    print("</table>\n")
+elseif(page == "stats") then
 
+   print [[
+<div id="table-redis-stats"></div>
+<script type='text/javascript'>
+
+$("#table-redis-stats").datatable({
+   title: "",
+   perPage: 100,
+   hidePerPage: true,
+   url: "]] print(ntop.getHttpPrefix()) print[[/lua/get_redis_stats.lua",
+   columns: [
+     {
+       field: "column_key",
+       hidden: true,
+       css: {
+         width: '15%',
+       }
+     }, {
+       field: "column_command",
+       sortable: true,
+       title: "]] print(i18n("please_wait_page.command")) print[[",
+       css: {
+         width: '15%',
+       }
+     }, {
+       title: "]] print(i18n("chart")) print[[",
+       field: "column_chart",
+       sortable: false,
+       css: {
+         textAlign: 'center',
+         width: '5%',
+       }
+     }, {
+       title: "]] print(i18n("system_stats.redis.tot_calls")) print[[",
+       field: "column_hits",
+       sortable: true,
+       css: {
+         textAlign: 'right'
+       }
+     }
+   ], tableCallback: function() {
+      datatableInitRefreshRows($("#table-redis-stats"), "column_key", 5000, {"column_hits": addCommas});
+   }
+});
+</script>
+ ]]
+   
 elseif(page == "historical") then
    local schema = _GET["ts_schema"] or "redis:memory"
    local selected_epoch = _GET["epoch"] or ""
-   local tags = {ifid = getSystemInterfaceId()}
+   local tags = {ifid = getSystemInterfaceId(), command = _GET["redis_command"]}
    url = url.."&page=historical"
 
    drawGraphs(getSystemInterfaceId(), schema, tags, _GET["zoom"], url, selected_epoch, {
+       top_redis_hits = "top:redis:hits",
 		 timeseries = system_schemas,
    })
 elseif((page == "alerts") and isAdministrator()) then
@@ -140,7 +195,7 @@ elseif((page == "alerts") and isAdministrator()) then
    interface.select(getSystemInterfaceId())
 
    _GET["ifid"] = getSystemInterfaceId()
-   -- _GET["entity"] = alertEntity("redis")
+   -- _GET["entity"] = alert_consts.alertEntity("redis")
 
    drawAlerts()
 

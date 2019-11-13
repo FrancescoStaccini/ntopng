@@ -6,7 +6,6 @@ local alerts_api = require("alerts_api")
 local user_scripts = require("user_scripts")
 
 local script = {
-  key = "flow_flood_attacker",
   threshold_type_builder = alerts_api.flowFloodType,
   default_value = "flow_flood_attacker;gt;50",
 
@@ -28,7 +27,9 @@ local script = {
 -- #################################################################
 
 function script.get_threshold_value(granularity, info)
-  return(info["hits.flow_flood_attacker"] or 0)
+  local ff = host.getFlowFlood()
+
+  return(ff["hits.flow_flood_attacker"] or 0)
 end
 
 -- #################################################################

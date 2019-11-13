@@ -11,7 +11,6 @@ print [[
    ]]
 
 local template = require "template_utils"
-local system_scripts = require("system_scripts_utils")
 
 local have_nedge = ntop.isnEdge()
 info = ntop.getInfo(true)
@@ -294,8 +293,8 @@ print[[
                    $('#ram-process-used').html('Used: ' + bytesToSize(rsp.system_host_stats.mem_ntopng_resident * 1024));
                 }
 
-                if(rsp.system_host_stats.cpu_load_percentage !== undefined)
-                  $('#cpu-load-pct').html(fpercent(rsp.system_host_stats.cpu_load_percentage));
+                if(rsp.system_host_stats.cpu_load !== undefined)
+                  $('#cpu-load-pct').html(ffloat(rsp.system_host_stats.cpu_load));
 
                 msg += "<br>";
 

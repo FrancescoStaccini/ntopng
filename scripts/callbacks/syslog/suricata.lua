@@ -7,16 +7,22 @@ package.path = dirs.installdir .. "/scripts/lua/modules/?.lua;" .. package.path
 require "lua_utils"
 require "flow_utils"
 local json = require ("dkjson")
+local alert_consts = require("alert_consts")
 
 local syslog_module = {
   key = "suricata",
   hooks = {},
 }
 
+local external_stats_key = getRedisIfacePrefix(interface.getId())..'.external_stats'
+
 -- #################################################################
 
 -- The function below ia called once (#pragma once)
 function syslog_module.setup()
+   -- Cleanup old stats, if any
+   ntop.delCache(external_stats_key)
+
    return true
 end
 
@@ -45,8 +51,18 @@ end
 -- #################################################################
 
 local function parseAlertMetadata(event_alert, flow)
-   flow.external_alert_severity = tonumber(event_alert.severity)
-   flow.external_alert = json.encode(event_alert)
+   local severity = alert_consts.alert_severities.error
+   if event_alert.severity ~= nil and event_alert.severity > 1 then
+      severity = alert_consts.alert_severities.warning
+   end
+
+   local external_alert = {
+      source = "suricata",
+      severity_id = severity.severity_id,
+      alert = event_alert,
+   }
+
+   flow.external_alert = json.encode(external_alert)
 end
 
 -- #################################################################
@@ -84,6 +100,7 @@ local function parseFileInfoMetadata(event_fileinfo, flow)
    flow.FILE_STATE = event_fileinfo.state
    flow.FILE_GAPS = event_fileinfo.gaps
    flow.FILE_STORED = event_fileinfo.stored
+   flow.FILE_ID = event_fileinfo.file_id
 end
 
 -- #################################################################
@@ -104,27 +121,26 @@ end
 
 local function parseTLSMetadata(event_tls, flow)
    flow.ssl_server_name = event_tls.sni
-   -- flow.ja3c_hash = event_tls.ja3
-   -- flow.ja3s_hash = event_tls.ja3s
+
+   if event_tls.ja3  ~= nil then flow.ja3c_hash = event_tls.ja3.hash  end
+   if event_tls.ja3s ~= nil then flow.ja3s_hash = event_tls.ja3s.hash end
 
    -- Additional fields
    flow.TLS_VERSION = event_tls.version
-   flow.TLS_CERTIFICATE_DN = event_tls.issuerdn
-   flow.TLS_CERTIFICATE_SUBJECT = event_tls.subject
-   flow.TLS_NOT_BEFORE = event_tls.notbefore
-   flow.TLS_NOT_AFTER = event_tls.notafter
-   flow.TLS_FINGERPRINT = event_tls.fingerprint
-   flow.TLS_SERIAL = event_tls.serial
-   flow.TLS_SESSION_RESUMED = event_tls.session_resumed
+   flow.TLS_CERT_NOT_BEFORE = event_tls.notbefore
+   flow.TLS_CERT_AFTER = event_tls.notafter
+   flow.TLS_CERT_SHA1 = event_tls.fingerprint
+   flow.TLS_CERT_SUBJECT = event_tls.subject
+   flow.TLS_CERT_DN = event_tls.issuerdn
+   flow.TLS_CERT_SN = event_tls.serial
 end
 
 -- #################################################################
 
 local function parseStats(event_stats)
-   local ifid = interface.getId()
    local external_stats = {}
 
-   external_stats.capture_packets = event_stats.capture.kernel_packets
+   external_stats.capture_packets = (event_stats.capture.kernel_packets - event_stats.capture.kernel_drops)
    external_stats.capture_drops = event_stats.capture.kernel_drops
 
    external_stats.signatures_loaded = 0
@@ -134,8 +150,10 @@ local function parseStats(event_stats)
      external_stats.signatures_failed = external_stats.signatures_failed + engine.rules_failed
    end
 
+   external_stats.i18n_title = "external_stats.suricata_statistics"
+
    local external_json_stats = json.encode(external_stats)
-   ntop.setCache(getRedisIfacePrefix(ifid)..'.external_stats', external_json_stats)
+   ntop.setCache(external_stats_key, external_json_stats)
 end
 
 -- #################################################################
@@ -146,7 +164,6 @@ function syslog_module.hooks.handleEvent(message)
    if event == nil then
       return
    end
-
 
    local flow = {}
    parseFiveTuple(event, flow)
@@ -160,9 +177,6 @@ function syslog_module.hooks.handleEvent(message)
 
       if event.flow ~= nil then
          parseFlowMetadata(event.flow, flow)
-         if flow.last_switched_iso8601 == nil then
-            flow.last_switched_iso8601 = event.timestamp
-         end
          parseAlertMetadata(event.alert, flow)
       else
          flow = nil
@@ -196,6 +210,15 @@ function syslog_module.hooks.handleEvent(message)
    end
 
    if flow ~= nil then
+      -- If first/last ts is not available, use the event timestamp as last resort
+      if flow.first_switched_iso8601 == nil then
+         flow.first_switched_iso8601 = event.timestamp
+      end
+      if flow.last_switched_iso8601 == nil then
+         flow.last_switched_iso8601 = event.timestamp
+      end
+
+      -- Processing flow or alert
       interface.processFlow(flow)
    end
 end 

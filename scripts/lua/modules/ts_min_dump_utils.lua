@@ -149,6 +149,50 @@ end
 
 -- ########################################################
 
+function ts_dump.update_hash_tables_stats(when, ifstats, verbose)
+   local hash_tables_stats = interface.getHashTablesStats()
+
+   for ht_name, ht_stats in pairs(hash_tables_stats) do
+      local num_idle = 0
+      local num_active = 0
+
+      if ht_stats["hash_entry_states"] then
+         if ht_stats["hash_entry_states"]["hash_entry_state_idle"] then
+	   num_idle = ht_stats["hash_entry_states"]["hash_entry_state_idle"]
+         end
+         if ht_stats["hash_entry_states"]["hash_entry_state_active"] then
+	   num_active = ht_stats["hash_entry_states"]["hash_entry_state_active"]
+         end
+      end
+
+      ts_utils.append("ht:state", {ifid = ifstats.id, hash_table = ht_name, num_idle = num_idle, num_active = num_active}, when, verbose)
+   end
+end
+
+-- ########################################################
+
+function ts_dump.update_periodic_scripts_stats(when, ifstats, verbose)
+   local periodic_scripts_stats = interface.getPeriodicActivitiesStats()
+
+   for ps_name, ps_stats in pairs(periodic_scripts_stats) do
+      local num_ms_max = 0
+      local num_ms_last = 0
+
+      if ps_stats["duration"] then
+         if ps_stats["duration"]["max_duration_ms"] then
+	   num_ms_max = ps_stats["duration"]["max_duration_ms"]
+         end
+         if ps_stats["duration"]["last_duration_ms"] then
+	   num_ms_last = ps_stats["duration"]["last_duration_ms"]
+         end
+      end
+
+      ts_utils.append("periodic_script:duration_ms", {ifid = ifstats.id, periodic_script = ps_name, num_ms_max = num_ms_max, num_ms_last = num_ms_last}, when, verbose)
+   end
+end
+
+-- ########################################################
+
 function ts_dump.containers_update_stats(when, ifstats, verbose)
   local containers_stats = interface.getContainersStats()
 
@@ -189,6 +233,19 @@ function ts_dump.pods_update_stats(when, ifstats, verbose)
       as_client=pod["rtt_variance_as_client"], as_server=pod["rtt_variance_as_server"]
     }, when, verbose)
   end
+end
+
+-- ########################################################
+
+function ts_dump.update_user_scripts_stats(when, ifid, verbose)
+  -- NOTE: flow scripts are monitored in 5sec.lua
+  local all_scripts = {
+    host = user_scripts.script_types.traffic_element,
+    interface = user_scripts.script_types.traffic_element,
+    network = user_scripts.script_types.traffic_element,
+  }
+
+  user_scripts.ts_dump(when, ifid, verbose, "elem_user_script", all_scripts)
 end
 
 -- ########################################################
@@ -257,6 +314,15 @@ function ts_dump.run_min_dump(_ifname, ifstats, iface_ts, config, when, verbose)
        ts_custom.iface_update_stats(instant, _ifname, iface_point, verbose)
     end
   end
+
+  -- Save internal hash tables states every minute
+  ts_dump.update_hash_tables_stats(when, ifstats, verbose)
+
+  -- Save the traffic elements user scripts stats
+  ts_dump.update_user_scripts_stats(when, ifstats.id, verbose)
+
+  -- Save duration of periodic scripts
+  ts_dump.update_periodic_scripts_stats(when, ifstats, verbose)
 
   -- Save Profile stats every minute
   if ntop.isPro() and ifstats.profiles then  -- profiles are only available in the Pro version

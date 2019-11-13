@@ -17,16 +17,15 @@ local function check_interface_drops(params)
   local drops_type = alerts_api.tooManyDropsType(stats.drops, drop_perc, threshold)
 
   if((stats.packets > 100) and (drop_perc > threshold)) then
-    alerts_api.trigger(params.alert_entity, drops_type)
+    alerts_api.trigger(params.alert_entity, drops_type, nil, params.cur_alerts)
   else
-    alerts_api.release(params.alert_entity, drops_type)
+    alerts_api.release(params.alert_entity, drops_type, nil, params.cur_alerts)
   end
 end
 
 -- #################################################################
 
 script = {
-  key = "too_many_drops",
   default_value = "too_many_drops;gt;5", -- 5%
 
   hooks = {

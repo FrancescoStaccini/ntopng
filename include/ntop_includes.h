@@ -172,6 +172,8 @@ using namespace std;
 #include "ntop_defines.h"
 #include "Mutex.h"
 #include "RwLock.h"
+#include "Bitmask.h"
+#include "Bloom.h"
 #include "MonitoredMetric.h"
 #include "MonitoredCounter.h"
 #include "MonitoredGauge.h"
@@ -262,6 +264,7 @@ using namespace std;
 #include "MySQLDB.h"
 #endif
 #include "InterfaceStatsHash.h"
+#include "GenericHash.h"
 #include "GenericHashEntry.h"
 #if defined(NTOPNG_PRO) && defined(HAVE_NINDEX)
 #include "nindex_api.h"
@@ -283,6 +286,7 @@ using namespace std;
 #include "NetworkInterfaceTsPoint.h"
 #include "LuaEngine.h"
 #include "AlertCheckLuaEngine.h"
+#include "FlowAlertCheckLuaEngine.h"
 #include "SyslogLuaEngine.h"
 #include "NetworkInterface.h"
 #ifndef HAVE_NEDGE
@@ -293,7 +297,6 @@ using namespace std;
 #include "PF_RINGInterface.h"
 #endif
 #include "FlowAlertCounter.h"
-#include "GenericHash.h"
 #include "VirtualHost.h"
 #include "VirtualHostHash.h"
 #include "HTTPstats.h"
@@ -362,6 +365,7 @@ using namespace std;
 #include "AggregatedFlow.h"
 #include "AggregatedFlowHash.h"
 #endif
+#include "ThreadedActivityStats.h"
 #include "ThreadedActivity.h"
 #include "ThreadPool.h"
 #include "PeriodicActivities.h"

@@ -33,11 +33,13 @@ class ThreadedActivity {
   char *path;
   u_int32_t periodicity;
   bool align_to_localtime;
+  bool exclude_viewed_interfaces;
   bool thread_started;
   bool systemTaskRunning;
   bool *interfaceTasksRunning;
   Mutex m;
   ThreadPool *pool;
+  ThreadedActivityStats **threaded_activity_stats;
 
   void periodicActivityBody();
   void aperiodicActivityBody();
@@ -45,12 +47,14 @@ class ThreadedActivity {
   void schedulePeriodicActivity(ThreadPool *pool);
   void setInterfaceTaskRunning(NetworkInterface *iface, bool running);
   bool isInterfaceTaskRunning(NetworkInterface *iface);
+  void updateThreadedActivityStats(NetworkInterface *iface, u_long latest_duration);
   
  public:
-  ThreadedActivity(const char* _path,
+  ThreadedActivity(const char* _path,		   
 		   u_int32_t _periodicity_seconds = 0,
 		   bool _align_to_localtime = false,
-		   u_int8_t thread_pool_size = 1);
+		   bool _exclude_viewed_interfaces = false,
+		   ThreadPool* _pool = NULL);
   ~ThreadedActivity();
 
   const char *activityPath() { return path; };
@@ -59,9 +63,12 @@ class ThreadedActivity {
   void runScript(char *script_path, NetworkInterface *iface);
 
   inline void shutdown()      { terminating = true; };
+  void terminateEnqueueLoop();
   bool isTerminating();
 
   void run();
+
+  void lua(NetworkInterface *iface, lua_State *vm);
 };
 
 #endif /* _THREADED_ACTIVITY_H_ */

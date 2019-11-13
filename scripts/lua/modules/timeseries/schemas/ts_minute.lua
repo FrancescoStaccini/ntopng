@@ -1,9 +1,51 @@
 --
--- (C) 2018 - ntop.org
+-- (C) 2019 - ntop.org
 --
 
 local ts_utils = require "ts_utils_core"
 local schema
+
+-------------------------------------------------------
+-- PERIODIC_SCRIPTS SCHEMAS
+-------------------------------------------------------
+
+schema = ts_utils.newSchema("periodic_script:duration_ms", {step = 60, rrd_fname="ps_duration_ms", metrics_type = ts_utils.metrics.gauge})
+schema:addTag("ifid")
+schema:addTag("periodic_script")
+schema:addMetric("num_ms_max")
+schema:addMetric("num_ms_last")
+
+-------------------------------------------------------
+-- TRAFFIC ELEMENTS USER SCRIPTS SCHEMAS
+-------------------------------------------------------
+
+schema = ts_utils.newSchema("elem_user_script:duration", {step = 60, metrics_type = ts_utils.metrics.gauge})
+schema:addTag("ifid")
+schema:addTag("user_script")
+schema:addTag("subdir")
+schema:addMetric("num_ms")
+
+schema = ts_utils.newSchema("elem_user_script:num_calls", {step = 60, metrics_type = ts_utils.metrics.gauge})
+schema:addTag("ifid")
+schema:addTag("user_script")
+schema:addTag("subdir")
+schema:addMetric("num_calls")
+
+schema = ts_utils.newSchema("elem_user_script:total_stats", {step = 60, metrics_type = ts_utils.metrics.gauge})
+schema:addTag("ifid")
+schema:addTag("subdir")
+schema:addMetric("num_ms")
+schema:addMetric("num_calls")
+
+-------------------------------------------------------
+-- HASH_TABLES SCHEMAS
+-------------------------------------------------------
+
+schema = ts_utils.newSchema("ht:state", {step = 60, rrd_fname="ht_state", metrics_type = ts_utils.metrics.gauge})
+schema:addTag("ifid")
+schema:addTag("hash_table")
+schema:addMetric("num_idle")
+schema:addMetric("num_active")
 
 -------------------------------------------------------
 -- PROFILES SCHEMAS

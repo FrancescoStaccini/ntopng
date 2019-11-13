@@ -40,7 +40,6 @@ class Host : public GenericHashEntry, public AlertableEntity {
   time_t last_stats_reset;
   u_int16_t alert_score;
   u_int32_t active_alerted_flows;
-  u_int32_t disabled_flow_status;
   Bitmap anomalous_flows_as_client_status, anomalous_flows_as_server_status;
  
   /* Host data: update Host::deleteHostData when adding new fields */
@@ -58,6 +57,8 @@ class Host : public GenericHashEntry, public AlertableEntity {
 
   AlertCounter *syn_flood_attacker_alert, *syn_flood_victim_alert;
   AlertCounter *flow_flood_attacker_alert, *flow_flood_victim_alert;
+  u_int32_t syn_sent_last_min, synack_recvd_last_min; /* syn scan counters (attacker) */
+  u_int32_t syn_recvd_last_min, synack_sent_last_min; /* syn scan counters (victim) */
   std::vector<u_int32_t> dropbox_namespaces;
   MonitoredGauge<u_int32_t> num_active_flows_as_client, num_active_flows_as_server,
     low_goodput_client_flows, low_goodput_server_flows;  
@@ -89,7 +90,7 @@ class Host : public GenericHashEntry, public AlertableEntity {
   TrafficShaper *get_shaper(ndpi_protocol ndpiProtocol, bool isIngress);
   void get_quota(u_int16_t protocol, u_int64_t *bytes_quota, u_int32_t *secs_quota, u_int32_t *schedule_bitmap, bool *is_category);
 #endif
-  void luaNames(lua_State * const vm, char * const buf, ssize_t buf_size);
+  void lua_get_names(lua_State * const vm, char * const buf, ssize_t buf_size);
   void luaStrTableEntryLocked(lua_State * const vm, const char * const entry_name, const char * const entry);
   char* printMask(char *str, u_int str_len) { return ip.printMask(str, str_len, isLocalHost()); };
   void freeHostData();
@@ -110,9 +111,9 @@ class Host : public GenericHashEntry, public AlertableEntity {
   inline void setBroadcastDomainHost()       { is_in_broadcast_domain = true;  };
   inline void setSystemHost()                { /* TODO: remove */              };
 
-  inline nDPIStats* get_ndpi_stats()       { return(stats->getnDPIStats()); };
+  inline nDPIStats* get_ndpi_stats()   const { return(stats->getnDPIStats()); };
 
-  inline bool isChildSafe() {
+  inline bool isChildSafe() const {
 #ifdef NTOPNG_PRO
     return(iface->getHostPools()->isChildrenSafePool(host_pool_id));
 #else
@@ -129,7 +130,7 @@ class Host : public GenericHashEntry, public AlertableEntity {
   };
 
   virtual HostStats* allocateStats()                { return(new HostStats(this)); };
-  void updateStats(update_stats_user_data_t *update_hosts_stats_user_data);
+  void updateStats(periodic_stats_update_user_data_t *periodic_stats_update_user_data);
   void incLowGoodputFlows(time_t t, bool asClient);
   void decLowGoodputFlows(time_t t, bool asClient);
   inline void incNumAnomalousFlows(bool asClient)   { stats->incNumAnomalousFlows(asClient); };
@@ -139,8 +140,8 @@ class Host : public GenericHashEntry, public AlertableEntity {
     else
       anomalous_flows_as_server_status.bitmapOr(status); 
   };
-  inline u_int16_t get_host_pool()         { return(host_pool_id);   };
-  inline u_int16_t get_vlan_id()           { return(vlan_id);        };
+  inline u_int16_t get_host_pool()    const { return(host_pool_id);   };
+  inline u_int16_t get_vlan_id()      const { return(vlan_id);        };
   char* get_name(char *buf, u_int buf_len, bool force_resolution_if_not_found);
 
   inline void incSentTcp(u_int32_t ooo_pkts, u_int32_t retr_pkts, u_int32_t lost_pkts, u_int32_t keep_alive_pkts) {
@@ -161,7 +162,7 @@ class Host : public GenericHashEntry, public AlertableEntity {
   inline void incRecvStats(u_int pkt_len)           { stats->incRecvStats(pkt_len);          };
   
   virtual int16_t get_local_network_id() const = 0;
-  virtual HTTPstats* getHTTPstats()                  { return(NULL);                 };
+  virtual HTTPstats* getHTTPstats()           const { return(NULL);                  };
   inline void set_ipv4(u_int32_t _ipv4)             { ip.set(_ipv4);                 };
   inline void set_ipv6(struct ndpi_in6_addr *_ipv6) { ip.set(_ipv6);                 };
   inline u_int32_t key()                            { return(ip.key());              };
@@ -169,7 +170,7 @@ class Host : public GenericHashEntry, public AlertableEntity {
   inline bool isIPv4()                        const { return ip.isIPv4();            };
   inline bool isIPv6()                        const { return ip.isIPv6();            };
   void set_mac(Mac  *m);
-  inline bool isBlacklisted()                  { return(blacklisted_host);  };
+  inline bool isBlacklisted()                 const { return(blacklisted_host);      };
   void reloadHostBlacklist();
   inline const u_int8_t* const get_mac() const { return(mac ? mac->get_mac() : NULL);}
   inline Mac* getMac() const                   { return(mac);              }
@@ -198,18 +199,20 @@ class Host : public GenericHashEntry, public AlertableEntity {
   }
 #endif
 
-  inline u_int64_t getNumBytesSent()           { return(stats->getNumBytesSent());   }
-  inline u_int64_t getNumBytesRcvd()           { return(stats->getNumBytesRcvd());   }
+  inline u_int64_t getNumBytesSent()     const { return(stats->getNumBytesSent());   }
+  inline u_int64_t getNumBytesRcvd()     const { return(stats->getNumBytesRcvd());   }
+  inline u_int64_t getNumPktsSent()      const { return(stats->getNumPktsSent());    }
+  inline u_int64_t getNumPktsRcvd()      const { return(stats->getNumPktsRcvd());    }
   inline u_int64_t getNumDroppedFlows()        { return(stats->getNumDroppedFlows());}
   inline u_int64_t getNumBytes()               { return(stats->getNumBytes());}
   inline float getBytesThpt()                  { return(stats->getBytesThpt());      }
   inline float getPacketsThpt()                { return(stats->getPacketsThpt());    }
   inline void incNumDroppedFlows()             { stats->incNumDroppedFlows();        }
 
-  inline u_int32_t get_asn()                   { return(asn);              }
-  inline char*     get_asname()                { return(asname);           }
-  inline AutonomousSystem* get_as()            { return(as);               }
-  inline bool isPrivateHost()                  { return(ip.isPrivateAddress()); }
+  inline u_int32_t get_asn()             const { return(asn);              }
+  inline char*     get_asname()          const { return(asname);           }
+  inline AutonomousSystem* get_as()      const { return(as);               }
+  inline bool isPrivateHost()            const { return(ip.isPrivateAddress()); }
   bool isLocalInterfaceAddress();
   char* get_visual_name(char *buf, u_int buf_len);
   virtual char* get_string_key(char *buf, u_int buf_len) const { return(ip.print(buf, buf_len)); };
@@ -217,10 +220,39 @@ class Host : public GenericHashEntry, public AlertableEntity {
   char* get_tskey(char *buf, size_t bufsize);
 
   bool is_hash_entry_state_idle_transition_ready() const;
+  void periodic_hash_entry_state_update(void *user_data, bool quick);
+  void periodic_stats_update(void *user_data, bool quick);
 
   virtual void incICMP(u_int8_t icmp_type, u_int8_t icmp_code, bool sent, Host *peer) {};
   virtual void lua(lua_State* vm, AddressTree * ptree, bool host_details,
 	   bool verbose, bool returnHost, bool asListElement);
+
+  void lua_get_min_info(lua_State* vm)      const;
+  void lua_get_ip(lua_State* vm)            const;
+  void lua_get_localhost_info(lua_State* vm) const;
+  void lua_get_mac(lua_State* vm)           const;
+  void lua_get_host_pool(lua_State* vm)     const;
+  void lua_get_score(lua_State* vm)         const;
+  void lua_get_as(lua_State* vm)            const;
+  void lua_get_bytes(lua_State* vm)         const;
+  void lua_get_app_bytes(lua_State *vm, u_int app_id) const;
+  void lua_get_cat_bytes(lua_State *vm, ndpi_protocol_category_t category_id) const;
+  void lua_get_packets(lua_State* vm)       const;
+  void lua_get_time(lua_State* vm)          const;
+  void lua_get_syn_flood(lua_State* vm)     const;
+  void lua_get_flow_flood(lua_State*vm)     const;
+  void lua_get_syn_scan(lua_State* vm)      const;
+  void lua_get_anomalies(lua_State* vm)     const;
+  void lua_get_num_alerts(lua_State* vm)    const;
+  void lua_get_num_total_flows(lua_State* vm) const;
+  void lua_get_num_flows(lua_State* vm)     const;
+  void lua_get_num_contacts(lua_State* vm)  const;
+  void lua_get_num_http_hosts(lua_State*vm) const;
+  void lua_get_low_goodput(lua_State*vm)    const;
+  void lua_get_os(lua_State* vm);
+  void lua_get_fingerprints(lua_State *vm);
+  void lua_get_geoloc(lua_State *vm);
+  
   void resolveHostName();
   void set_host_label(char *label_name, bool ignoreIfPresent);
   inline bool is_label_set() { return(host_label_set); };
@@ -237,16 +269,17 @@ class Host : public GenericHashEntry, public AlertableEntity {
   virtual void updateHostTrafficPolicy(char *key) {};
   bool addIfMatching(lua_State* vm, AddressTree * ptree, char *key);
   bool addIfMatching(lua_State* vm, u_int8_t *mac);
-  void updateSynAlertsCounter(time_t when, u_int8_t flags, Flow *f, bool syn_sent);
+  void updateSynAlertsCounter(time_t when, bool syn_sent);
+  void update3WHSCompletedAlertsCounter(time_t when, bool synack_sent);
   inline void updateRoundTripTime(u_int32_t rtt_msecs) {
     if(as) as->updateRoundTripTime(rtt_msecs);
   }
 
   void incNumFlows(time_t t, bool as_client, Host *peer);
   void decNumFlows(time_t t, bool as_client, Host *peer);
-  inline void incNumAlertedFlows()        { active_alerted_flows++; }
-  inline void decNumAlertedFlows()        { active_alerted_flows--; }
-  inline u_int32_t getNumAlertedFlows()   { return(active_alerted_flows); }
+  inline void incNumAlertedFlows()            { active_alerted_flows++; }
+  inline void decNumAlertedFlows()            { active_alerted_flows--; }
+  inline u_int32_t getNumAlertedFlows() const { return(active_alerted_flows); }
   inline void incNumUnreachableFlows(bool as_server) { if(stats) stats->incNumUnreachableFlows(as_server); }
   inline void incNumHostUnreachableFlows(bool as_server) { if(stats) stats->incNumHostUnreachableFlows(as_server); };
   inline void incnDPIFlows(u_int16_t l7_protocol)    { if(stats) stats->incnDPIFlows(l7_protocol); }
@@ -256,6 +289,7 @@ class Host : public GenericHashEntry, public AlertableEntity {
   virtual void incNumDNSQueriesRcvd(u_int16_t query_type) { };
   virtual void incNumDNSResponsesSent(u_int32_t ret_code) { };
   virtual void incNumDNSResponsesRcvd(u_int32_t ret_code) { };
+  virtual void luaHTTP(lua_State *vm) const { };
   virtual void luaDNS(lua_State *vm) const { };
   virtual void luaICMP(lua_State *vm, bool isV4, bool verbose) const    { };
   virtual void luaTCP(lua_State *vm) const { };
@@ -275,10 +309,10 @@ class Host : public GenericHashEntry, public AlertableEntity {
   virtual void incrVisitedWebSite(char *hostname) {};
   inline void incTotalAlerts(AlertType alert_type) { stats->incTotalAlerts(alert_type); }
   inline u_int32_t getTotalAlerts()       { return(stats->getTotalAlerts()); }
-  virtual u_int32_t getActiveHTTPHosts()  { return(0); };
-  inline u_int32_t getNumOutgoingFlows()  { return(num_active_flows_as_client.get()); }
-  inline u_int32_t getNumIncomingFlows()  { return(num_active_flows_as_server.get()); }
-  inline u_int32_t getNumActiveFlows()    { return(getNumOutgoingFlows()+getNumIncomingFlows()); }
+  virtual u_int32_t getActiveHTTPHosts()  const { return(0); };
+  inline u_int32_t getNumOutgoingFlows()  const { return(num_active_flows_as_client.get()); }
+  inline u_int32_t getNumIncomingFlows()  const { return(num_active_flows_as_server.get()); }
+  inline u_int32_t getNumActiveFlows()    const { return(getNumOutgoingFlows()+getNumIncomingFlows()); }
   inline u_int32_t getTotalNumFlowsAsClient() const { return(stats->getTotalNumFlowsAsClient());  };
   inline u_int32_t getTotalNumFlowsAsServer() const { return(stats->getTotalNumFlowsAsServer());  };
   inline u_int32_t getTotalNumAnomalousOutgoingFlows() const { return stats->getTotalAnomalousNumFlowsAsClient(); };
@@ -293,7 +327,6 @@ class Host : public GenericHashEntry, public AlertableEntity {
   char* get_country(char *buf, u_int buf_len);
   char* get_city(char *buf, u_int buf_len);
   void get_geocoordinates(float *latitude, float *longitude);
-  inline u_int16_t getVlanId() { return (vlan ? vlan->get_vlan_id() : 0); }
   inline void reloadHideFromTop() { hidden_from_top = iface->isHiddenFromTop(this); }
   inline void reloadDhcpHost()    { is_dhcp_host = iface->isInDhcpRange(get_ip()); }
   inline bool isHiddenFromTop() { return hidden_from_top; }
@@ -307,9 +340,7 @@ class Host : public GenericHashEntry, public AlertableEntity {
   inline void requestDataReset()                         { data_delete_requested = true; requestStatsReset(); };
   void checkDataReset();
   void checkBroadcastDomain();
-  bool hasAnomalies();
-  void luaAnomalies(lua_State* vm);
-  bool triggerAlerts()                                   { return(!hasAlertsSuppressed());    };
+  bool hasAnomalies() const;
   void housekeepAlerts(ScriptPeriodicity p);
   inline u_int getNumDropboxPeers()                      { return(dropbox_namespaces.size()); };
   virtual void inlineSetOSDetail(const char *detail) { }
@@ -327,7 +358,6 @@ class Host : public GenericHashEntry, public AlertableEntity {
 			   u_int16_t port, u_int16_t l7_proto,
 			   const char *info, time_t when) { ; }
   virtual void luaPortsDump(lua_State* vm) { lua_pushnil(vm); }    
-  void refreshDisableFlowAlertTypes();
 
   void setPrefsChanged()                   { prefs_loaded = false;  }
   virtual void reloadPrefs()               {}
@@ -342,17 +372,6 @@ class Host : public GenericHashEntry, public AlertableEntity {
   inline void setScore(u_int16_t score)    { alert_score = score; };
   inline u_int16_t getScore()              { return(alert_score); };
   inline bool hasScore()                   { return(alert_score != CONST_NO_SCORE_SET); };
-  
-  inline bool isDisabledFlowAlertType(u_int32_t v) {
-    return(Utils::bitmapIsSet(disabled_flow_status, v));
-  }
-
-  inline void toggleDisabledFlowAlertType(u_int32_t v, bool disable_alert) {
-    if(disable_alert)
-      disabled_flow_status = Utils::bitmapSet(disabled_flow_status, v);
-    else
-      disabled_flow_status = Utils::bitmapClear(disabled_flow_status, v);
-  }
 
   inline void setOS(OperatingSystem _os) {
     Mac *mac = getMac();
@@ -360,7 +379,7 @@ class Host : public GenericHashEntry, public AlertableEntity {
       os = _os;
   }
 
-  inline OperatingSystem getOS() {
+  inline OperatingSystem getOS() const {
     Mac *mac = getMac();
     if(!mac || (mac->getDeviceType() != device_networking))
       return(os);

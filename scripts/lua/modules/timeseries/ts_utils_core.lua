@@ -117,6 +117,7 @@ function ts_utils.loadSchemas()
   require("ts_second")
   require("ts_minute")
   require("ts_5min")
+  require("ts_5sec")
   require("ts_hour")
 
   -- Possibly load more timeseries schemas
@@ -858,6 +859,8 @@ function ts_utils.getPossiblyChangedSchemas()
     "monitored_host:rtt",
     "system:cpu_load",
     "process:memory",
+    "redis:keys",
+    "redis:memory",
   }
 end
 

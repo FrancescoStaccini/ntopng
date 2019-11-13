@@ -40,6 +40,10 @@ function getSerieLabel(schema, serie, visualization, serie_index) {
       return serie.tags.ifname;
     else if(serie.tags.profile)
         return serie.tags.profile;
+    else if(serie.tags.user_script)
+      return serie.tags.user_script;
+    else if(serie.tags.command)
+      return serie.tags.command.substring(4).toUpperCase();
   } else if(data_label != "bytes") { // single series
     if(serie.tags.protocol)
       return serie.tags.protocol + " (" + new_label + ")";
@@ -109,7 +113,7 @@ function getValueFormatter(schema, metric_type, series, custom_formatter, stats)
     else if(label.contains("flows")) {
       var as_counter = ((metric_type === "counter") && (schema !== "custom:memory_vs_flows_hosts"));
       return [as_counter ? fflows : formatValue, formatFlows, as_counter ? fflows : formatFlows];
-    } else if(label.contains("millis")) {
+    } else if(label.contains("millis") || label.contains("_ms")) {
       return [fmillis, fmillis];
     } else if(label.contains("alerts") && (metric_type === "counter")) {
       return [falerts, falerts];
@@ -928,7 +932,7 @@ function attachStackedChartCallback(chart, schema_name, chart_id, zoom_reset_id,
       chart.yAxis1_formatter = value_formatter;
 
       var second_axis_series = series.filter(function(d) { return(d.axis == 2); });
-      var formatter2 = getValueFormatter(schema_name, metric_type, second_axis_series, visualization.value_formatter, data.statistics);
+      var formatter2 = getValueFormatter(schema_name, metric_type, second_axis_series, visualization.value_formatter2 || visualization.value_formatter, data.statistics);
       var value_formatter2 = formatter2[0];
       chart.yAxis2.tickFormat(value_formatter2);
       chart.yAxis2_formatter = value_formatter2;

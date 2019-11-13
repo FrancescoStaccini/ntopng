@@ -62,6 +62,8 @@ local prefs = ntop.getPrefs()
 local ifstats = interface.getStats()
 
 local flows_filter = getFlowsFilter()
+
+flows_filter.statusFilter = nil -- remove the filter, otherwise no menu entries will be shown
 local flowstats = interface.getActiveFlowsStats(host, flows_filter)
 
 local base_url = ntop.getHttpPrefix() .. "/lua/flows_stats.lua"
@@ -259,23 +261,6 @@ print[[
          field: "column_server",
          sortable: true,
       }, {
-]]
-
---if ifstats.has_seen_ebpf_events then
-if false then
-  print[[
-         title: "]] print(i18n("sflows_stats.client_process")) print[[",
-         field: "column_client_process",
-         sortable: false,
-      }, {
-         title: "]] print(i18n("sflows_stats.server_process")) print[[",
-         field: "column_server_process",
-         sortable: false,
-      }, {
-]]
-end
-
-print[[
          title: "]] print(i18n("duration")) print[[",
          field: "column_duration",
          sortable: true,

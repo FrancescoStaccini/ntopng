@@ -45,6 +45,10 @@ class Utils {
   static u_int8_t l4name2proto(const char *name);
   static u_int8_t queryname2type(const char *name);
   static bool  isIPAddress(char *name);
+#ifdef __linux__ 
+  static int   setAffinityMask(char *cores_list, cpu_set_t *mask);
+  static int   setThreadAffinityWithMask(pthread_t thread, cpu_set_t *mask);
+#endif
   static int   setThreadAffinity(pthread_t thread, int core_id);
   static void  setThreadName(const char *name);
   static char* trim(char *s);
@@ -90,6 +94,7 @@ class Utils {
   static bool progressCanContinue(ProgressState *progressState);
   static char* urlEncode(const char *url);
   static ticks getticks();
+  static ticks gettickspersec();
   static char* getURL(char *url, char *buf, u_int buf_len);
   static bool discardOldFilesExceeding(const char *path, const unsigned long max_size);
   static u_int64_t macaddr_int(const u_int8_t *mac);
@@ -106,9 +111,6 @@ class Utils {
   static u_int32_t timeval2usec(const struct timeval *tv);
   static void xor_encdec(u_char *data, int data_len, u_char *key);
   static bool isPrintableChar(u_char c);
-  static AlertLevel flowStatus2AlertLevel(FlowStatus s, u_int8_t ext_severity);
-  static AlertType flowStatus2AlertType(FlowStatus s);
-  static bool dumpFlowStatus(FlowStatus s);
   static char* formatMac(const u_int8_t * const mac, char *buf, u_int buf_len);
   static void  parseMac(u_int8_t *mac, const char *symMac);
   static u_int32_t macHash(const u_int8_t * const mac);
@@ -195,6 +197,7 @@ class Utils {
 
   static OperatingSystem getOSFromFingerprint(const char *fingerprint, const char*manuf, DeviceType devtype);
   static DeviceType getDeviceTypeFromOsDetail(const char *os_detail);
+  static u_int32_t pow2(u_int32_t v);
 };
 
 #endif /* _UTILS_H_ */

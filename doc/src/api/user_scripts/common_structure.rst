@@ -10,7 +10,6 @@ Here is the skeleton for a generic user script:
   -- #################################################################
 
   local script = {
-    key = "a_unique_key",
     hooks = {},
 
     -- other script attributes ...
@@ -29,7 +28,6 @@ Here is the skeleton for a generic user script:
 
 A user script must expose the following attributes:
 
-  - `key`: a unique key for the script
   - `hooks`: a map `hook_name -> callback` which defines on which events
     the callback should be invoked. The scripts must register at least one
     hook. The list of available hooks depends on the script type, check out
@@ -41,8 +39,11 @@ The following optional attributes can also be exposed:
 
   - `gui`: See `GUI Configuration` below for more details.
   - `local_only` (hosts only): if true, the script will not be executed on remote hosts
+  - `packet_interface_only`: only execute the script on packet interfaces
   - `l4_proto` (flows only): only execute the script for flows matching the L4 proto.
+  - `l7_proto` (flows only): only execute the script for flows matching the L7 proto.
     see 2nd column in lua_utils.lua::l4_keys for supported protocols.
+  - `nedge_only`: if true, the script will only be executed in nEdge
   - `nedge_exclude`: if true, the script will not be executed in nEdge
   - `default_value`: the default value for the script configuration,
     in the form `<script_key>;<operator>;<value>` (e.g. `syn_flood_victim;gt;50`)

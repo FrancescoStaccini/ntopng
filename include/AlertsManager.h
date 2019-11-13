@@ -35,8 +35,6 @@ class AlertsManager : public StoreManager {
   /* methods used for alerts that have a timespan */
   void markForMakeRoom(bool on_flows);
 
-  bool notifyFlowAlert(u_int64_t rowid);
-
   /* methods used to retrieve alerts and counters with possible sql clause to filter */
   int queryAlertsRaw(lua_State *vm, const char *selection, const char *clauses, const char *table_name, bool ignore_disabled);
 
@@ -50,24 +48,17 @@ class AlertsManager : public StoreManager {
   AlertsManager(int interface_id, const char *db_filename);
   ~AlertsManager();
 
-  /*
-    ========== Generic alerts API =========
-   */
-  int storeAlert(time_t tstart, time_t tend, int granularity, AlertType alert_type, const char *subtype,
-      AlertLevel alert_severity, AlertEntity alert_entity, const char *alert_entity_value,
+  int storeAlert(time_t tstart, time_t tend, int granularity, 
+      AlertType alert_type, const char *subtype,
+      AlertLevel alert_severity, AlertEntity alert_entity, 
+      const char *alert_entity_value,
       const char *alert_json, bool *new_alert, u_int64_t *rowid,
       bool ignore_disabled = false, bool check_maximum = true);
+
+  int storeFlowAlert(lua_State *L, int index, u_int64_t *rowid);
+
   bool hasAlerts();
 
-  /*
-    ========== FLOW alerts API =========
-   */
-  int storeFlowAlert(Flow *f);
-  int storeFlowAlert(Flow *f, AlertType alert_type, AlertLevel alert_severity, const char *status_info);
-
-  /*
-    ========== raw API ======
-  */
   inline int queryAlertsRaw(lua_State *vm, const char *selection, const char *clauses, bool ignore_disabled) {
     return queryAlertsRaw(vm, selection, clauses, ALERTS_MANAGER_TABLE_NAME, ignore_disabled);
   };

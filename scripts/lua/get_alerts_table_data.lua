@@ -34,7 +34,7 @@ local function getEntityAlertDisabledBitmap(entity, entity_val)
     return entities_bitmaps[entity][entity_val]
   end
 
-  local bitmap = alerts_api.getEntityAlertsDisabled(ifid, entity, entity_val)
+  local bitmap = alerts_api.getEntityAlertsDisabledBitmap(ifid, entity, entity_val)
   entities_bitmaps[entity] = entities_bitmaps[entity] or {}
   entities_bitmaps[entity][entity_val] = bitmap
 
@@ -46,7 +46,10 @@ end
 if(tonumber(_GET["currentPage"]) == nil) then _GET["currentPage"] = 1 end
 if(tonumber(_GET["perPage"]) == nil) then _GET["perPage"] = getDefaultTableSize() end
 
-if(isEmptyString(_GET["sortColumn"]) or (_GET["sortColumn"] == "column_") or (status ~= "historical" and _GET["sortColumn"] == "column_sort")) then
+if(isEmptyString(_GET["sortColumn"]) or (_GET["sortColumn"] == "column_") or (status ~= "historical" and _GET["sortColumn"] == "column_sort")) or (status ~= "historical-flows" and  _GET["sortColumn"] == "column_count") then
+   if status ~= "historical-flows" and  _GET["sortColumn"] == "column_count" then
+      tablePreferences("sort_alerts", "column_")
+   end
    _GET["sortColumn"] = getDefaultTableSort("alerts")
 elseif((_GET["sortColumn"] ~= "column_") and (_GET["sortColumn"] ~= "")) then
    tablePreferences("sort_alerts", _GET["sortColumn"])
@@ -145,7 +148,7 @@ for _key,_value in ipairs(alerts) do
    if status ~= "historical-flows" then
      local bitmap = getEntityAlertDisabledBitmap(_value["alert_entity"], _value["alert_entity_val"])
 
-     record["column_entity_formatted"] = formatAlertEntity(ifid, alertEntityRaw(_value["alert_entity"]), _value["alert_entity_val"])
+     record["column_entity_formatted"] = alert_consts.formatAlertEntity(ifid, alert_consts.alertEntityRaw(_value["alert_entity"]), _value["alert_entity_val"])
      record["column_alert_disabled"] = ntop.bitmapIsSet(bitmap, tonumber(_value["alert_type"]))
    end
 

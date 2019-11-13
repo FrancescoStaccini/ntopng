@@ -38,6 +38,8 @@ class NtopPro;
  */
 class Ntop {
  private:
+  bool ndpiReloadInProgress;
+  Bloom *resolvedHostsBloom; /* Used by all redis class instances */
   AddressTree local_interface_addresses;
   char epoch_buf[11];
   char working_dir[MAX_PATH]; /**< Working directory. */
@@ -52,6 +54,7 @@ class Ntop {
   NtopGlobals *globals; /**< Pointer of Ntop globals info and variables. */
   u_int num_cpus; /**< Number of physical CPU cores. */
   Redis *redis; /**< Pointer to the Redis server. */
+  struct ndpi_detection_module_struct *ndpi_struct, *ndpi_struct_shadow;
 #ifndef HAVE_NEDGE
   ElasticSearch *elastic_search; /**< Pointer of Elastic Search. */
   Logstash *logstash; /**< Pointer of Logstash. */
@@ -66,7 +69,8 @@ class Ntop {
   void *trackers_automa;
   long time_offset;
   time_t start_time; /**< Time when start() was called */
-  time_t last_stats_reset;
+  time_t last_stats_reset, last_ndpi_reload;
+  bool ndpi_cleanup_needed;
   int udp_socket;
   NtopPro *pro;
   DeviceProtocolBitmask deviceProtocolPresets[device_max_type];
@@ -84,7 +88,8 @@ class Ntop {
   void loadLocalInterfaceAddress();
   void initAllowedProtocolPresets();
   bool checkUserPassword(const char * const user, const char * const password, char *group, bool *localuser) const;
-
+  void cleanShadownDPI();
+  
  public:
   /**
    * @brief A Constructor
@@ -328,13 +333,14 @@ class Ntop {
    *
    * @return The path of installed directory.
    */
-  inline char* get_install_dir()                     { return(install_dir);      };
+  inline char* get_install_dir()                     { return(install_dir);         };
   inline void  set_install_dir(char *id)             { snprintf(install_dir, MAX_PATH, "%s", id); };
 
-  inline NtopGlobals*      getGlobals()              { return(globals); };
+  inline Bloom*            getResolutionBloom()      { return(resolvedHostsBloom);  };
+  inline NtopGlobals*      getGlobals()              { return(globals);             };
   inline Trace*            getTrace()                { return(globals->getTrace()); };
   inline Redis*            getRedis()                { return(redis);               };
-  inline TimelineExtract*  getTimelineExtract()      { return(extract); };
+  inline TimelineExtract*  getTimelineExtract()      { return(extract);             };
 #ifndef HAVE_NEDGE
   inline ExportInterface*  get_export_interface()    { return(export_interface);    };
 #endif
@@ -348,7 +354,7 @@ class Ntop {
   inline NagiosManager*    getNagios()               { return(nagios_manager);      };
 #endif
 #endif
-
+  void lua_periodic_activities_stats(NetworkInterface *iface, lua_State* vm);
   void getUsers(lua_State* vm);
   bool isUserAdministrator(lua_State* vm);
   void getAllowedNetworks(lua_State* vm);
@@ -429,6 +435,9 @@ class Ntop {
   DeviceProtoStatus getDeviceAllowedProtocolStatus(DeviceType dev_type, ndpi_protocol proto, u_int16_t pool_id, bool as_client);
   void refreshCpuLoad();
   bool getCpuLoad(float *out);
+  inline void setLastInterfacenDPIReload(time_t now)      { last_ndpi_reload = now;   }
+  inline bool needsnDPICleanup()                          { return(ndpi_cleanup_needed); }
+  inline void setnDPICleanupNeeded(bool needed)           { ndpi_cleanup_needed = needed; }
 
   void sendNetworkInterfacesTermination();
   inline time_t getLastStatsReset() { return(last_stats_reset); }
@@ -437,6 +446,14 @@ class Ntop {
   inline void loadMaliciousJA3Hash(std::string md5_hash)     { new_malicious_ja3->insert(md5_hash); }
   bool isMaliciousJA3Hash(std::string md5_hash);
   void reloadJA3Hashes();
+  struct ndpi_detection_module_struct* initnDPIStruct();    
+  inline struct ndpi_detection_module_struct* get_ndpi_struct() const { return(ndpi_struct); };
+  bool startCustomCategoriesReload();
+  void checkReloadHostsBroadcastDomain();
+  inline bool isnDPIReloadInProgress()  { return(ndpiReloadInProgress);     }  
+  void reloadCustomCategories();
+  void nDPILoadIPCategory(char *what, ndpi_protocol_category_t id);
+  void nDPILoadHostnameCategory(char *what, ndpi_protocol_category_t id);
 };
 
 extern Ntop *ntop;

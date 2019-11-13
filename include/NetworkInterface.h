@@ -128,7 +128,6 @@ class NetworkInterface : public AlertableEntity {
   bool bridge_interface;
   bool is_dynamic_interface, show_dynamic_interface_traffic;
   bool is_traffic_mirrored, is_loopback;
-  bool reload_custom_categories, reload_hosts_blacklist;
 #ifdef NTOPNG_PRO
   L7Policer *policer;
 #ifndef HAVE_NEDGE
@@ -138,6 +137,8 @@ class NetworkInterface : public AlertableEntity {
   CustomAppStats *custom_app_stats;
   FlowInterfacesStats *flow_interfaces_stats;
   AggregatedFlowHash *aggregated_flows_hash; /**< Hash used to store aggregated flows information. */
+  u_int32_t aggregated_flows_dump_updates;
+  u_int32_t aggregated_flows_dump_max_updates;
 #endif
   EthStats ethStats;
   std::map<u_int32_t, u_int64_t> ip_mac; /* IP (network byte order) <-> MAC association [2 bytes are unused] */
@@ -148,7 +149,7 @@ class NetworkInterface : public AlertableEntity {
   pthread_t pollLoop;
   bool pollLoopCreated, has_too_many_hosts, has_too_many_flows, mtuWarningShown;
   bool slow_stats_update, flow_dump_disabled;
-  u_int32_t ifSpeed, numL2Devices, numFlows, numHosts, numLocalHosts, scalingFactor;
+  u_int32_t ifSpeed, numL2Devices, numHosts, numLocalHosts, scalingFactor;
   u_int64_t checkpointPktCount, checkpointBytesCount, checkpointPktDropCount; /* Those will hold counters at checkpoints */
   u_int16_t ifMTU;
   int cpu_affinity; /**< Index of physical core where the network interface works. */
@@ -160,7 +161,6 @@ class NetworkInterface : public AlertableEntity {
   TimeseriesExporter *tsExporter;
   TimeseriesRing *ts_ring;
 
-  time_t lastFlowAggregation;
   TcpFlowStats tcpFlowStats;
   TcpPacketStats tcpPacketStats;
   ThroughputStats bytes_thpt, pkts_thpt;
@@ -181,8 +181,7 @@ class NetworkInterface : public AlertableEntity {
   CountriesHash *countries_hash;
 
   /* ARP Matrix Hash */
-  ArpStatsHashMatrix *arp_hash_matrix;/**<Hash used to store ARP pkts counters related to pkt_src and pkt_dst */
-
+  ArpStatsHashMatrix *arp_hash_matrix; /** Hash used to store ARP pkts counters related to pkt_src and pkt_dst */
 
   /* Vlans */
   VlanHash *vlans_hash; /**< Hash used to store Vlans information. */
@@ -197,10 +196,9 @@ class NetworkInterface : public AlertableEntity {
   VlanAddressTree *hide_from_top, *hide_from_top_shadow;
   bool has_vlan_packets, has_ebpf_events, has_mac_addresses, has_seen_dhcp_addresses;
   bool has_seen_pods, has_seen_containers;
-  struct ndpi_detection_module_struct *ndpi_struct;
   time_t last_pkt_rcvd, last_pkt_rcvd_remote, /* Meaningful only for ZMQ interfaces */
     next_idle_flow_purge, next_idle_host_purge;
-  bool running, is_idle;
+  bool running, is_idle, packet_processing_completed;
   NetworkStats **networkStats;
   InterfaceStatsHash *interfaceStats;
   dhcp_range* dhcp_ranges, *dhcp_ranges_shadow;
@@ -294,8 +292,7 @@ class NetworkInterface : public AlertableEntity {
 		      bool walk_all,
 		      WalkerType wtype,
 		      bool (*walker)(GenericHashEntry *h, void *user_data, bool *entryMatched),
-		      void *user_data,
-		      bool walk_idle = false /* Should never walk idle unless in ViewInterface::flowPollLoop */);
+		      void *user_data);
 
   void checkDisaggregationMode();
   inline void setCPUAffinity(int core_id)      { cpu_affinity = core_id; };
@@ -323,18 +320,18 @@ class NetworkInterface : public AlertableEntity {
   inline FlowHash *get_flows_hash()            { return flows_hash;     }
   inline TcpFlowStats* getTcpFlowStats()       { return(&tcpFlowStats); }
   virtual bool is_ndpi_enabled() const         { return(true);          }
-  inline u_int  getNumnDPIProtocols()          { return(ndpi_get_num_supported_protocols(ndpi_struct)); };
+  inline u_int  getNumnDPIProtocols()          { return(ndpi_get_num_supported_protocols(get_ndpi_struct())); };
   inline time_t getTimeLastPktRcvdRemote()     { return(last_pkt_rcvd_remote); };
   inline time_t getTimeLastPktRcvd()           { return(last_pkt_rcvd ? last_pkt_rcvd : last_pkt_rcvd_remote); };
   inline void  setTimeLastPktRcvd(time_t t)    { if(t > last_pkt_rcvd) last_pkt_rcvd = t; };
-  inline ndpi_protocol_category_t get_ndpi_proto_category(ndpi_protocol proto) { return(ndpi_get_proto_category(ndpi_struct, proto)); };
-  inline const char* get_ndpi_category_name(ndpi_protocol_category_t category) { return(ndpi_category_get_name(ndpi_struct, category)); };
+  inline ndpi_protocol_category_t get_ndpi_proto_category(ndpi_protocol proto) { return(ndpi_get_proto_category(get_ndpi_struct(), proto)); };
+  inline const char* get_ndpi_category_name(ndpi_protocol_category_t category) { return(ndpi_category_get_name(get_ndpi_struct(), category)); };
   ndpi_protocol_category_t get_ndpi_proto_category(u_int protoid);
-  inline char* get_ndpi_proto_name(u_int id)   { return(ndpi_get_proto_name(ndpi_struct, id));   };
-  inline int   get_ndpi_proto_id(char *proto)  { return(ndpi_get_protocol_id(ndpi_struct, proto));   };
-  inline int   get_ndpi_category_id(char *cat) { return(ndpi_get_category_id(ndpi_struct, cat));     };
+  inline char* get_ndpi_proto_name(u_int id)   { return(ndpi_get_proto_name(get_ndpi_struct(), id));   };
+  inline int   get_ndpi_proto_id(char *proto)  { return(ndpi_get_protocol_id(get_ndpi_struct(), proto));   };
+  inline int   get_ndpi_category_id(char *cat) { return(ndpi_get_category_id(get_ndpi_struct(), cat));     };
   inline char* get_ndpi_proto_breed_name(u_int id) {
-    return(ndpi_get_proto_breed_name(ndpi_struct, ndpi_get_proto_breed(ndpi_struct, id))); };
+    return(ndpi_get_proto_breed_name(get_ndpi_struct(), ndpi_get_proto_breed(get_ndpi_struct(), id))); };
   inline u_int get_flow_size()                 { return(ndpi_detection_get_sizeof_ndpi_flow_struct()); };
   inline u_int get_size_id()                   { return(ndpi_detection_get_sizeof_ndpi_id_struct());   };
   inline char* get_name() const                { return(ifname);                                       };
@@ -353,13 +350,15 @@ class NetworkInterface : public AlertableEntity {
   inline void setSeenPods()                    { has_seen_pods = true; }
   inline bool hasSeenContainers() const        { return(has_seen_containers); }
   inline void setSeenContainers()              { has_seen_containers = true; }
-  inline struct ndpi_detection_module_struct* get_ndpi_struct() const { return(ndpi_struct); };
+  struct ndpi_detection_module_struct* get_ndpi_struct() const;
   inline bool is_purge_idle_interface()        { return(purge_idle_flows_hosts);               };
   int dumpFlow(time_t when, Flow *f);
 #ifdef NTOPNG_PRO
   void dumpAggregatedFlow(time_t when, AggregatedFlow *f, bool is_top_aggregated_flow, bool is_top_cli, bool is_top_srv);
   void dumpAggregatedFlows(const struct timeval *tv);
-  bool dumpAggregatedFlowsReady(const struct timeval *tv) const;
+  bool is_aggregated_flows_dump_ready() const;
+  void inc_aggregated_flows_dump_updates();
+  bool check_aggregated_flows_dump_ready(const struct timeval *tv) const;
   void flushFlowDump();
 #endif
   void checkPointHostTalker(lua_State* vm, char *host_ip, u_int16_t vlan_id);
@@ -454,10 +453,16 @@ class NetworkInterface : public AlertableEntity {
 		     Host **srcHost, Host **dstHost, Flow **flow);
   void processInterfaceStats(sFlowInterfaceStats *stats);
   void getActiveFlowsStats(nDPIStats *stats, FlowStats *status_stats, AddressTree *allowed_hosts, Host *h, Paginator *p);
-  virtual u_int32_t periodicStatsUpdateFrequency();
+  virtual u_int32_t periodicStatsUpdateFrequency() const;
   void periodicStatsUpdate();
+  virtual void periodicHTStateUpdate(time_t deadline, lua_State* vm);
+  void periodicUpdateInitTime(struct timeval *tv) const;
+  static bool quick_periodic_ht_state_update(time_t deadline, GenericHashEntry *ghe);
+  static bool generic_periodic_hash_entry_state_update(GenericHashEntry *node, void *user_data);
   virtual u_int32_t getFlowMaxIdle();
   virtual void lua(lua_State* vm);
+  void lua_hash_tables_stats(lua_State* vm);
+  void lua_periodic_activities_stats(lua_State* vm);
   void getnDPIProtocols(lua_State *vm, ndpi_protocol_category_t filter, bool skip_critical);
   void setnDPIProtocolCategory(u_int16_t protoId, ndpi_protocol_category_t protoCategory);
   void processAllActiveFlows();
@@ -652,18 +657,15 @@ class NetworkInterface : public AlertableEntity {
   inline void getSFlowDeviceInfo(lua_State *vm, u_int32_t deviceIP) {
     if(interfaceStats) interfaceStats->luaDeviceInfo(vm, deviceIP); else lua_newtable(vm);
   };
-  void refreshSuppressedAlertsPrefs(AlertEntity entity_type, const char *entity_value);
   int updateHostTrafficPolicy(AddressTree* allowed_networks, char *host_ip, u_int16_t host_vlan);
 
   virtual void reloadCompanions() {};
   void reloadHideFromTop(bool refreshHosts=true);
   void updateLbdIdentifier();
   inline bool serializeLbdHostsAsMacs()             { return(lbd_serialize_by_mac); }
-  inline void requestReloadCustomCategories()       { reload_custom_categories = true; }
-  inline bool customCategoriesReloadRequested()     { return reload_custom_categories; }
+
   void checkReloadHostsBroadcastDomain();
   inline bool reloadHostsBroadcastDomain()          { return reload_hosts_bcast_domain; }
-  inline void checkHostsBlacklistReload()           { if(reload_hosts_blacklist) { reloadHostsBlacklist(); reload_hosts_blacklist = false; } }
   void reloadHostsBlacklist();
   void checkHostsAlerts(ScriptPeriodicity p);
   void checkNetworksAlerts(ScriptPeriodicity p);
@@ -684,8 +686,6 @@ class NetworkInterface : public AlertableEntity {
   bool getCountryInfo(lua_State* vm, const char *country);
   bool getVLANInfo(lua_State* vm, u_int16_t vlan_id);
   bool getArpStatsMatrixInfo(lua_State* vm);
-  inline void incNumFlows() { numFlows++; };
-  inline void decNumFlows() { numFlows--; };
   inline void incNumHosts(bool local) { if(local) numLocalHosts++; numHosts++; };
   inline void decNumHosts(bool local) { if(local) numLocalHosts--; numHosts--; };
   inline void incNumL2Devices()       { numL2Devices++; }
@@ -761,6 +761,7 @@ class NetworkInterface : public AlertableEntity {
   void reloadDhcpRanges();
   inline bool hasConfiguredDhcpRanges()      { return(dhcp_ranges && !dhcp_ranges->last_ip.isEmpty()); };
   inline bool isFlowDumpDisabled()           { return(flow_dump_disabled); }
+  inline struct ndpi_detection_module_struct* initnDPIStruct();
   bool isInDhcpRange(IpAddress *ip);
   void getPodsStats(lua_State* vm);
   void getContainersStats(lua_State* vm, const char *pod_filter);
@@ -771,9 +772,6 @@ class NetworkInterface : public AlertableEntity {
   inline void profiling_section_enter(const char *label, int id) { PROFILING_SECTION_ENTER(label, id); };
   inline void profiling_section_exit(int id) { PROFILING_SECTION_EXIT(id); };
 #endif
-
-  void nDPILoadIPCategory(char *category, ndpi_protocol_category_t id);
-  void nDPILoadHostnameCategory(char *category, ndpi_protocol_category_t id);
 
   void incNumAlertedFlows(Flow *f);
   void decNumAlertedFlows(Flow *f);
@@ -795,6 +793,8 @@ class NetworkInterface : public AlertableEntity {
   virtual bool reproducePcapOriginalSpeed() const         { return(false); }
   u_int32_t getNumEngagedAlerts();
   void releaseAllEngagedAlerts();
+  inline bool isProcessingPackets() { return(!packet_processing_completed); }
+  inline void processingCompleted() { packet_processing_completed = true;   }
 };
 
 #endif /* _NETWORK_INTERFACE_H_ */

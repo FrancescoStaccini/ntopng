@@ -601,14 +601,6 @@ end
 
 -- ##############################################
 
-function table.len(T)
-  local count = 0
-  for _ in pairs(T) do count = count + 1 end
-  return count
-end
-
--- ##############################################
-
 function noHtml(s)
    if s == nil then return nil end
 
@@ -1786,6 +1778,7 @@ function get_version_update_msg(info, latest_version)
   end
 end
 
+-- NOTE: on index based tables using #table is much more performant
 function table.len(table)
  local count = 0
 
@@ -1835,6 +1828,10 @@ end
 
 
 function isPausedInterface(current_ifname)
+   if(not isEmptyString(_POST["toggle_local"])) then
+      return(_POST["toggle_local"] == "0")
+   end
+
   state = ntop.getCache("ntopng.prefs."..current_ifname.."_not_idle")
   if(state == "0") then return true else return false end
 end
@@ -2387,33 +2384,6 @@ end
 
 function formatWebSite(site)
    return("<A target=\"_blank\" HREF=\"http://"..site.."\">"..site.."</A> <i class=\"fa fa-external-link\"></i></th>")
-end
-
--- ###############################################
-
--- NOTE: "flowstatus_info" is a lua table in a common format used
--- to dump accurate flow alert information. See flow2statusinfo and alert2statusinfo
--- below.
-
--- Uses a flow returned by interface.getFlowsInfo() to create a flowstatus_info.
--- NOTE: Keep consistent with alert2statusinfo
-function flow2statusinfo(flow)
-   if flow["status_info"] then
-      local json = require("dkjson")
-      local res = json.decode(flow["status_info"])
-
-      return res
-   end
-
-   return nil
-end
-
--- Uses an alert json to create a flowstatus_info.
--- NOTE: Keep consistent with flow2statusinfo
-function alert2statusinfo(flow_json)
-   local res = table.clone(flow_json.status_info)
-
-   return res
 end
 
 -- ###############################################
@@ -3404,6 +3374,17 @@ end
 
 function ip_address_rev(a, b)
    return(ntop.ipCmp(a, b) > 0)
+end
+
+-- ###########################################
+
+-- @brief Deletes all the cache/prefs keys matching the pattern
+function deleteCachePattern(pattern)
+   local keys = ntop.getKeysCache(pattern)
+
+   for key in pairs(keys or {}) do
+      ntop.delCache(key)
+   end
 end
 
 -- ###########################################

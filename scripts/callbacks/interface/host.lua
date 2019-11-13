@@ -15,10 +15,36 @@ local do_benchmark = true          -- Compute benchmarks and store their results
 local do_print_benchmark = false   -- Print benchmarks results to standard output
 local do_trace = false             -- Trace lua calls
 
+-- DEBUG: benchmarks local to the execution of this script
+-- Will be removed once all the host.<method> calls will be performed
+-- inside the custom scripts
+local do_script_benchmark = false
+local script_benchmark_begin_time
+local script_benchmark_tot_clock = 0
+local script_benchmark_tot_calls = 0
+
 local config_alerts_local = nil
 local config_alerts_remote = nil
 local available_modules = nil
 local ifid = nil
+local host_entity = alert_consts.alert_entities.host.entity_id
+
+-- #################################################################
+
+local function benchmark_begin()
+   if do_benchmark then
+      script_benchmark_begin_time = os.clock()
+   end
+end
+
+-- #################################################################
+
+local function benchmark_end()
+   if do_benchmark then
+      script_benchmark_tot_clock = script_benchmark_tot_clock + os.clock() - script_benchmark_begin_time
+      script_benchmark_tot_calls = script_benchmark_tot_calls + 1
+   end
+end
 
 -- #################################################################
 
@@ -41,6 +67,13 @@ end
 function teardown(str_granularity)
    if(do_trace) then print("alert.lua:teardown("..str_granularity..") called\n") end
 
+   if do_script_benchmark and script_benchmark_tot_calls > 0 then
+      traceError(TRACE_NORMAL,TRACE_CONSOLE, string.format("[tot_elapsed: %.4f][tot_num_calls: %u][avg time per call: %.4f]",
+      							   script_benchmark_tot_clock,
+							   script_benchmark_tot_calls,
+							   script_benchmark_tot_clock / script_benchmark_tot_calls))
+   end
+
    user_scripts.teardown(available_modules, do_benchmark, do_print_benchmark)
 end
 
@@ -53,19 +86,25 @@ function checkAlerts(granularity)
     return
   end
 
-  local suppressed_alerts = host.hasAlertsSuppressed()
+  local host_ip = host.getIp()
+  local host_key   = hostinfo2hostkey({ip = host_ip.ip, vlan = host_ip.vlan}, nil, true --[[ force @[vlan] even when vlan is 0 --]])
+  local granularity_id = alert_consts.alerts_granularities[granularity].granularity_id
+  local suppressed_alerts = alerts_api.hasSuppressedAlerts(ifid, host_entity, host_key)
 
   if suppressed_alerts then
-     releaseAlerts(granularity)
+     releaseAlerts(granularity_id)
   end
 
-  local info = host.getFullInfo()
-  local host_key   = hostinfo2hostkey({ip = info.ip, vlan = info.vlan}, nil, true --[[ force @[vlan] even when vlan is 0 --]])
-  local config_alerts = ternary(info["localhost"], config_alerts_local, config_alerts_remote)
+  benchmark_begin()
+  local cur_alerts = host.getAlerts(granularity_id)
+  local is_localhost = host.getLocalhostInfo()["localhost"]
+  benchmark_end()
+
+  local config_alerts = ternary(is_localhost, config_alerts_local, config_alerts_remote)
   local host_config = config_alerts[host_key] or {}
-  local global_config = ternary(info["localhost"], config_alerts["local_hosts"], config_alerts["remote_hosts"]) or {}
+  local global_config = ternary(is_localhost, config_alerts["local_hosts"], config_alerts["remote_hosts"]) or {}
   local has_configuration = (table.len(host_config) or table.len(global_config))
-  local entity_info = alerts_api.hostAlertEntity(info.ip, info.vlan)
+  local entity_info = alerts_api.hostAlertEntity(host_ip.ip, host_ip.vlan)
 
   if has_configuration then
     for mod_key, hook_fn in pairs(available_modules.hooks[granularity]) do
@@ -85,7 +124,8 @@ function checkAlerts(granularity)
         hook_fn({
            granularity = granularity,
            alert_entity = entity_info,
-           entity_info = info,
+           entity_info = host_ip,
+	   cur_alerts = cur_alerts,
            alert_config = config,
            user_script = check,
         })
@@ -93,14 +133,19 @@ function checkAlerts(granularity)
     end
   end
 
-  alerts_api.releaseEntityAlerts(entity_info, host.getExpiredAlerts(granularity2id(granularity)))
+  -- cur_alerts now contains unprocessed triggered alerts, that is,
+  -- those alerts triggered but then disabled or unconfigured (e.g., when
+  -- the user removes a threshold from the gui)
+  if #cur_alerts > 0 then
+     alerts_api.releaseEntityAlerts(entity_info, cur_alerts)
+  end
 end
 
 -- #################################################################
 
 function releaseAlerts(granularity)
-  local info = host.getFullInfo()
-  local entity_info = alerts_api.hostAlertEntity(info.ip, info.vlan)
+  local host_ip = host.getIp()
+  local entity_info = alerts_api.hostAlertEntity(host_ip.ip, host_ip.vlan)
 
   alerts_api.releaseEntityAlerts(entity_info, host.getAlerts(granularity))
 end

@@ -13,9 +13,6 @@ local do_trace = false
 
 local alerts_api = {}
 
--- NOTE: sqlite can handle about 10-50 alerts/sec
-local MAX_NUM_ENQUEUED_ALERT_PER_INTERFACE = 256
-
 -- Just helpers
 local str_2_periodicity = {
   ["min"]     = 60,
@@ -30,6 +27,12 @@ local known_alerts = {}
 
 local function getAlertEventQueue(ifid)
   return string.format("ntopng.cache.ifid_%d.alerts_events_queue", ifid)
+end
+
+-- ##############################################
+
+local function getFlowAlertEventQueue(ifid)
+  return string.format("ntopng.cache.ifid_%d.flow_alerts_events_queue", ifid)
 end
 
 -- ##############################################
@@ -50,87 +53,134 @@ end
 
 -- ##############################################
 
-local function getEntityDisabledAlertsCountersKey(ifid, entity, entity_val)
-  return(string.format("ntopng.cache.alerts.ifid_%d.%d_%s", ifid, entity, entity_val))
-end
-
-local function incDisabledAlertsCount(ifid, granularity_id, entity, entity_val, alert_type)
-  local key = getEntityDisabledAlertsCountersKey(ifid, entity, entity_val)
-
-  -- NOTE: using separate keys based on granularity to avoid concurrency issues
-  counter_key = string.format("%d_%d", granularity_id, alert_type)
-
-  local val = tonumber(ntop.getHashCache(key, counter_key)) or 0
-  val = val + 1
-  ntop.setHashCache(key, counter_key, string.format("%d", val))
-  return(val)
-end
-
--- ##############################################
-
-local function deleteEntityDisabledAlertsCountersKey(ifid, entity, entity_val, target_type)
-  local key = getEntityDisabledAlertsCountersKey(ifid, entity, entity_val)
-  local entity_counters = ntop.getHashAllCache(key) or {}
-
-  for what, counter in pairs(entity_counters) do
-    local parts = string.split(what, "_")
-
-    if((parts) and (#parts == 2)) then
-      local alert_type = tonumber(parts[2])
-
-      if(alert_type == target_type) then
-        ntop.delHashCache(key, what)
-      end
-    end
-  end
-end
-
--- ##############################################
-
-function alerts_api.getEntityDisabledAlertsCounters(ifid, entity, entity_val)
-  local key = getEntityDisabledAlertsCountersKey(ifid, entity, entity_val)
-  local entity_counters = ntop.getHashAllCache(key) or {}
-  local by_alert_type = {}
-
-  for what, counter in pairs(entity_counters) do
-    local parts = string.split(what, "_")
-
-    if((parts) and (#parts == 2)) then
-      local granularity_id = tonumber(parts[1])
-      local alert_type = tonumber(parts[2])
-
-      by_alert_type[alert_type] = by_alert_type[alert_type] or 0
-      by_alert_type[alert_type] = by_alert_type[alert_type] + counter
-    end
-  end
-
-  return(by_alert_type)
-end
-
--- ##############################################
-
 local function get_alert_triggered_key(type_info)
   return(string.format("%d@%s", type_info.alert_type.alert_id, type_info.alert_subtype or ""))
 end
 
 -- ##############################################
 
--- Enqueue a store alert action on the DB to be performed asynchronously
-local function enqueueStoreAlert(ifid, alert)
-  local trim = nil
+-- Rating status cache to avoid too many redis lookups
+-- Format: k -> rating_status
+local rating_status_cache = {}
 
-  local alert_json = json.encode(alert)
-  local queue = getAlertEventQueue(ifid)
+-- Rating len cache to avoid too many redis lookups
+-- Format: k -> {when->cache_when, length->queue_length}
+-- when is used to recheck the cache periodically
+local rating_len_cache = {}
 
-  if(ntop.llenCache(queue) > MAX_NUM_ENQUEUED_ALERT_PER_INTERFACE) then
-    trim = math.ceil(MAX_NUM_ENQUEUED_ALERT_PER_INTERFACE/2)
-    traceError(TRACE_INFO, TRACE_CONSOLE, string.format("Alerts event queue too long: dropping %u alerts", trim))
+-- @brief Implements a simple queue rating algorithmn to limit rpush operations.
+-- @param queue the queue name
+-- @param ref_limit the maximum queue size
+-- @param inc_drops true if alert drops should be incremented
+local function enqueueAlertEvent(queue, event, ref_limit, inc_drops)
+  local queue_rating_key = string.format("%s.rating", queue)
+  local queue_len_key = string.format("%s.len", queue)
+  local cur_status = rating_status_cache[queue_rating_key] or ntop.getCache(queue_rating_key)
+  local now = os.time()
+  local rv
 
-    interface.incNumDroppedAlerts(trim)
+  -- Queue rating limits
+  local low_value = math.ceil(ref_limit / 3)
+  local high_value = math.ceil(ref_limit / 2)
+  local trim_limit = ref_limit
+
+  -- NOTE: using a cached value to avoid calling llenCache every time
+  local len_info = rating_len_cache[queue_len_key]
+  local num_pending
+
+  -- Recheck the length every second
+  if((len_info ~= nil) and ((now - len_info.when) < 1)) then
+    num_pending = len_info.length
+  else
+    -- Resync from redis
+    num_pending = ntop.llenCache(queue)
+    rating_len_cache[queue_len_key] = {when = now, length = num_pending}
   end
 
-  ntop.rpushCache(queue, alert_json, trim)
-  return(true)
+  -- The rpush is only performed in "normal" status
+  if isEmptyString(cur_status) then
+    cur_status = "normal"
+  end
+
+  -- Status transitions:
+  --  num_pending >= high_value -> "full"
+  --  num_pending <= low_value -> "normal"
+  if((num_pending >= high_value) and (cur_status ~= "full")) then
+    -- Limit reached, inhibit subsequent push
+    cur_status = "full"
+    ntop.setCache(queue_rating_key, cur_status)
+  elseif((num_pending <= low_value) and (cur_status ~= "normal")) then
+    -- The problem was solved, can now push
+    cur_status = "normal"
+    ntop.setCache(queue_rating_key, cur_status)
+  end
+
+  if(num_pending > trim_limit) then
+    -- In normal conditions, this should not happen as the "high_value"
+    -- should have already limited the insertions
+    local new_size = math.ceil(trim_limit / 2)
+    local num_drop = num_pending - new_size
+
+    traceError(TRACE_INFO, TRACE_CONSOLE, string.format("Event queue [%s] too long: dropping %u alerts", queue, num_drop))
+
+    -- Drop the oldest alerts (from of the queue)
+    ntop.ltrimCache(queue, num_drop, num_pending)
+
+    if(inc_drops) then
+      interface.incNumDroppedAlerts(num_drop)
+    end
+
+    -- Recalculate num_pending on next round
+    rating_len_cache[queue_len_key] = nil
+  end
+
+  if(cur_status == "full") then
+    if(inc_drops) then
+      interface.incNumDroppedAlerts(1)
+    end
+
+    rv = false
+  else
+    -- Success
+    ntop.rpushCache(queue, event)
+    rv = true
+  end
+
+  -- Update rating cache
+  rating_status_cache[queue_rating_key] = cur_status
+  -- NOTE: do not update the queue_len_cache here, it will be periodically rechecked
+
+  return(rv)
+end
+
+-- ##############################################
+
+-- Enqueue a store alert action on the DB to be performed asynchronously
+local function enqueueStoreAlert(ifid, alert)
+  return(enqueueAlertEvent(getAlertEventQueue(ifid), json.encode(alert),
+    alert_consts.MAX_NUM_QUEUED_ALERTS_PER_INTERFACE, true))
+end
+
+-- Enqueue a store flow alert action on the DB to be performed asynchronously
+local function enqueueStoreFlowAlert(ifid, alert_json)
+  return(enqueueAlertEvent(getFlowAlertEventQueue(ifid), alert_json,
+    alert_consts.MAX_NUM_QUEUED_ALERTS_PER_INTERFACE, true))
+end
+
+-- ##############################################
+
+local function pushAlertJSONNotification(alert_json)
+  return(enqueueAlertEvent("ntopng.alerts.notifications_queue", alert_json,
+    alert_consts.MAX_NUM_QUEUED_ALERTS_NOTIFICATIONS, false --[[just a notification, don't count drops]]))
+end
+
+-- ##############################################
+
+local function pushAlertNotification(ifid, action, alert)
+  alert.ifid = ifid
+  alert.action = action
+
+  pushAlertJSONNotification(json.encode(alert))
 end
 
 -- ##############################################
@@ -149,6 +199,9 @@ function alerts_api.checkPendingStoreAlerts(deadline)
 
   for ifid, _ in pairs(ifnames) do
     interface.select(ifid)
+
+    -- Dequeue Alerts
+
     local queue = getAlertEventQueue(ifid)
 
     while(true) do
@@ -172,6 +225,29 @@ function alerts_api.checkPendingStoreAlerts(deadline)
         return(false)
       end
     end
+
+    -- Dequeue Flow Alerts
+
+    queue = getFlowAlertEventQueue(ifid)
+
+    while(true) do
+      local alert_json = ntop.lpopCache(queue)
+
+      if(not alert_json) then
+        break
+      end
+
+      local alert = json.decode(alert_json)
+
+      if(alert) then
+        interface.storeFlowAlert(alert)
+      end
+
+      if(os.time() > deadline) then
+        return(false)
+      end
+    end
+
   end
 
   return(true)
@@ -179,10 +255,17 @@ end
 
 -- ##############################################
 
-local function pushAlertNotification(ifid, action, alert)
+--! @brief Stores a flow alert into the alerts database
+function alerts_api.storeFlow(alert)
+  local ifid = interface.getId()
+
   alert.ifid = ifid
-  alert.action = action
-  ntop.rpushCache("ntopng.alerts.notifications_queue", json.encode(alert))
+  alert.action = "store"
+
+  local alert_json = json.encode(alert)
+
+  enqueueStoreFlowAlert(ifid, alert_json)
+  pushAlertJSONNotification(alert_json)
 end
 
 -- ##############################################
@@ -207,7 +290,6 @@ function alerts_api.store(entity_info, type_info, when)
   end
 
   if alerts_api.isEntityAlertDisabled(ifid, entity_info.alert_entity.entity_id, entity_info.alert_entity_val, type_info.alert_type.alert_id) then
-    incDisabledAlertsCount(ifid, granularity_id, entity_info.alert_entity.entity_id, entity_info.alert_entity_val, type_info.alert_type.alert_id)
     return(false)
   end
 
@@ -227,7 +309,7 @@ function alerts_api.store(entity_info, type_info, when)
     alert_json = alert_json,
   }
 
-  if(entity_info.alert_entity.entity_id == alertEntity("host")) then
+  if(entity_info.alert_entity.entity_id == alert_consts.alertEntity("host")) then
     -- NOTE: for engaged alerts this operation is performed during trigger in C
     interface.incTotalHostAlerts(entity_info.alert_entity_val, type_info.alert_type.alert_id)
   end
@@ -239,10 +321,74 @@ end
 
 -- ##############################################
 
-function alerts_api.storeFlowAlert(alert_type, alert_severity, flow_info)
-   if flow then
-      -- flow.storeAlert(alert_type.alert_id, alert_severity.severity_id, json.encode(flow_info))
+--! @brief Determine whether the alert has already been triggered
+--! @param candidate_alert type_info of the aler which needs to be checked
+--! @param cur_alerts a table of currently triggered alerts
+--! @return true on if the alert has already been triggered, false otherwise
+--!
+--! @note Example of candidate alert
+--! candidate_alert table
+--! candidate_alert.alert_granularity table
+--! candidate_alert.alert_granularity.i18n_title string show_alerts.minute
+--! candidate_alert.alert_granularity.granularity_id number 1
+--! candidate_alert.alert_granularity.i18n_description string alerts_thresholds_config.every_minute
+--! candidate_alert.alert_granularity.granularity_seconds number 60
+--! candidate_alert.alert_severity table
+--! candidate_alert.alert_severity.severity_id number 2
+--! candidate_alert.alert_severity.syslog_severity number 3
+--! candidate_alert.alert_severity.i18n_title string alerts_dashboard.error
+--! candidate_alert.alert_severity.label string label-danger
+--! candidate_alert.alert_type table
+--! candidate_alert.alert_type.i18n_title string alerts_dashboard.threashold_cross
+--! candidate_alert.alert_type.i18n_description function function: 0x7fd24070f570
+--! candidate_alert.alert_type.alert_id number 2
+--! candidate_alert.alert_type.icon string fa-arrow-circle-up
+--! candidate_alert.alert_type_params table
+--! candidate_alert.alert_type_params.value number 129277
+--! candidate_alert.alert_type_params.threshold number 1
+--! candidate_alert.alert_type_params.operator string gt
+--! candidate_alert.alert_type_params.metric string bytes
+--! candidate_alert.alert_subtype string min_bytes
+--!
+--! @note Example of cur_alerts
+--! cur_alerts table
+--! cur_alerts.1 table
+--! cur_alerts.1.alert_type number 2
+--! cur_alerts.1.alert_subtype string min_bytes
+--! cur_alerts.1.alert_entity_val string 192.168.2.222@0
+--! cur_alerts.1.alert_granularity number 60
+--! cur_alerts.1.alert_severity number 2
+--! cur_alerts.1.alert_json string {"metric":"bytes","threshold":1,"value":13727070,"operator":"gt"}
+--! cur_alerts.1.alert_tstamp_end number 1571328097
+--! cur_alerts.1.alert_tstamp number 1571327460
+--! cur_alerts.1.alert_entity number 1
+local function already_triggered(candidate_alert, cur_alerts)
+   if not cur_alerts or not candidate_alert then
+      return nil
    end
+
+   local candidate_severity = candidate_alert.alert_severity.severity_id
+   local candidate_type = candidate_alert.alert_type.alert_id
+   local candidate_granularity = candidate_alert.alert_granularity.granularity_seconds
+   local candidate_alert_subtype = candidate_alert.alert_subtype
+
+   for i = #cur_alerts, 1, -1 do
+      local cur_alert = cur_alerts[i]
+
+      if candidate_severity == cur_alert.alert_severity
+	 and candidate_type == cur_alert.alert_type
+	 and candidate_granularity == cur_alert.alert_granularity
+         and candidate_alert_subtype == cur_alert.alert_subtype then
+	    -- Remove from cur_alerts, this will save cycles for
+	    -- subsequent calls of this method.
+	    -- Using .remove is OK here as there won't unnecessarily move memory multiple times:
+	    -- we return immeediately
+	    table.remove(cur_alerts, i)
+	    return true
+      end
+   end
+
+   return false
 end
 
 -- ##############################################
@@ -251,12 +397,25 @@ end
 --! @param entity_info data returned by one of the entity_info building functions
 --! @param type_info data returned by one of the type_info building functions
 --! @param when (optional) the time when the release event occurs
+--! @param cur_alerts (optional) a table containing triggered alerts for the current entity
 --! @return true on if the alert was triggered, false otherwise
 --! @note The actual trigger is performed asynchronously
 --! @note false is also returned if an existing alert is found and refreshed
-function alerts_api.trigger(entity_info, type_info, when)
-  when = when or os.time()
+function alerts_api.trigger(entity_info, type_info, when, cur_alerts)
   local ifid = interface.getId()
+  local is_disabled = alerts_api.isEntityAlertDisabled(ifid, entity_info.alert_entity.entity_id, entity_info.alert_entity_val, type_info.alert_type.alert_id)
+
+  -- Check if the alerts has been disabled and, in case return, before checking already_triggered,
+  -- so that the alert will be automatically released during the next check.
+  if is_disabled then
+     return(true)
+  end
+
+  if already_triggered(type_info, cur_alerts) == true then
+     return(true)
+  end
+
+  when = when or os.time()
 
   if(not areAlertsEnabled()) then
     return(false)
@@ -271,23 +430,22 @@ function alerts_api.trigger(entity_info, type_info, when)
   local granularity_id = type_info.alert_granularity and type_info.alert_granularity.granularity_id or 0 --[[ 0 is aperiodic ]]
   local subtype = type_info.alert_subtype or ""
   local alert_json = json.encode(type_info.alert_type_params)
-  local is_disabled = alerts_api.isEntityAlertDisabled(ifid, entity_info.alert_entity.entity_id, entity_info.alert_entity_val, type_info.alert_type.alert_id)
   local triggered
   local alert_key_name = get_alert_triggered_key(type_info)
 
   local params = {
     alert_key_name, granularity_id,
     type_info.alert_severity.severity_id, type_info.alert_type.alert_id,
-    subtype, alert_json, is_disabled
+    subtype, alert_json,
   }
 
-  if(entity_info.alert_entity.entity_id == alertEntity("host")) then
+  if(entity_info.alert_entity.entity_id == alert_consts.alertEntity("host")) then
     host.checkContext(entity_info.alert_entity_val)
     triggered = host.storeTriggeredAlert(table.unpack(params))
-  elseif(entity_info.alert_entity.entity_id == alertEntity("interface")) then
+  elseif(entity_info.alert_entity.entity_id == alert_consts.alertEntity("interface")) then
     interface.checkContext(entity_info.alert_entity_val)
     triggered = interface.storeTriggeredAlert(table.unpack(params))
-  elseif(entity_info.alert_entity.entity_id == alertEntity("network")) then
+  elseif(entity_info.alert_entity.entity_id == alert_consts.alertEntity("network")) then
     network.checkContext(entity_info.alert_entity_val)
     triggered = network.storeTriggeredAlert(table.unpack(params))
   else
@@ -297,12 +455,6 @@ function alerts_api.trigger(entity_info, type_info, when)
   if(triggered == nil) then
     if(do_trace) then print("[Don't Trigger alert (already triggered?) @ "..granularity_sec.."] "..
         entity_info.alert_entity_val .."@"..type_info.alert_type.i18n_title..":".. subtype .. "\n") end
-    return(false)
-  elseif(is_disabled) then
-    if(do_trace) then print("[COUNT Disabled alert @ "..granularity_sec.."] "..
-        entity_info.alert_entity_val .."@"..type_info.alert_type.i18n_title..":".. subtype .. "\n") end
-
-    incDisabledAlertsCount(ifid, granularity_id, entity_info.alert_entity.entity_id, entity_info.alert_entity_val, type_info.alert_type.alert_id)
     return(false)
   else
     if(do_trace) then print("[TRIGGER alert @ "..granularity_sec.."] "..
@@ -319,10 +471,15 @@ end
 --! @param entity_info data returned by one of the entity_info building functions
 --! @param type_info data returned by one of the type_info building functions
 --! @param when (optional) the time when the release event occurs
+--! @param cur_alerts (optional) a table containing triggered alerts for the current entity
 --! @note The actual release is performed asynchronously
 --! @return true on success, false otherwise
-function alerts_api.release(entity_info, type_info, when)
-  local when = when or os.time()
+function alerts_api.release(entity_info, type_info, when, cur_alerts)
+  if already_triggered(type_info, cur_alerts) == false then
+     return(true)
+  end
+
+  when = when or os.time()
   local granularity_sec = type_info.alert_granularity and type_info.alert_granularity.granularity_seconds or 0
   local granularity_id = type_info.alert_granularity and type_info.alert_granularity.granularity_id or 0 --[[ 0 is aperiodic ]]
   local subtype = type_info.alert_subtype or ""
@@ -340,13 +497,13 @@ function alerts_api.release(entity_info, type_info, when)
     return(false)
   end
 
-  if(entity_info.alert_entity.entity_id == alertEntity("host")) then
+  if(entity_info.alert_entity.entity_id == alert_consts.alertEntity("host")) then
     host.checkContext(entity_info.alert_entity_val)
     released = host.releaseTriggeredAlert(table.unpack(params))
-  elseif(entity_info.alert_entity.entity_id == alertEntity("interface")) then
+  elseif(entity_info.alert_entity.entity_id == alert_consts.alertEntity("interface")) then
     interface.checkContext(entity_info.alert_entity_val)
     released = interface.releaseTriggeredAlert(table.unpack(params))
-  elseif(entity_info.alert_entity.entity_id == alertEntity("network")) then
+  elseif(entity_info.alert_entity.entity_id == alert_consts.alertEntity("network")) then
     network.checkContext(entity_info.alert_entity_val)
     released = network.releaseTriggeredAlert(table.unpack(params))
   else
@@ -520,6 +677,21 @@ end
 function alerts_api.synFloodType(granularity, metric, value, operator, threshold)
   return({
     alert_type = alert_consts.alert_types.alert_tcp_syn_flood,
+    alert_subtype = metric,
+    alert_granularity = alert_consts.alerts_granularities[granularity],
+    alert_severity = alert_consts.alert_severities.error,
+    alert_type_params = {
+      value = value,
+      threshold = threshold,
+    }
+  })
+end
+
+-- ##############################################
+
+function alerts_api.synScanType(granularity, metric, value, operator, threshold)
+  return({
+    alert_type = alert_consts.alert_types.alert_tcp_syn_scan,
     alert_subtype = metric,
     alert_granularity = alert_consts.alerts_granularities[granularity],
     alert_severity = alert_consts.alert_severities.error,
@@ -857,6 +1029,19 @@ end
 
 -- ##############################################
 
+function alerts_api.slowPurgeType(idle, idle_perc, threshold)
+  return({
+    alert_type = alert_consts.alert_types.alert_slow_purge,
+    alert_severity = alert_consts.alert_severities.warning,
+    alert_granularity = alert_consts.alerts_granularities.min,
+    alert_type_params = {
+      idle = idle, idle_perc = idle_perc, edge = threshold,
+    },
+  })
+end
+
+-- ##############################################
+
 function alerts_api.slowStatsUpdateType()
   return({
     alert_type = alert_consts.alert_types.alert_slow_stats_update,
@@ -952,9 +1137,9 @@ function alerts_api.threshold_check_function(params)
   end
 
   if(alarmed) then
-    return(alerts_api.trigger(params.alert_entity, threshold_type))
+    return(alerts_api.trigger(params.alert_entity, threshold_type, nil, params.cur_alerts))
   else
-    return(alerts_api.release(params.alert_entity, threshold_type))
+    return(alerts_api.release(params.alert_entity, threshold_type, nil, params.cur_alerts))
   end
 end
 
@@ -969,9 +1154,9 @@ function alerts_api.anomaly_check_function(params)
   local type_info = params.user_script.anomaly_type_builder(anomal_key)
 
   if params.entity_info.anomalies[anomal_key] then
-    return alerts_api.trigger(params.alert_entity, type_info)
+    return alerts_api.trigger(params.alert_entity, type_info, nil, params.cur_alerts)
   else
-    return alerts_api.release(params.alert_entity, type_info)
+    return alerts_api.release(params.alert_entity, type_info, nil, params.cur_alerts)
   end
 end
 
@@ -1041,92 +1226,260 @@ function alerts_api.category_bytes(info, category_name)
 end
 
 -- ##############################################
+-- ENTITY DISABLED ALERTS API
+-- ##############################################
 
-local function getEntityDisabledAlertsBitmapKey(ifid, entity, entity_val)
-  return string.format("ntopng.prefs.alerts.ifid_%d.disabled_alerts.__%s__%s", ifid, entity, entity_val)
+local function getEntityDisabledAlertsBitmapHash(ifid, entity_type)
+  -- NOTE: should be able to accept strings for alerts_api.purgeAlertsPrefs
+  if(type(ifid) == "number") then ifid = string.format("%d", ifid) end
+  if(type(entity_type) == "number") then entity_type = string.format("%u", entity_type) end
+
+  return string.format("ntopng.prefs.alerts.ifid_%s.disabled_alerts.entity_%s", ifid, entity_type)
 end
 
 -- ##############################################
 
-function alerts_api.getEntityAlertsDisabled(ifid, entity, entity_val)
-  local bitmap = tonumber(ntop.getPref(getEntityDisabledAlertsBitmapKey(ifid, entity, entity_val))) or 0
-  -- traceError(TRACE_NORMAL, TRACE_CONSOLE, string.format("ifid: %d, entity: %s, val: %s -> bitmap=%x", ifid, alertEntityRaw(entity), entity_val, bitmap))
-  return(bitmap)
+-- @brief Get a table containing the disabled alert bitmaps of the alertable entities
+-- for the given entity_type
+-- @return {entity_key -> disabled_alerts_bitmap}
+function alerts_api.getEntityTypeDisabledAlertsBitmap(ifid, entity_type)
+  local hash = getEntityDisabledAlertsBitmapHash(ifid, entity_type)
+  local rv = ntop.getHashAllCache(hash) or {}
+
+  for k, v in pairs(rv) do
+    rv[k] = tonumber(v)
+  end
+
+  return(rv)
 end
 
 -- ##############################################
 
-function alerts_api.setEntityAlertsDisabled(ifid, entity, entity_val, bitmap)
-  local key = getEntityDisabledAlertsBitmapKey(ifid, entity, entity_val)
+-- A cache variable to know if there are configured disabled alerts
+local function getInterfaceHasDisabledAlertsKey(ifid)
+  -- NOTE: should be able to accept strings for alerts_api.purgeAlertsPrefs
+  if(type(ifid) == "number") then ifid = string.format("%d", ifid) end
+
+  return(string.format("ntopng.cache.alerts.ifid_%s.has_disabled_alerts", ifid))
+end
+
+-- ##############################################
+
+-- @brief Set the disabled alerts bitmap for the given alertable entity
+function alerts_api.setEntityAlertsDisabledBitmap(ifid, entity_type, entity_val, bitmap)
+  local hash = getEntityDisabledAlertsBitmapHash(ifid, entity_type)
 
   if(bitmap == 0) then
-    ntop.delCache(key)
+    -- No status disabled
+    ntop.delHashCache(hash, entity_val)
   else
-    ntop.setPref(key, string.format("%u", bitmap))
-  end
-end
-
--- ##############################################
-
-local function toggleEntityAlert(ifid, entity, entity_val, alert_type, disable)
-  alert_type = tonumber(alert_type)
-  bitmap = alerts_api.getEntityAlertsDisabled(ifid, entity, entity_val)
-
-  if(disable) then
-    bitmap = ntop.bitmapSet(bitmap, alert_type)
-  else
-    bitmap = ntop.bitmapClear(bitmap, alert_type)
-    deleteEntityDisabledAlertsCountersKey(ifid, entity, entity_val, alert_type)
+    ntop.setHashCache(hash, entity_val, string.format("%u", bitmap))
   end
 
-  alerts_api.setEntityAlertsDisabled(ifid, entity, entity_val, bitmap)
-  return(bitmap)
+  -- Invalidate the disabled alerts cache
+  ntop.delCache(getInterfaceHasDisabledAlertsKey(ifid))
 end
 
 -- ##############################################
 
-function alerts_api.disableEntityAlert(ifid, entity, entity_val, alert_type)
-  return(toggleEntityAlert(ifid, entity, entity_val, alert_type, true))
+-- @brief Get the disabled alert bitmap for the given entity
+function alerts_api.getEntityAlertsDisabledBitmap(ifid, entity_type, entity_val)
+  local hash = getEntityDisabledAlertsBitmapHash(ifid, entity_type)
+
+  return(tonumber(ntop.getHashCache(hash, entity_val)) or 0)
 end
 
 -- ##############################################
 
-function alerts_api.enableEntityAlert(ifid, entity, entity_val, alert_type)
-  return(toggleEntityAlert(ifid, entity, entity_val, alert_type, false))
+-- A cache is used to reduce Redis accesses
+local cache_disabled_by_entity_type = {}
+
+-- @brief Check if the alert_type is disabled for the given entity
+function alerts_api.isEntityAlertDisabled(ifid, entity_type, entity_val, alert_id)
+  local entities_disabled = cache_disabled_by_entity_type[entity_type]
+
+  if(entities_disabled == nil) then
+    -- Local from redis
+    entities_disabled = alerts_api.getEntityTypeDisabledAlertsBitmap(ifid, entity_type)
+    cache_disabled_by_entity_type[entity_type] = entities_disabled
+  end
+
+  local bitmap = entities_disabled[entity_val]
+
+  if((bitmap ~= nil) and ntop.bitmapIsSet(bitmap, alert_id)) then
+    return(true)
+  end
+
+  return(false)
 end
 
 -- ##############################################
 
-function alerts_api.isEntityAlertDisabled(ifid, entity, entity_val, alert_type)
-  local bitmap = alerts_api.getEntityAlertsDisabled(ifid, entity, entity_val)
-  return(ntop.bitmapIsSet(bitmap, tonumber(alert_type)))
-end
-
--- ##############################################
-
+-- @brief Check if there are any entities with disabled alerts configured
 function alerts_api.hasEntitiesWithAlertsDisabled(ifid)
-  return(table.len(ntop.getKeysCache(getEntityDisabledAlertsBitmapKey(ifid, "*", "*"))) > 0)
+  local has_disabled_cache_key = getInterfaceHasDisabledAlertsKey(ifid)
+  local cached_val = ntop.getCache(has_disabled_cache_key) or ""
+
+  if(cached_val ~= "") then
+    return(cached_val == "1")
+  end
+
+  -- Slow search
+  local available_entities = alert_consts.alert_entities
+  local found = false
+
+  for _, entity in pairs(available_entities) do
+    local keys = ntop.getKeysCache(getEntityDisabledAlertsBitmapHash(ifid, entity.entity_id))
+
+    if(not table.empty(keys)) then
+      found = true
+      break
+    end
+  end
+
+  ntop.setCache(has_disabled_cache_key, ternary(found, "1", "0"), 3600 --[[ 1h ]])
+  return(found)
 end
 
 -- ##############################################
 
-function alerts_api.listEntitiesWithAlertsDisabled(ifid)
-  local keys = ntop.getKeysCache(getEntityDisabledAlertsBitmapKey(ifid, "*", "*")) or {}
+-- @brief Get all the disabled alerts by entity
+-- @return {entity_type -> {entity_val1 -> bitmap, entity_val2 -> bitmap, ...}, ...}
+function alerts_api.getAllEntitiesDisabledAlerts(ifid)
+  local available_entities = alert_consts.alert_entities
   local res = {}
 
-  for key in pairs(keys) do
-    local parts = string.split(key, "__")
+  for entity_key, entity in pairs(available_entities) do
+    local hash = getEntityDisabledAlertsBitmapHash(ifid, entity.entity_id)
+    local entities_bitmaps = ntop.getHashAllCache(hash) or {}
+    local is_empty = true
 
-    if((parts) and (#parts == 3)) then
-      local entity = tonumber(parts[2])
-      local entity_val = parts[3]
+    for k, v in pairs(entities_bitmaps) do
+      entities_bitmaps[k] = tonumber(v)
+      is_empty = false
+    end
 
-      res[entity] = res[entity] or {}
-      res[entity][entity_val] = true
+    if(not is_empty) then
+      res[entity_key] = entities_bitmaps
     end
   end
 
   return(res)
+end
+
+-- ##############################################
+-- HOST DISABLED FLOW STATUS API
+-- ##############################################
+
+local function getHostDisabledStatusBitmapHash(ifid)
+  -- NOTE: should be able to accept strings for alerts_api.purgeAlertsPrefs
+  if(type(ifid) == "number") then ifid = string.format("%d", ifid) end
+
+  return(string.format("ntopng.prefs.alerts.ifid_%s.disabled_status", ifid))
+end
+
+-- ##############################################
+
+-- @brief Get the bitmap of disabled flow status for an host
+function alerts_api.getHostDisabledStatusBitmap(ifid, hostkey)
+  local hash = getHostDisabledStatusBitmapHash(ifid)
+
+  return(tonumber(ntop.getHashCache(hash, hostkey)) or 0)
+end
+
+-- ##############################################
+
+-- @brief Set the bitmap of disabled flow status for an host
+function alerts_api.setHostDisabledStatusBitmap(ifid, hostkey, bitmap)
+  local hash = getHostDisabledStatusBitmapHash(ifid)
+
+  if(bitmap == 0) then
+    -- No status disabled
+    ntop.delHashCache(hash, hostkey)
+  else
+    ntop.setHashCache(hash, hostkey, string.format("%u", bitmap))
+  end
+end
+
+-- ##############################################
+
+-- @brief Get all the hosts disabled flow status bitmaps
+function alerts_api.getAllHostsDisabledStatusBitmaps(ifid)
+  local hash = getHostDisabledStatusBitmapHash(ifid)
+  local rv = ntop.getHashAllCache(hash) or {}
+
+  for k, v in pairs(rv) do
+    rv[k] = tonumber(v)
+  end
+
+  return(rv)
+end
+
+-- ##############################################
+-- SUPPRESSED ALERTS API
+-- ##############################################
+
+local function getSuppressedSetKey(ifid, entity_type)
+  -- NOTE: should be able to accept strings for alerts_api.purgeAlertsPrefs
+  if(type(ifid) == "number") then ifid = string.format("%d", ifid) end
+  if(type(entity_type) == "number") then entity_type = string.format("%u", entity_type) end
+
+  return(string.format("ntopng.prefs.alerts.ifid_%s.suppressed_alerts.entity_%s", ifid, entity_type))
+end
+
+-- @brief Get the suppressed alertable entities given the entity_type
+function alerts_api.getSuppressedEntityAlerts(ifid, entity_type)
+  local setk = getSuppressedSetKey(ifid, entity_type)
+  local suppressed_entities = ntop.getMembersCache(setk) or {}
+  local ret = {}
+
+  for _, v in pairs(suppressed_entities) do
+    ret[v] = true
+  end
+
+  return(ret)
+end
+
+-- ##############################################
+
+-- @brief Enable/disable suppressed alerts on the given alertable entity
+function alerts_api.setSuppressedAlerts(ifid, entity_type, entity_value, suppressed)
+  local setk = getSuppressedSetKey(ifid, entity_type)
+
+  if(suppressed) then
+    ntop.setMembersCache(setk, entity_value)
+  else
+    ntop.delMembersCache(setk, entity_value)
+  end
+end
+
+-- ##############################################
+
+-- A cache is used to reduce Redis accesses
+local cache_suppressed_by_entity_type = {}
+
+-- @brief Check if the given entity has suppressed alerts
+function alerts_api.hasSuppressedAlerts(ifid, entity_type, entity_value)
+  local entities_suppressed = cache_suppressed_by_entity_type[entity_type]
+
+  if(entities_suppressed == nil) then
+    -- Local from redis
+    entities_suppressed = alerts_api.getSuppressedEntityAlerts(ifid, entity_type)
+    cache_suppressed_by_entity_type[entity_type] = entities_suppressed
+  end
+
+  return(entities_suppressed[entity_value] ~= nil)
+end
+
+-- ##############################################
+
+-- @brief Purge all the alerts prefs set by this module
+function alerts_api.purgeAlertsPrefs()
+  -- Purge all the alerts prefs on all the interfaces
+  deleteCachePattern(getEntityDisabledAlertsBitmapHash("*", "*"))
+  deleteCachePattern(getSuppressedSetKey("*", "*"))
+  deleteCachePattern(getInterfaceHasDisabledAlertsKey("*"))
+  deleteCachePattern(getHostDisabledStatusBitmapHash("*"))
 end
 
 -- ##############################################

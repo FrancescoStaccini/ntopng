@@ -8,10 +8,13 @@ local user_scripts = require("user_scripts")
 -- #################################################################
 
 local script = {
-   key = "my_custom_script",
-
    -- NOTE: hooks defined below
    hooks = {},
+
+   gui = {
+      i18n_title = "My Custom script",
+      i18n_description = "Trigger an alert when something bad happens",
+   }
 }
 
 -- #################################################################
@@ -23,7 +26,7 @@ end
 
 -- #################################################################
 
-function script.hooks.protocolDetected(params)
+function script.hooks.protocolDetected(now)
    if(true --[[ some condition]]) then
       -- NOTE: the status must be manually defined in scripts/callbacks/status_defs/custom_status_1.lua
       -- See scripts/callbacks/status_defs/custom_status_1.lua.example for details

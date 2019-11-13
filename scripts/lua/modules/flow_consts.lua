@@ -34,8 +34,16 @@ end
 flow_consts.status_types = {}
 local status_by_id = {}
 local status_key_by_id = {}
+local status_by_prio = {}
+local max_prio = 0
 
 local function loadStatusDefs()
+    if(false) then
+      if(string.find(debug.traceback(), "second.lua")) then
+         traceError(TRACE_WARNING, TRACE_CONSOLE, "second.lua is loading flow_consts.lua. This will slow it down!")
+      end
+    end
+
     local defs_dir = flow_consts.getDefinititionsDir()
     package.path = defs_dir .. "/?.lua;" .. package.path
     local required_fields = {"status_id", "relevance", "prio", "alert_severity", "alert_type", "i18n_title"}
@@ -60,10 +68,17 @@ local function loadStatusDefs()
                 goto next_script
             end
 
+            if(status_by_prio[def_script.prio] ~= nil) then
+                traceError(TRACE_ERROR, TRACE_CONSOLE, string.format("status_defs/%s: status priority must be unique, skipping", fname))
+                goto next_script
+            end
+
             -- Success
             flow_consts.status_types[mod_fname] = def_script
             status_by_id[def_id] = def_script
             status_key_by_id[def_id] = mod_fname
+            max_prio = math.max(max_prio, def_script.prio)
+            status_by_prio[def_script.prio] = def_script
         end
 
         ::next_script::
@@ -111,6 +126,27 @@ end
 
 function flow_consts.getStatusType(status_id)
     return(status_key_by_id[tonumber(status_id)])
+end
+
+-- ################################################################################
+
+-- @brief Calculate the predominant status from a status bitmap
+function flow_consts.getPredominantStatus(status_bitmap)
+    local normal_status = flow_consts.status_types.status_normal
+
+    if(status_bitmap == normal_status.status_id) then
+        -- Simple case: normal status
+        return(normal_status)
+    end
+
+    -- Look for predominant status in descending order to speed up search
+    for i = max_prio,0,-1 do
+        local status = status_by_prio[i]
+
+        if(status and ntop.bitmapIsSet(status_bitmap, status.status_id)) then
+            return(status)
+        end
+    end
 end
 
 -- ################################################################################
@@ -349,6 +385,7 @@ flow_consts.flow_fields_description = {
     ["DNS_NUM_ANSWERS"] = i18n("flow_fields_description.dns_num_answers"),
     ["DNS_TTL_ANSWER"] = i18n("flow_fields_description.dns_ttl_answer"),
     ["DNS_RESPONSE"] = i18n("flow_fields_description.dns_response"),
+    ["DNS_TX_ID"] = i18n("flow_fields_description.dns_tx_id"),
 
     -- FTP Protocol
     ["FTP_LOGIN"] = i18n("flow_fields_description.ftp_login"),
@@ -434,6 +471,8 @@ flow_consts.flow_fields_description = {
     ["HTTP_SITE"] = i18n("flow_fields_description.http_site"),
     ["HTTP_X_FORWARDED_FOR"] = i18n("flow_fields_description.http_x_forwarded_for"),
     ["HTTP_VIA"] = i18n("flow_fields_description.http_via"),
+    ["HTTP_PROTOCOL"] = i18n("flow_fields_description.http_protocol"),
+    ["HTTP_LENGTH"] = i18n("flow_fields_description.http_length"),
 
     -- IMAP Protocol
     ["IMAP_LOGIN"] = i18n("flow_fields_description.imap_login"),
@@ -575,6 +614,30 @@ flow_consts.flow_fields_description = {
     ["SSDP_SERVER"] = i18n("flow_fields_description.ssdp_server"),
     ["SSDP_TYPE"] = i18n("flow_fields_description.ssdp_type"),
     ["SSDP_METHOD"] = i18n("flow_fields_description.ssdp_method"),
+
+    -- TLS Protocol
+    ["TLS_VERSION"] = i18n("flow_fields_description.tls_version"),
+    ["TLS_CERT_NOT_BEFORE"] = i18n("flow_fields_description.tls_cert_not_before"),
+    ["TLS_CERT_AFTER"] = i18n("flow_fields_description.tls_cert_after"),
+    ["TLS_CERT_SHA1"] = i18n("flow_fields_description.tls_cert_sha1"),
+    ["TLS_CERT_DN"] = i18n("flow_fields_description.tls_cert_dn"),
+    ["TLS_CERT_SN"] = i18n("flow_fields_description.tls_cert_sn"),
+    ["TLS_CERT_SUBJECT"] = i18n("flow_fields_description.tls_cert_subject"),
+
+    -- File Info
+    ["FILE_NAME"] = i18n("flow_fields_description.file_name"),
+    ["FILE_SIZE"] = i18n("flow_fields_description.file_size"),
+    ["FILE_STATE"] = i18n("flow_fields_description.file_state"),
+    ["FILE_GAPS"] = i18n("flow_fields_description.file_gaps"),
+    ["FILE_STORED"] = i18n("flow_fields_description.file_stored"),
+    ["FILE_ID"] = i18n("flow_fields_description.file_id"),
+
+    -- Suricata
+    ["SURICATA_FLOW_ID"] = i18n("flow_fields_description.suricata_flow_id"),
+    ["SURICATA_APP_PROTO"] = i18n("flow_fields_description.suricata_app_proto"),
+
+    -- Misc
+    ["COMMUNITY_ID"] = i18n("flow_fields_description.community_id"),
 }
 
 -- ################################################################################

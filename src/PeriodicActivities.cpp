@@ -24,8 +24,9 @@
 typedef struct _activity_descr {
   const char *path;
   u_int32_t periodicity;
-  bool align_to_localtime;
-  u_int8_t thread_pool_size;
+  ThreadPool *pool;
+  bool align_to_localtime;  
+  bool exclude_viewed_interfaces;
 } activity_descr;
 
 /* ******************************************* */
@@ -40,12 +41,36 @@ PeriodicActivities::PeriodicActivities() {
 /* ******************************************* */
 
 PeriodicActivities::~PeriodicActivities() {
+  /* Important: destroy the ThreadedActivities only *after* ensuring that both its pthreadLoop
+   * thread and the possibly running activity into the ThreadPool::run thread
+   * have been terminated. */
+  for(u_int16_t i = 0; i < CONST_MAX_NUM_THREADED_ACTIVITIES; i++) {
+    /* This will terminate the pthreadLoop of the activities */
+    if(activities[i])
+      activities[i]->terminateEnqueueLoop();
+  }
+
+  /* This will terminate any possibly running activities into the ThreadPool::run */
+  delete high_priority_pool;
+  delete standard_priority_pool;
+  delete no_priority_pool;
+
+  /* Now it's safe to delete the activities as no other thread is executing
+   * their code. */
   for(u_int16_t i = 0; i < CONST_MAX_NUM_THREADED_ACTIVITIES; i++) {
     if(activities[i]) {
       delete activities[i];
       activities[i] = NULL;
       num_activities--;
     }
+  }
+}
+
+/* ******************************************* */
+
+void PeriodicActivities::lua(NetworkInterface *iface, lua_State *vm) {
+  for(int i = 0; i < num_activities; i++) {
+    activities[i]->lua(iface, vm);
   }
 }
 
@@ -67,7 +92,7 @@ void PeriodicActivities::startPeriodicActivitiesLoop() {
   struct stat buf;
 #endif
   ThreadedActivity *startup_activity;
-  static u_int8_t num_threads = DEFAULT_THREAD_POOL_SIZE;
+  u_int8_t num_threads = DEFAULT_THREAD_POOL_SIZE;
     
   ntop->getTrace()->traceEvent(TRACE_NORMAL, "Started periodic activities loop...");
 
@@ -95,20 +120,26 @@ void PeriodicActivities::startPeriodicActivitiesLoop() {
 
   if(num_threads > MAX_THREAD_POOL_SIZE)
     num_threads = MAX_THREAD_POOL_SIZE;
+
+  high_priority_pool     = new ThreadPool(true,  ntop->get_num_interfaces());
+  standard_priority_pool = new ThreadPool(false, ntop->get_num_interfaces());
+  no_priority_pool       = new ThreadPool(false, num_threads);
   
   static activity_descr ad[] = {
-    { SECOND_SCRIPT_PATH,       1,     false, 1           },
-    { MINUTE_SCRIPT_PATH,       60,    false, num_threads },
-    { FIVE_MINUTES_SCRIPT_PATH, 300,   false, num_threads },
-    { HOURLY_SCRIPT_PATH,       3600,  false, num_threads },
-    { DAILY_SCRIPT_PATH,        86400, true,  1           },
-    { HOUSEKEEPING_SCRIPT_PATH, 3,     false, 1           },
-    { DISCOVER_SCRIPT_PATH,     5,     false, 1           },
-    { TIMESERIES_SCRIPT_PATH,   5,     false, 1           },
+				{ SECOND_SCRIPT_PATH,             1, standard_priority_pool, false, false },
+				{ HT_STATE_UPDATE_SCRIPT_PATH,    5, high_priority_pool,     false, true },
+				{ STATS_UPDATE_SCRIPT_PATH,       5, high_priority_pool,     false, false },
+				{ MINUTE_SCRIPT_PATH,            60, no_priority_pool,       false, false },
+				{ FIVE_MINUTES_SCRIPT_PATH,     300, no_priority_pool,       false, false },
+				{ HOURLY_SCRIPT_PATH,          3600, no_priority_pool,       false, false },
+				{ DAILY_SCRIPT_PATH,          86400, no_priority_pool,       true,  false },
+				{ HOUSEKEEPING_SCRIPT_PATH,       3, standard_priority_pool, false, false },
+				{ DISCOVER_SCRIPT_PATH,           5, no_priority_pool,       false, false },
+				{ TIMESERIES_SCRIPT_PATH,         5, standard_priority_pool, false, false },
 #ifdef HAVE_NEDGE
-    { PINGER_SCRIPT_PATH,       5,     false, 1           },
+				{ PINGER_SCRIPT_PATH,             5, no_priority_pool,       false, false },
 #endif
-    { NULL, 0, false}
+				{ NULL, 0, NULL, false, false }
   };
 
   ntop->getTrace()->traceEvent(TRACE_NORMAL, "Each periodic activity script will use %u threads", num_threads);
@@ -119,7 +150,8 @@ void PeriodicActivities::startPeriodicActivitiesLoop() {
     ThreadedActivity *ta = new ThreadedActivity(d->path,
 						d->periodicity,
 						d->align_to_localtime,
-						d->thread_pool_size);
+						d->exclude_viewed_interfaces,
+						d->pool);
     if(ta) {
       activities[num_activities++] = ta;
       ta->run();

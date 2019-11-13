@@ -352,6 +352,12 @@ if(isAdministrator()) then
    end
 end
 
+if(page == "internals") then
+   print("\n<li class=\"active\"><a href=\"#\"><i class=\"fa fa-wrench fa-lg\"></i></a></li>\n")
+else
+   print("\n<li><a href=\""..url.."&page=internals\"><i class=\"fa fa-wrench fa-lg\"></i></a></li>")
+end
+
 if(isAdministrator() and ntop.isEnterprise() and not ifstats.isDynamic) and isEmptyString(ntop.getCache(disaggregation_criterion_key)) then
    if(page == "sub_interfaces") then
       print("\n<li class=\"active\"><a href=\"#\"><i class=\"fa fa-code-fork fa-lg\"></i></a></li>\n")
@@ -696,7 +702,12 @@ if((page == "overview") or (page == nil)) then
       if not isEmptyString(external_json_stats) then
          local external_stats = json.decode(external_json_stats)
          if external_stats ~= nil then
-            print("<tr><th colspan=7 nowrap>"..i18n("external_stats.title").."</th></tr>\n")
+            local external_stats_title = i18n("external_stats.title")
+            if external_stats.i18n_title then
+              external_stats_title = i18n(external_stats.i18n_title)
+              external_stats.i18n_title = nil
+            end
+            print("<tr><th colspan=7 nowrap>"..external_stats_title.."</th></tr>\n")
             for key, value in pairsByKeys(external_stats, asc) do
                print("<tr>")
                print("<th nowrap>"..ternary(i18n("external_stats."..key), i18n("external_stats."..key), key).."</th>")
@@ -1822,9 +1833,64 @@ elseif(page == "callbacks") then
       return
    end
 
+   local alias = getHumanReadableInterfaceName(if_name)
+
    drawAlertSourceSettings("interface", ifname_clean,
-      i18n("show_alerts.iface_delete_config_btn", {iface=if_name}), "show_alerts.iface_delete_config_confirm",
-      "if_stats.lua", {ifid=ifid}, if_name, "interface")
+      i18n("show_alerts.iface_delete_config_btn", {iface=alias}), "show_alerts.iface_delete_config_confirm",
+      "if_stats.lua", {ifid=ifid}, alias, "interface")
+
+elseif(page == "internals") then
+   local hash_tables_stats = interface.getHashTablesStats()
+
+   print("<table class=\"table table-striped table-bordered\">\n")
+   print("<tr><th colspan=4>" .. i18n("internals.hash_tables") .. "</th>")
+   print("<tr><th width=15%>" .. i18n("internals.hash_table") .. "</th>")
+   print("<th width=5% style='text-align:center;'>" .. i18n("chart") .. "</th>")
+   print("<th style='text-align:right;'>" .. i18n("internals.state_active") .. "</th>")
+   print("<th style='text-align:right;'>" .. i18n("internals.state_idle") .. "</th>")
+   print("</tr>\n")
+
+   for ht_name, ht_stats in pairsByKeys(hash_tables_stats, asc) do
+     local statschart_icon = ''
+
+     if ts_utils.exists("ht:state", {ifid = ifid, hash_table = ht_name}) then
+	 statschart_icon = '<A HREF=\"'..ntop.getHttpPrefix()..'/lua/hash_table_details.lua?hash_table='..ht_name..'\"><i class=\'fa fa-area-chart fa-lg\'></i></A>'
+     end
+
+     print("<tr><th>"..i18n("hash_table."..ht_name).."</th><td align=center>"..statschart_icon.."</td>")
+     print("<td align=right>"..format_utils.formatValue(ht_stats["hash_entry_states"]["hash_entry_state_active"] or "0").."</td>")
+     print("<td align=right>"..format_utils.formatValue(ht_stats["hash_entry_states"]["hash_entry_state_idle"] or "0").."</td>")
+     print("</tr>\n")
+   end
+
+   local periodic_activities_stats = interface.getPeriodicActivitiesStats()
+
+   if((table.len(periodic_activities_stats) > 0) and (ntop.isPro())) then
+      print("<tr><th colspan=4>" .. i18n("internals.periodic_activities") .. "</th>")
+      print("<tr><th width=15%>" .. i18n("internals.periodic_activity") .. "</th>")
+      print("<th width=5% style='text-align:center;'>" .. i18n("chart") .. "</th>")
+      print("<th style='text-align:right;'>" .. i18n("internals.max_duration_ms") .. "</th>")
+      print("<th style='text-align:right;'>" .. i18n("internals.last_duration_ms") .. "</th>")
+      print("</tr>\n")
+
+      for p_name, p_stats in pairsByKeys(periodic_activities_stats, asc) do
+	 local statschart_icon = ''
+
+	 if ts_utils.exists("periodic_script:duration_ms", {ifid = ifid, periodic_script = p_name}) then
+	    statschart_icon = '<A HREF=\"'..ntop.getHttpPrefix()..'/lua/periodic_script_details.lua?periodic_script='..p_name..'\"><i class=\'fa fa-area-chart fa-lg\'></i></A>'
+	 end
+
+	 print("<tr><th>"..p_name.."</th><td align=center>"..statschart_icon.."</td>")
+	 print("<td align=right>"..format_utils.formatMillis(p_stats["duration"]["max_duration_ms"] or "0").."</td>")
+	 print("<td align=right>"..format_utils.formatMillis(p_stats["duration"]["last_duration_ms"] or "0").."</td>")
+	 print("</tr>\n")
+      end
+   end
+
+print [[
+   </table>
+]]
+
 
 elseif(page == "snmp_bind") then
    if ((not hasSnmpDevices(ifstats.id)) or (not is_packet_interface)) then

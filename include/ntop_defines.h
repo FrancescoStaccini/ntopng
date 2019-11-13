@@ -56,7 +56,6 @@
 #define IPPROTO_ICMPV6          58 /* ICMPv6 */
 #endif
 
-
 /* should be defined in linux/if_ether.h */
 #ifndef ETH_P_ERSPAN2
 #define ETH_P_ERSPAN2           0x22EB  /* ERSPAN version 2 (type III) */
@@ -159,7 +158,7 @@
 #endif
 
 #define MAX_INTERFACE_NAME_LEN    512
-
+#define NUM_HOSTS_RESOLVED_BITS   2 << 19 /* ~1 million */
 #define HOST_FAMILY_ID            ((u_int16_t)-1)
 #define FLOW_PURGE_FREQUENCY      2 /* sec */
 #define HOST_PURGE_FREQUENCY      2 /* sec */
@@ -206,10 +205,6 @@
 #define TRAFFIC_FILTERING_CACHE_DURATION  43200 /* 12 h */
 #define DNS_CACHE_DURATION                 3600  /*  1 h */
 #define LOCAL_HOSTS_CACHE_DURATION         3600  /*  1 h */
-#define CONST_ALERT_PROBING_TIME            120  /* 2 mins */
-#define CONST_TCP_CHECK_ISSUES_THRESHOLD      5  /* min 5 retr/ooo/lost packets */
-#define CONST_TCP_CHECK_ISSUES_RATIO         10  /* 1/10 */
-#define CONST_TCP_CHECK_SEVERE_ISSUES_RATIO   3  /* 1/3 */
 #define HOST_LABEL_NAMES        "ntopng.host_labels"
 #define IFACE_DHCP_RANGE_KEY    "ntopng.prefs.ifid_%u.dhcp_ranges"
 #define HOST_SERIALIZED_KEY     "ntopng.serialized_hosts.ifid_%u__%s@%d"
@@ -464,20 +459,6 @@
 #define CONST_DEFAULT_MAX_UI_STRLEN  24
 #define CONST_DEFAULT_IS_AUTOLOGOUT_ENABLED               1
 #define CONST_DEFAULT_IS_IDLE_LOCAL_HOSTS_CACHE_ENABLED   1
-#define CONST_DEFAULT_ALERT_PROBING_ENABLED               0
-#define CONST_DEFAULT_ALERT_SSL_ENABLED                   0
-#define CONST_DEFAULT_ALERT_DNS_ENABLED                   0
-#define CONST_DEFAULT_ALERT_MINING_ENABLED                1
-#define CONST_DEFAULT_ALERT_REMOTE_TO_REMOTE_ENABLED      0
-#define CONST_DEFAULT_ALERT_DROPPED_FLOWS_ENABLED         0
-#define CONST_DEFAULT_ALERT_DEVICE_PROTOCOLS_ENABLED      0
-#define CONST_DEFAULT_ALERT_DANGEROUS_PROTOCOLS_ENABLED   1
-#define CONST_DEFAULT_ALERT_ELEPHANT_FLOWS_ENABLED        0
-#define CONST_DEFAULT_ALERT_LONGLIVED_FLOWS_ENABLED       1
-#define CONST_DEFAULT_ALERT_DATA_EXFILTRATION_ENABLED     1
-#define CONST_DEFAULT_ALERT_SYSLOG_ENABLED                0
-#define CONST_DEFAULT_MALWARE_ALERTS_ENABLED              1
-#define CONST_DEFAULT_EXTERNAL_ALERTS_ENABLED             1
 #define CONST_DEFAULT_PACKETS_DROP_PERCENTAGE_ALERT       5
 #define CONST_DEFAULT_IS_ACTIVE_LOCAL_HOSTS_CACHE_ENABLED 0
 #define CONST_DEFAULT_ACTIVE_LOCAL_HOSTS_CACHE_INTERVAL   3600 /* Every hour by default */
@@ -520,7 +501,8 @@
 #define CONST_INFLUXDB_FILE_QUEUE          "ntopng.influx_file_queue"
 #define CONST_INFLUXDB_FLUSH_TIME          10 /* sec */
 #define CONST_INFLUXDB_MAX_DUMP_SIZE       4194304 /* 4 MB */
-#define CONST_ALERT_STORE_QUEUE            "ntopng.alert_store_queue"
+#define CONST_ALERT_STORE_QUEUE            "ntopng.push_alerts_queue"
+#define CONST_FLOW_ALERT_EVENT_QUEUE       "ntopng.cache.ifid_%d.flow_alerts_events_queue"
 #define CONST_REMOTE_TO_REMOTE_MAX_QUEUE   32
 #define CONST_SQL_QUEUE                    "ntopng.sql_queue"
 #define CONST_SQL_BATCH_SIZE               32
@@ -532,7 +514,6 @@
 #define CONST_PREFS_ENABLE_ACCESS_LOG      NTOPNG_PREFS_PREFIX".enable_access_log"
 #define CONST_PREFS_ENABLE_SQL_LOG         NTOPNG_PREFS_PREFIX".enable_sql_log"
 #define CONST_TOP_TALKERS_ENABLED          NTOPNG_PREFS_PREFIX".host_top_sites_creation"
-#define CONST_SUPPRESSED_ALERT_PREFS       NTOPNG_PREFS_PREFIX".alerts.ifid_%d"
 #define CONST_MIRRORED_TRAFFIC_PREFS       NTOPNG_PREFS_PREFIX".ifid_%d.is_traffic_mirrored"
 #define CONST_SHOW_DYN_IFACE_TRAFFIC_PREFS NTOPNG_PREFS_PREFIX".ifid_%d.show_dynamic_interface_traffic"
 #define CONST_DISABLED_FLOW_DUMP_PREFS     NTOPNG_PREFS_PREFIX".ifid_%d.is_flow_dump_disabled"
@@ -553,7 +534,6 @@
 #define CONST_IFACE_HIDE_FROM_TOP_PREFS     NTOPNG_PREFS_PREFIX".iface_%d.hide_from_top"
 #define CONST_IFACE_COMPANIONS_SET          NTOPNG_PREFS_PREFIX".companion_interface.ifid_%d.companion_of"
 #define CONST_IFACE_DYN_IFACE_MODE_PREFS    NTOPNG_PREFS_PREFIX".dynamic_sub_interfaces.ifid_%d.mode"
-#define CONST_HOST_REFRESH_DISABLED_FLOW_ALERT_TYPES NTOPNG_PREFS_PREFIX".alerts.ifid_%d.disabled_status.host_%s"
 #define CONST_REMOTE_HOST_IDLE_PREFS        NTOPNG_PREFS_PREFIX".non_local_host_max_idle"
 #define CONST_FLOW_MAX_IDLE_PREFS           NTOPNG_PREFS_PREFIX".flow_max_idle"
 #define CONST_INTF_RRD_RAW_DAYS             NTOPNG_PREFS_PREFIX".intf_rrd_raw_days"
@@ -607,20 +587,6 @@
 #define CONST_RUNTIME_PREFS_HOST_NDPI_RRD_CREATION     NTOPNG_PREFS_PREFIX".host_ndpi_rrd_creation" /* 0 / 1 */
 #define CONST_RUNTIME_PREFS_HOST_CATE_RRD_CREATION     NTOPNG_PREFS_PREFIX".host_categories_rrd_creation" /* 0 / 1 */
 #define CONST_RUNTIME_PREFS_THPT_CONTENT               NTOPNG_PREFS_PREFIX".thpt_content"     /* bps / pps */
-#define CONST_RUNTIME_PREFS_ALERT_SYSLOG               NTOPNG_PREFS_PREFIX".alerts_syslog"    /* 0 / 1 */
-#define CONST_RUNTIME_PREFS_MALWARE_ALERTS             NTOPNG_PREFS_PREFIX".host_blacklist"   /* 0 / 1 */
-#define CONST_RUNTIME_PREFS_EXTERNAL_ALERTS            NTOPNG_PREFS_PREFIX".external_alerts"  /* 0 / 1 */
-#define CONST_RUNTIME_PREFS_ALERT_PROBING              NTOPNG_PREFS_PREFIX".probing_alerts"   /* 0 / 1 */
-#define CONST_RUNTIME_PREFS_ALERT_SSL                  NTOPNG_PREFS_PREFIX".ssl_alerts"       /* 0 / 1 */
-#define CONST_RUNTIME_PREFS_ALERT_DNS                  NTOPNG_PREFS_PREFIX".dns_alerts"       /* 0 / 1 */
-#define CONST_RUNTIME_PREFS_ALERT_MINING               NTOPNG_PREFS_PREFIX".mining_alerts"    /* 0 / 1 */
-#define CONST_RUNTIME_PREFS_ALERT_REMOTE_TO_REMOTE     NTOPNG_PREFS_PREFIX".remote_to_remote_alerts"
-#define CONST_RUNTIME_PREFS_ALERT_DROPPED_FLOWS        NTOPNG_PREFS_PREFIX".dropped_flows_alerts"
-#define CONST_RUNTIME_PREFS_ALERT_DEVICE_PROTOCOLS     NTOPNG_PREFS_PREFIX".device_protocols_alerts"
-#define CONST_RUNTIME_PREFS_ALERT_DANGEROUS_PROTOCOLS  NTOPNG_PREFS_PREFIX".potentially_dangerous_protocols_alerts"
-#define CONST_RUNTIME_PREFS_ALERT_ELEPHANT_FLOWS       NTOPNG_PREFS_PREFIX".elephant_flows_alerts"
-#define CONST_RUNTIME_PREFS_ALERT_LONGLIVED_FLOWS      NTOPNG_PREFS_PREFIX".longlived_flows_alerts"
-#define CONST_RUNTIME_PREFS_ALERT_DATA_EXFILTRATION    NTOPNG_PREFS_PREFIX".data_exfiltration_alerts"
 #define CONST_RUNTIME_PREFS_HOSTS_ALERTS_CONFIG        NTOPNG_PREFS_PREFIX".alerts_global.min.local_hosts"
 #define CONST_PREFS_ENABLE_DEVICE_PROTOCOL_POLICIES    NTOPNG_PREFS_PREFIX".device_protocols_policing"
 #define CONST_HOST_SYN_ATTACKER_ALERT_THRESHOLD_KEY    "syn_attacker_threshold"
@@ -651,8 +617,7 @@
 #define CONST_RUNTIME_PREFS_HOSTMASK  NTOPNG_PREFS_PREFIX".host_mask"
 #define CONST_RUNTIME_PREFS_AUTO_ASSIGNED_POOL_ID      NTOPNG_PREFS_PREFIX".auto_assigned_pool_id"
 
-#define CONST_MAX_ACCEPTABLE_ICMP_V4_PAYLOAD_LENGTH 128
-#define CONST_MAX_ACCEPTABLE_ICMP_V6_PAYLOAD_LENGTH 256
+
 #define CONST_MAX_ALERT_MSG_QUEUE_LEN 8192
 #define CONST_MAX_ES_MSG_QUEUE_LEN    8192
 #define CONST_MAX_MYSQL_QUEUE_LEN     8192
@@ -699,17 +664,11 @@
 #define CONST_DEFAULT_IS_AGGR_FLOWS_EXPORT_LIMIT_ENABLED false /* exports all the aggregated flows by default */
 #define CONST_DEFAULT_MAX_NUM_PACKETS_PER_TINY_FLOW 3
 #define CONST_DEFAULT_MAX_NUM_BYTES_PER_TINY_FLOW   64 /* Empty TCP */
-#define CONST_DEFAULT_ELEPHANT_FLOW_LOCAL_TO_REMOTE_BYTES (1024*1024*1024) /* 1 GB */
-#define CONST_DEFAULT_ELEPHANT_FLOW_REMOTE_TO_LOCAL_BYTES (1024*1024*1024) /* 1 GB */
-#define CONST_DEFAULT_LONGLIVED_FLOW_DURATION (12*60*60) /* 12h */
 #define CONST_IS_AGGR_FLOWS_EXPORT_LIMIT_ENABLED   NTOPNG_PREFS_PREFIX".aggregated_flows_export_limit_enabled"
 #define CONST_MAX_NUM_AGGR_FLOWS_PER_EXPORT        NTOPNG_PREFS_PREFIX".max_num_aggregated_flows_per_export"
 #define CONST_IS_TINY_FLOW_EXPORT_ENABLED          NTOPNG_PREFS_PREFIX".tiny_flows_export_enabled"
 #define CONST_MAX_NUM_PACKETS_PER_TINY_FLOW        NTOPNG_PREFS_PREFIX".max_num_packets_per_tiny_flow"
 #define CONST_MAX_NUM_BYTES_PER_TINY_FLOW          NTOPNG_PREFS_PREFIX".max_num_bytes_per_tiny_flow"
-#define CONST_ELEPHANT_FLOW_LOCAL_TO_REMOTE_BYTES  NTOPNG_PREFS_PREFIX".elephant_flow_local_to_remote_bytes"
-#define CONST_ELEPHANT_FLOW_REMOTE_TO_LOCAL_BYTES  NTOPNG_PREFS_PREFIX".elephant_flow_remote_to_local_bytes"
-#define CONST_LONGLIVED_FLOW_DURATION              NTOPNG_PREFS_PREFIX".longlived_flow_duration"
 
 /* Exponentially Weighted Moving Average alpha config. */
 #define CONST_EWMA_ALPHA_PERCENT            NTOPNG_PREFS_PREFIX".ewma_alpha_percent"
@@ -880,18 +839,20 @@
 #define CONST_MAX_NUM_THREADED_ACTIVITIES 64
 #define STARTUP_SCRIPT_PATH        "startup.lua"
 #define BOOT_SCRIPT_PATH           "boot.lua" /* Executed as root before networking is setup */
-#define SHUTDOWN_SCRIPT_PATH       "shutdown.lua"
-#define HOUSEKEEPING_SCRIPT_PATH   "housekeeping.lua"
-#define DISCOVER_SCRIPT_PATH       "discover.lua"
-#define TIMESERIES_SCRIPT_PATH     "timeseries.lua"
-#define UPGRADE_SCRIPT_PATH        "upgrade.lua"
-#define PINGER_SCRIPT_PATH         "pinger.lua"
-#define SECOND_SCRIPT_PATH         "second.lua"
-#define MINUTE_SCRIPT_PATH         "minute.lua"
-#define THIRTY_SECONDS_SCRIPT_PATH "30sec.lua"
-#define FIVE_MINUTES_SCRIPT_PATH   "5min.lua"
-#define HOURLY_SCRIPT_PATH         "hourly.lua"
-#define DAILY_SCRIPT_PATH          "daily.lua"
+#define SHUTDOWN_SCRIPT_PATH         "shutdown.lua"
+#define HOUSEKEEPING_SCRIPT_PATH     "housekeeping.lua"
+#define DISCOVER_SCRIPT_PATH         "discover.lua"
+#define TIMESERIES_SCRIPT_PATH       "timeseries.lua"
+#define UPGRADE_SCRIPT_PATH          "upgrade.lua"
+#define PINGER_SCRIPT_PATH           "pinger.lua"
+#define SECOND_SCRIPT_PATH           "second.lua"
+#define MINUTE_SCRIPT_PATH           "minute.lua"
+#define HT_STATE_UPDATE_SCRIPT_PATH  "ht_state_update.lua"
+#define STATS_UPDATE_SCRIPT_PATH     "stats_update.lua"
+#define THIRTY_SECONDS_SCRIPT_PATH   "30sec.lua"
+#define FIVE_MINUTES_SCRIPT_PATH     "5min.lua"
+#define HOURLY_SCRIPT_PATH           "hourly.lua"
+#define DAILY_SCRIPT_PATH            "daily.lua"
 
 #define SYSLOG_SCRIPT_PATH         "callbacks/syslog.lua"
 #define SYSLOG_SCRIPTS_PATH        "callbacks/syslog"
@@ -944,6 +905,7 @@
 /* Elastic Search */
 #define NTOP_ES_TEMPLATE              "ntopng_template_elk.json"
 #define NTOP_ES6_TEMPLATE             "ntopng_template_elk6.json"
+#define NTOP_ES7_TEMPLATE             "ntopng_template_elk7.json"
 #define ES_MAX_QUEUE_LEN              32768
 #define ES_BULK_BUFFER_SIZE           1*1024*1024
 #define ES_BULK_MAX_DELAY             5
@@ -975,6 +937,8 @@
 #define QUEUE_ITEMS_MASK        (QUEUE_ITEMS - 1)
 #define QUEUE_WATERMARK         8 /* pow of 2 */
 #define QUEUE_WATERMARK_MASK    (QUEUE_WATERMARK - 1)
+
+#define BITMAP_NUM_BITS               64
 
 #define SSL_HANDSHAKE_PACKET          0x16
 #define SSL_PAYLOAD_PACKET            0x17
@@ -1031,7 +995,6 @@ extern struct ntopngLuaContext* getUserdata(struct lua_State *vm);
 #define CONST_MAX_NUM_HOST_USES    8
 
 #define MAX_CHECKPOINT_COMPRESSION_BUFFER_SIZE 1024
-#define MAX_VALID_DNS_QUERY_LEN     96
 
 /* Keep in sync with nProbe */
 #define MAX_ZMQ_FLOW_BUF             4096
@@ -1053,7 +1016,6 @@ extern struct ntopngLuaContext* getUserdata(struct lua_State *vm);
 #define MAX_THREAD_POOL_SIZE         5
 #endif
 
-#define MIN_TIME_SPAWN_THREAD_POOL        10 /* sec */
 #define DONT_NOT_EXPIRE_BEFORE_SEC        15 /* sec */
 #define MAX_NDPI_IDLE_TIME_BEFORE_GUESS   5 /* sec */
 #define MAX_NUM_PCAP_CAPTURES             4

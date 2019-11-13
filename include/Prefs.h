@@ -63,26 +63,16 @@ class Prefs {
   u_int32_t intf_rrd_raw_days, intf_rrd_1min_days, intf_rrd_1h_days, intf_rrd_1d_days;
   u_int32_t other_rrd_raw_days, other_rrd_1min_days, other_rrd_1h_days, other_rrd_1d_days;
   u_int32_t housekeeping_frequency;
-  u_int32_t longlived_flow_duration;
   bool disable_alerts, enable_top_talkers, enable_idle_local_hosts_cache,
     enable_active_local_hosts_cache;
-  bool enable_flow_device_port_rrd_creation, enable_probing_alerts,
-    enable_ssl_alerts, enable_ip_reassignment_alerts;
+  bool enable_flow_device_port_rrd_creation;
   bool enable_tiny_flows_export, enable_aggregated_flows_export_limit;
-  bool enable_dns_alerts, enable_remote_to_remote_alerts;
-  bool enable_mining_alerts;
-  bool enable_dropped_flows_alerts, enable_device_protocols_alerts;
-  bool enable_potentially_dangerous_protocols_alerts;
-  bool enable_syslog_alerts;
-  bool enabled_malware_alerts, enabled_external_alerts;
   bool enable_captive_portal, enable_informative_captive_portal, mac_based_captive_portal;
+  bool enable_ip_reassignment_alerts;
   bool override_dst_with_post_nat_dst, override_src_with_post_nat_src;
   bool use_ports_to_determine_src_and_dst;
   bool routing_mode_enabled, global_dns_forging_enabled;
   bool device_protocol_policies_enabled, enable_vlan_trunk_bridge;
-  bool enable_elephant_flows_alerts;
-  bool enable_longlived_flows_alerts;
-  bool enable_exfiltration_alerts;
   bool enable_arp_matrix_generation;
   int32_t max_num_alerts_per_entity, max_num_flow_alerts;
   u_int32_t safe_search_dns_ip, global_primary_dns_ip, global_secondary_dns_ip;
@@ -90,7 +80,6 @@ class Prefs {
   u_int32_t max_num_aggregated_flows_per_export;
   u_int32_t max_extracted_pcap_bytes;
   u_int32_t max_ui_strlen;
-  u_int64_t elephant_flow_remote_to_local_bytes, elephant_flow_local_to_remote_bytes;
   u_int8_t default_l7policy;
   u_int8_t num_ts_slots, ts_num_steps;
   HostMask hostMask;
@@ -120,7 +109,10 @@ class Prefs {
   char *redis_host;
   char *redis_password;
   char *pid_path;
-  char *cpu_affinity;
+  char *cpu_affinity, *other_cpu_affinity;
+#ifdef HAVE_LIBCAP
+  cpu_set_t other_cpu_affinity_mask;
+#endif
   u_int8_t redis_db_id;
   int redis_port;
   int dns_mode;
@@ -150,8 +142,6 @@ class Prefs {
     }
   };
   bool getDefaultBoolPrefsValue(const char *pref_key, const bool default_value);
-  bool in_longlived_whitelist(const Flow * f) const;
-  bool in_elephant_whitelist(const Flow * f)  const;
 
  public:
   Prefs(Ntop *_ntop);
@@ -230,6 +220,10 @@ class Prefs {
   inline bool  do_ignore_macs()                         { return(ignore_macs);                      };
   inline bool  do_simulate_vlans()                      { return(simulate_vlans);                   };
   inline char* get_cpu_affinity()                       { return(cpu_affinity);            };
+  inline char* get_other_cpu_affinity()                 { return(other_cpu_affinity);            };
+#ifdef HAVE_LIBCAP
+  inline cpu_set_t* get_other_cpu_affinity_mask()       { return(&other_cpu_affinity_mask); };
+#endif
   inline u_int get_http_port()                          { return(http_port);               };
   inline u_int get_https_port()                         { return(https_port);              };
   inline bool  is_client_x509_auth_enabled()            { return(enable_client_x509_auth); };
@@ -316,21 +310,7 @@ class Prefs {
   inline bool is_tiny_flows_export_enabled()             { return(enable_tiny_flows_export);            };
   inline bool is_aggregated_flows_export_limit_enabled() { return(enable_aggregated_flows_export_limit);};
   inline bool is_flow_device_port_rrd_creation_enabled() { return(enable_flow_device_port_rrd_creation);};
-  inline bool are_ip_reassignment_alerts_enabled()       { return(enable_ip_reassignment_alerts);       };
-  inline bool are_probing_alerts_enabled()               { return(enable_probing_alerts);               };
-  inline bool are_ssl_alerts_enabled()                   { return(enable_ssl_alerts);                   };
-  inline bool are_dns_alerts_enabled()                   { return(enable_dns_alerts);                   };
-  inline bool are_mining_alerts_enabled()                { return(enable_mining_alerts);                };
-  inline bool are_remote_to_remote_alerts_enabled()      { return(enable_remote_to_remote_alerts);      };
-  inline bool are_dropped_flows_alerts_enabled()         { return(enable_dropped_flows_alerts);         };
-  inline bool are_device_protocols_alerts_enabled()      { return(enable_device_protocols_alerts);      };
-  inline bool are_potentially_dangerous_protocols_alerts_enabled() { return(enable_potentially_dangerous_protocols_alerts); };
-  inline bool are_alerts_syslog_enabled()                { return(enable_syslog_alerts);                };
-  inline bool are_malware_alerts_enabled()               { return(enabled_malware_alerts);              };
-  inline bool are_external_alerts_enabled()              { return(enabled_external_alerts);              };
-  inline bool are_elephant_flows_alerts_enabled()        { return(enable_elephant_flows_alerts);        };
-  inline bool are_longlived_flows_alerts_enabled()       { return(enable_longlived_flows_alerts);       };
-  inline bool are_exfiltration_alerts_enabled()          { return(enable_exfiltration_alerts);          };
+  inline bool are_ip_reassignment_alerts_enabled()       { return(enable_ip_reassignment_alerts); };
   inline bool is_arp_matrix_generation_enabled()         { return(enable_arp_matrix_generation);        };
 
   inline bool do_override_dst_with_post_nat_dst()     const { return(override_dst_with_post_nat_dst);     };
@@ -352,12 +332,6 @@ class Prefs {
   inline u_int32_t get_max_num_packets_per_tiny_flow()       const { return(max_num_packets_per_tiny_flow);       };
   inline u_int32_t get_max_num_bytes_per_tiny_flow()         const { return(max_num_bytes_per_tiny_flow);         };
   inline u_int32_t get_max_num_aggregated_flows_per_export() const { return(max_num_aggregated_flows_per_export); };
-  inline u_int64_t get_elephant_flow_remote_to_local_bytes() const { return(elephant_flow_remote_to_local_bytes); };
-  inline u_int64_t get_elephant_flow_local_to_remote_bytes() const { return(elephant_flow_local_to_remote_bytes); };
-  inline u_int32_t get_longlived_flow_duration()             const { return(longlived_flow_duration);             };
-
-  bool is_longlived_flow(const Flow *f) const;
-  bool is_elephant_flow(const Flow *f)   const;
 
   inline u_int64_t get_max_extracted_pcap_bytes() { return max_extracted_pcap_bytes; };
 

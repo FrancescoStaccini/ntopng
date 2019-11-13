@@ -4,14 +4,19 @@
 -- This file contains the alert constats
 
 local alert_consts = {}
-local locales_utils = require "locales_utils"
 local format_utils  = require "format_utils"
 local os_utils = require("os_utils")
+require("ntop_utils")
 
 if(ntop.isPro()) then
   package.path = dirs.installdir .. "/pro/scripts/lua/modules/?.lua;" .. package.path
   -- NOTE: import snmp_utils below to avoid import cycles
 end
+
+-- NOTE: sqlite can handle about 10-50 alerts/sec
+alert_consts.MAX_NUM_QUEUED_ALERTS_PER_INTERFACE = 512
+alert_consts.MAX_NUM_QUEUED_ALERTS_NOTIFICATIONS = 1024
+alert_consts.MAX_NUM_QUEUED_ALERTS_PER_MODULE = 1024 -- should match ALERTS_MANAGER_MAX_ENTITY_ALERTS
 
 -- Alerts (see ntop_typedefs.h)
 -- each table entry is an array as:
@@ -46,9 +51,7 @@ alert_consts.custom_alert_5 = 63
 
 -- ##############################################
 
--- NOTE: the following formatting functions need to be global since they
--- are used inside the alert_defs scripts
-function formatAlertEntity(ifid, entity_type, entity_value)
+function alert_consts.formatAlertEntity(ifid, entity_type, entity_value)
    require "flow_utils"
    local value
    local epoch_begin, epoch_end = getAlertTimeBounds({alert_tstamp = os.time()})
@@ -66,7 +69,7 @@ function formatAlertEntity(ifid, entity_type, entity_value)
    elseif entity_type == "interface" then
       value = "<a href='"..ntop.getHttpPrefix().."/lua/if_stats.lua?ifid="..ifid..
         "&page=historical&epoch_begin="..epoch_begin .."&epoch_end=".. epoch_end ..
-        "'>"..getInterfaceName(ifid).."</a>"
+        "'>"..getHumanReadableInterfaceName(getInterfaceName(ifid)).."</a>"
    elseif entity_type == "network" then
       value = getLocalNetworkAlias(hostkey2hostinfo(entity_value)["host"])
 
@@ -130,18 +133,48 @@ end
 
 -- ##############################################
 
+function alert_consts.alertEntityRaw(entity_id)
+  entity_id = tonumber(entity_id)
+
+  for key, entity_info in pairs(alert_consts.alert_entities) do
+    if(entity_info.entity_id == entity_id) then
+      return(key)
+    end
+  end
+end
+
+function alert_consts.alertEntity(v)
+   return(alert_consts.alert_entities[v].entity_id)
+end
+
+function alert_consts.alertEntityLabel(v, nothml)
+  local entity_id = alert_consts.alertEntityRaw(v)
+
+  if(entity_id) then
+    return(alert_consts.alert_entities[entity_id].label)
+  end
+end
+
+-- ##############################################
+
 -- NOTE: flow alerts are formatted based on their status. See flow_consts.status_types.
 alert_consts.alert_types = {}
 local alerts_by_id = {}
 
 local function loadAlertsDefs()
+   if(false) then
+      if(string.find(debug.traceback(), "second.lua")) then
+         traceError(TRACE_WARNING, TRACE_CONSOLE, "second.lua is loading alert_consts.lua. This will slow it down!")
+      end
+   end
+
    local dirs = ntop.getDirs()
    local defs_dir = alert_consts.getDefinititionsDir()
    package.path = defs_dir .. "/?.lua;" .. package.path
    local required_fields = {"alert_id", "i18n_title", "icon"}
 
    for fname in pairs(ntop.readdir(defs_dir)) do
-      if ends(fname, ".lua") then
+      if string.ends(fname, ".lua") then
          local mod_fname = string.sub(fname, 1, string.len(fname) - 4)
          local def_script = require(mod_fname)
 
@@ -184,7 +217,6 @@ end
 -- ##############################################
 
 -- See flow_consts.status_types in flow_consts for flow alerts
--- See Utils::flowStatus2AlertType to determine the alert_type for flow alerts
 
 -- Keep in sync with ntop_typedefs.h:AlertEntity
 alert_consts.alert_entities = {

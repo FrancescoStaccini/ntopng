@@ -39,19 +39,13 @@ Prefs::Prefs(Ntop *_ntop) {
   data_dir = strdup(CONST_DEFAULT_DATA_DIR);
   enable_access_log = false, enable_sql_log = false, flow_aggregation_enabled = false;
   enable_flow_device_port_rrd_creation = false;
-  enable_ip_reassignment_alerts = false, reproduce_at_original_speed = false;
+  reproduce_at_original_speed = false;
+  enable_ip_reassignment_alerts = false;
   enable_top_talkers = false, enable_idle_local_hosts_cache = false;
   enable_active_local_hosts_cache = false,
     enable_tiny_flows_export = true, enable_aggregated_flows_export_limit = false,
-    enable_probing_alerts = true, enable_ssl_alerts = true, enable_dns_alerts = true,
-    enable_mining_alerts = CONST_DEFAULT_ALERT_MINING_ENABLED,
-    enable_remote_to_remote_alerts = true,
-    enable_dropped_flows_alerts = true, enable_device_protocols_alerts = false,
-    enable_potentially_dangerous_protocols_alerts = false,
-    enable_syslog_alerts = false, enable_captive_portal = false, mac_based_captive_portal = false,
-    enabled_malware_alerts = true, enabled_external_alerts = true,
-    enable_elephant_flows_alerts = false, enable_longlived_flows_alerts = true,
-    enable_arp_matrix_generation = false, enable_exfiltration_alerts = true,
+    enable_captive_portal = false, mac_based_captive_portal = false,
+    enable_arp_matrix_generation = false,
     enable_informative_captive_portal = false,
     override_dst_with_post_nat_dst = false, override_src_with_post_nat_src = false,
     use_ports_to_determine_src_and_dst = false;
@@ -90,7 +84,10 @@ Prefs::Prefs(Ntop *_ntop) {
   https_binding_address2 = NULL;
   enable_client_x509_auth = false;
   lan_interface = NULL;
-  cpu_affinity = NULL;
+  cpu_affinity = other_cpu_affinity = NULL;
+#ifdef HAVE_LIBCAP
+  CPU_ZERO(&other_cpu_affinity_mask);
+#endif
   redis_host = strdup("127.0.0.1");
   redis_password = NULL;
   redis_port = 6379;
@@ -170,6 +167,7 @@ Prefs::~Prefs() {
   if(pid_path)         free(pid_path);
   if(packet_filter)    free(packet_filter);
   if(cpu_affinity)     free(cpu_affinity);
+  if(other_cpu_affinity) free(other_cpu_affinity);
   if(es_type)          free(es_type);
   if(es_index)         free(es_index);
   if(es_url)           free(es_url);
@@ -202,7 +200,7 @@ Prefs::~Prefs() {
 void nDPIusage() {
   printf("\nnDPI detected protocols:\n");
 
-  struct ndpi_detection_module_struct *ndpi_struct = ndpi_init_detection_module();
+  struct ndpi_detection_module_struct *ndpi_struct = ndpi_init_detection_module(ndpi_no_prefs);
   ndpi_dump_protocols(ndpi_struct);
 
   exit(0);
@@ -290,9 +288,11 @@ void usage() {
 #ifdef __linux__
 	 "                                    | -r /var/run/redis/redis.sock\n"
 	 "                                    | -r /var/run/redis/redis.sock@2\n"
-	 "[--core-affinity|-g] <cpu core ids> | Bind the capture/processing threads to\n"
+	 "[--core-affinity|-g] <ids>          | Bind the capture/processing threads to\n"
 	 "                                    | specific CPU cores (specified as a comma-\n"
-	 "                                    | separated list)\n"
+	 "                                    | separated list of core id)\n"
+	 "[--other-core-affinity|-y] <ids>    | Bind service threads to specific CPU cores\n"
+	 "                                    | (specified as a comma-separated list of core id)\n"
 #endif
 	 "[--user|-U] <sys user>              | Run ntopng with the specified user\n"
 	 "                                    | instead of %s\n"
@@ -559,29 +559,9 @@ void Prefs::reloadPrefsFromRedis() {
     max_num_flow_alerts = getDefaultPrefsValue(CONST_MAX_NUM_FLOW_ALERTS, ALERTS_MANAGER_MAX_FLOW_ALERTS),
 
     enable_flow_device_port_rrd_creation = getDefaultBoolPrefsValue(CONST_RUNTIME_PREFS_FLOW_DEVICE_PORT_RRD_CREATION, false),
-    enable_ip_reassignment_alerts = getDefaultBoolPrefsValue(CONST_RUNTIME_PREFS_ALERT_IP_REASSIGNMENT, false),
     disable_alerts        = getDefaultBoolPrefsValue(CONST_ALERT_DISABLED_PREFS, false),
-    enable_probing_alerts = getDefaultBoolPrefsValue(CONST_RUNTIME_PREFS_ALERT_PROBING, CONST_DEFAULT_ALERT_PROBING_ENABLED),
-    enable_ssl_alerts     = getDefaultBoolPrefsValue(CONST_RUNTIME_PREFS_ALERT_SSL, CONST_DEFAULT_ALERT_SSL_ENABLED),
-    enable_dns_alerts     = getDefaultBoolPrefsValue(CONST_RUNTIME_PREFS_ALERT_DNS, CONST_DEFAULT_ALERT_DNS_ENABLED),
-    enable_mining_alerts  = getDefaultBoolPrefsValue(CONST_RUNTIME_PREFS_ALERT_MINING, CONST_DEFAULT_ALERT_MINING_ENABLED),
-    enable_remote_to_remote_alerts  = getDefaultBoolPrefsValue(CONST_RUNTIME_PREFS_ALERT_REMOTE_TO_REMOTE,
-							       CONST_DEFAULT_ALERT_REMOTE_TO_REMOTE_ENABLED),
-    enable_dropped_flows_alerts     = getDefaultBoolPrefsValue(CONST_RUNTIME_PREFS_ALERT_DROPPED_FLOWS,
-							       CONST_DEFAULT_ALERT_DROPPED_FLOWS_ENABLED),
-    enable_device_protocols_alerts  = getDefaultBoolPrefsValue(CONST_RUNTIME_PREFS_ALERT_DEVICE_PROTOCOLS,
-							       CONST_DEFAULT_ALERT_DEVICE_PROTOCOLS_ENABLED),
-    enable_potentially_dangerous_protocols_alerts = getDefaultBoolPrefsValue(CONST_RUNTIME_PREFS_ALERT_DANGEROUS_PROTOCOLS,
-							       CONST_DEFAULT_ALERT_DANGEROUS_PROTOCOLS_ENABLED),
-    enable_elephant_flows_alerts  = getDefaultBoolPrefsValue(CONST_RUNTIME_PREFS_ALERT_ELEPHANT_FLOWS,
-							     CONST_DEFAULT_ALERT_ELEPHANT_FLOWS_ENABLED),
-    enable_longlived_flows_alerts  = getDefaultBoolPrefsValue(CONST_RUNTIME_PREFS_ALERT_LONGLIVED_FLOWS,
-							      CONST_DEFAULT_ALERT_LONGLIVED_FLOWS_ENABLED),
-    enable_exfiltration_alerts = getDefaultBoolPrefsValue(CONST_RUNTIME_PREFS_ALERT_DATA_EXFILTRATION,
-							      CONST_DEFAULT_ALERT_DATA_EXFILTRATION_ENABLED),
-    enable_syslog_alerts  = getDefaultBoolPrefsValue(CONST_RUNTIME_PREFS_ALERT_SYSLOG, CONST_DEFAULT_ALERT_SYSLOG_ENABLED),
-    enabled_malware_alerts = getDefaultBoolPrefsValue(CONST_RUNTIME_PREFS_MALWARE_ALERTS, CONST_DEFAULT_MALWARE_ALERTS_ENABLED),
-    enabled_external_alerts = getDefaultBoolPrefsValue(CONST_RUNTIME_PREFS_EXTERNAL_ALERTS, CONST_DEFAULT_EXTERNAL_ALERTS_ENABLED),
+
+    enable_ip_reassignment_alerts = getDefaultBoolPrefsValue(CONST_RUNTIME_PREFS_ALERT_IP_REASSIGNMENT, false),
 
     enable_arp_matrix_generation = getDefaultBoolPrefsValue(CONST_DEFAULT_ARP_MATRIX_GENERATION, false),
 
@@ -595,12 +575,6 @@ void Prefs::reloadPrefsFromRedis() {
 							 CONST_DEFAULT_MAX_NUM_BYTES_PER_TINY_FLOW),
     max_num_aggregated_flows_per_export = getDefaultPrefsValue(CONST_MAX_NUM_AGGR_FLOWS_PER_EXPORT,
 							       FLOW_AGGREGATION_MAX_AGGREGATES),
-    elephant_flow_local_to_remote_bytes = getDefaultPrefsValue(CONST_ELEPHANT_FLOW_LOCAL_TO_REMOTE_BYTES,
-							       CONST_DEFAULT_ELEPHANT_FLOW_LOCAL_TO_REMOTE_BYTES),
-    elephant_flow_remote_to_local_bytes = getDefaultPrefsValue(CONST_ELEPHANT_FLOW_REMOTE_TO_LOCAL_BYTES,
-							       CONST_DEFAULT_ELEPHANT_FLOW_REMOTE_TO_LOCAL_BYTES),
-    longlived_flow_duration = getDefaultPrefsValue(CONST_LONGLIVED_FLOW_DURATION,
-						   CONST_DEFAULT_LONGLIVED_FLOW_DURATION),
     max_extracted_pcap_bytes = getDefaultPrefsValue(CONST_MAX_EXTR_PCAP_BYTES,
                                                      CONST_DEFAULT_MAX_EXTR_PCAP_BYTES); 
 
@@ -695,26 +669,29 @@ void Prefs::loadInstanceNameDefaults() {
 static const struct option long_options[] = {
 #ifndef WIN32
   { "data-dir",                          required_argument, NULL, 'd' },
-  { "install-dir",                       required_argument, NULL, 't' },
 #endif
   { "daemon",                            no_argument,       NULL, 'e' },
   { "core-affinity",                     required_argument, NULL, 'g' },
   { "help",                              no_argument,       NULL, 'h' },
   { "interface",                         required_argument, NULL, 'i' },
+  { "traffic-filtering",                 required_argument, NULL, 'k' },
+  { "disable-login",                     required_argument, NULL, 'l' },
   { "local-networks",                    required_argument, NULL, 'm' },
 #ifndef HAVE_NEDGE
   { "dns-mode",                          required_argument, NULL, 'n' },
 #endif
-  { "traffic-filtering",                 required_argument, NULL, 'k' },
-  { "disable-login",                     required_argument, NULL, 'l' },
   { "ndpi-protocols",                    required_argument, NULL, 'p' },
   { "disable-autologout",                no_argument,       NULL, 'q' },
   { "redis",                             required_argument, NULL, 'r' },
   { "dont-change-user",                  no_argument,       NULL, 's' },
+#ifndef WIN32
+  { "install-dir",                       required_argument, NULL, 't' },
+#endif
   { "no-promisc",                        no_argument,       NULL, 'u' },
   { "verbose",                           required_argument, NULL, 'v' },
-  { "max-num-hosts",                     required_argument, NULL, 'x' },
   { "http-port",                         required_argument, NULL, 'w' },
+  { "max-num-hosts",                     required_argument, NULL, 'x' },
+  { "other-core-affinity",               required_argument, NULL, 'y' },
   { "packet-filter",                     required_argument, NULL, 'B' },
   { "dump-hosts",                        required_argument, NULL, 'D' },
   { "dump-flows",                        required_argument, NULL, 'F' },
@@ -722,14 +699,14 @@ static const struct option long_options[] = {
   { "pid",                               required_argument, NULL, 'G' },
 #endif
   { "export-flows",                      required_argument, NULL, 'I' },
+  { "instance-name",                     required_argument, NULL, 'N' },
   { "capture-direction",                 required_argument, NULL, 'Q' },
   { "sticky-hosts",                      required_argument, NULL, 'S' },
   { "user",                              required_argument, NULL, 'U' },
   { "version",                           no_argument,       NULL, 'V' },
-  { "max-num-flows",                     required_argument, NULL, 'X' },
   { "https-port",                        required_argument, NULL, 'W' },
+  { "max-num-flows",                     required_argument, NULL, 'X' },
   { "http-prefix",                       required_argument, NULL, 'Z' },
-  { "instance-name",                     required_argument, NULL, 'N' },
   { "httpdocs-dir",                      required_argument, NULL, '1' },
   { "scripts-dir",                       required_argument, NULL, '2' },
   { "callbacks-dir",                     required_argument, NULL, '3' },
@@ -1144,8 +1121,16 @@ int Prefs::setOption(int optkey, char *optarg) {
 				   optarg);
     }
     break;
+
   case 'x':
     max_num_hosts = max_val(atoi(optarg), 1024);
+    break;
+
+  case 'y':
+    other_cpu_affinity = strdup(optarg);
+#ifdef HAVE_LIBCAP
+    Utils::setAffinityMask(optarg, &other_cpu_affinity_mask);
+#endif
     break;
 
   case 'v':
@@ -1475,7 +1460,7 @@ int Prefs::loadFromCLI(int argc, char *argv[]) {
 #else
 	  argc, argv,
 #endif
-			 "k:eg:hi:w:r:sg:m:n:p:qd:t:x:1:2:3:4:5:l:uv:A:B:CD:E:F:N:G:I:O:Q:S:TU:X:W:VZ:",
+			 "k:eg:hi:w:r:sg:m:n:p:qd:t:x:y:1:2:3:4:5:l:uv:A:B:CD:E:F:N:G:I:O:Q:S:TU:X:W:VZ:",
 			 long_options, NULL)) != '?') {
     if(c == 255) break;
     setOption(c, optarg);
@@ -1684,16 +1669,12 @@ void Prefs::lua(lua_State* vm) {
   lua_push_bool_table_entry(vm, "is_flow_device_port_rrd_creation_enabled", enable_flow_device_port_rrd_creation);
 
   lua_push_bool_table_entry(vm, "are_alerts_enabled", !disable_alerts);
-  lua_push_bool_table_entry(vm, "are_longlived_flows_alerts_enabled", enable_longlived_flows_alerts);
   lua_push_bool_table_entry(vm, "is_arp_matrix_generation_enabled", is_arp_matrix_generation_enabled());
   lua_push_bool_table_entry(vm, "is_users_login_enabled", enable_users_login);
 
   lua_push_uint64_table_entry(vm, "max_num_packets_per_tiny_flow", max_num_packets_per_tiny_flow);
   lua_push_uint64_table_entry(vm, "max_num_bytes_per_tiny_flow",   max_num_bytes_per_tiny_flow);
   lua_push_uint64_table_entry(vm, "max_num_aggregated_flows_per_export", max_num_aggregated_flows_per_export);
-  lua_push_uint64_table_entry(vm, "elephant_flow_local_to_remote_bytes", elephant_flow_local_to_remote_bytes);
-  lua_push_uint64_table_entry(vm, "elephant_flow_remote_to_local_bytes", elephant_flow_remote_to_local_bytes);
-  lua_push_uint64_table_entry(vm, "longlived_flow_duration", longlived_flow_duration);
 
   lua_push_uint64_table_entry(vm, "max_extracted_pcap_bytes", max_extracted_pcap_bytes);
 
@@ -1715,6 +1696,7 @@ void Prefs::lua(lua_State* vm) {
   lua_push_str_table_entry(vm, "ndpi_proto_file", ndpi_proto_path ? ndpi_proto_path : (char*)"");
 
   lua_push_str_table_entry(vm, "cpu_affinity", cpu_affinity ? cpu_affinity : (char*)"");
+  lua_push_str_table_entry(vm, "other_cpu_affinity", other_cpu_affinity ? other_cpu_affinity : (char*)"");
   lua_push_str_table_entry(vm, "user", change_user ? user : (char*)"");
 
   lua_push_str_table_entry(vm, "capture_direction", Utils::captureDirection2Str(captureDirection)); 
@@ -1836,35 +1818,6 @@ time_t Prefs::pro_edition_demo_ends_at() {
     0
 #endif
     ;
-}
-
-/* *************************************** */
-
-bool Prefs::in_longlived_whitelist(const Flow * f) const {
-  return f->get_protocol_category() == NDPI_PROTOCOL_CATEGORY_DATABASE;
-}
-
-/* *************************************** */
-
-bool Prefs::in_elephant_whitelist(const Flow * f) const {
-  return false;
-}
-
-/* *************************************** */
-
-bool Prefs::is_longlived_flow(const Flow * f) const {
-  bool ret = !in_longlived_whitelist(f)
-    && f->get_duration() > get_longlived_flow_duration()
-    && f->get_srv_ip_addr()->isNonEmptyUnicastAddress();
-
-  return ret;
-}
-
-/* *************************************** */
-
-bool Prefs::is_elephant_flow(const Flow * f) const {
-  /* TODO */
-  return false;
 }
 
 /* *************************************** */

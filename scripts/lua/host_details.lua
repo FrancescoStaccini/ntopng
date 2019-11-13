@@ -27,6 +27,7 @@ local template = require "template_utils"
 local mud_utils = require "mud_utils"
 local companion_interface_utils = require "companion_interface_utils"
 local flow_consts = require "flow_consts"
+local alert_consts = require "alert_consts"
 
 local info = ntop.getInfo()
 
@@ -140,7 +141,7 @@ if(host == nil) and (not only_historical) then
       if page == "alerts" then
 	 print('<script>window.location.href = "')
 	 print(ntop.getHttpPrefix())
-	 print('/lua/show_alerts.lua?entity='..alertEntity("host")..'&entity_val=')
+	 print('/lua/show_alerts.lua?entity='..alert_consts.alertEntity("host")..'&entity_val=')
 	 print(hostkey)
 	 print('";</script>')
       else
@@ -462,10 +463,12 @@ if(isAdministrator()) then
    elseif interface.isPcapDumpInterface() == false then
       print("\n<li><a href=\""..url.."&page=config\"><i class=\"fa fa-cog fa-lg\"></i></a></li>")
    end
-   if(page == "callbacks") then
-      print("\n<li class=\"active\"><a href=\"#\"><i class=\"fa fa-superpowers fa-lg\"></i></a></li>\n")
-   else
-      print("\n<li><a href=\""..url.."&page=callbacks\"><i class=\"fa fa-superpowers fa-lg\"></i></a></li>")
+   if not interface.isPcapDumpInterface() then
+      if(page == "callbacks") then
+         print("\n<li class=\"active\"><a href=\"#\"><i class=\"fa fa-superpowers fa-lg\"></i></a></li>\n")
+      else
+         print("\n<li><a href=\""..url.."&page=callbacks\"><i class=\"fa fa-superpowers fa-lg\"></i></a></li>")
+      end
    end
 end
 
@@ -517,8 +520,8 @@ if((page == "overview") or (page == nil)) then
       print("<tr><th>"..i18n("ip_address").."</th><td colspan=1>" .. host["ip"])
       if(host.childSafe == true) then print(getSafeChildIcon()) end
 
-     if(host.operatingSystem ~= 0) then
-       print(" "..discover.getOsIcon(host.operatingSystem).." ")
+     if(host.os ~= 0) then
+       print(" "..discover.getOsIcon(host.os).." ")
      end
 
       historicalProtoHostHref(getInterfaceId(ifname), host["ip"], nil, nil, nil)
@@ -925,13 +928,9 @@ print [[/lua/get_arp_data.lua', { ifid: "]] print(ifId.."") print ('", '..hostin
       <table class="table table-bordered table-striped">
 	 ]]
 
-      if(host["bytes.sent"] > 0) then
-	 print('<tr><th class="text-left">'..i18n("ports_page.client_ports")..'</th><td colspan=5><div class="pie-chart" id="clientPortsDistro"></div></td></tr>')
-      end
-      if(host["bytes.rcvd"] > 0) then
-	 print('<tr><th class="text-left">'..i18n("ports_page.server_ports")..'</th><td colspan=5><div class="pie-chart" id="serverPortsDistro"></div></td></tr>')
-      end
-      hostinfo2json(host_info)
+      print('<tr><th class="text-left">'..i18n("ports_page.client_ports")..'</th><td colspan=5><div class="pie-chart" id="clientPortsDistro"></div></td></tr>')
+      print('<tr><th class="text-left">'..i18n("ports_page.server_ports")..'</th><td colspan=5><div class="pie-chart" id="serverPortsDistro"></div></td></tr>')
+
       print [[
       </table>
 
@@ -1659,36 +1658,38 @@ if(preference ~= "") then print ('perPage: '..preference.. ",\n") end
 
 print ('sort: [ ["' .. getDefaultTableSort("flows") ..'","' .. getDefaultTableSortOrder("flows").. '"] ],\n')
 
-print [[
-	        columns: [
-           {
-        title: "Key",
+print[[
+   columns: [
+      {
+         title: "",
          field: "key",
-         hidden: true
-         },
-			     {
-			     title: "",
-				 field: "column_key",
-	 	             css: {
-			        textAlign: 'center'
-			     }
-				 },
-			     {
-                             title: "]] print(i18n("application")) print[[",
-				 field: "column_ndpi",
-				 sortable: true,
-	 	             css: {
-			        textAlign: 'center'
-			     }
-				 },
-			     {
-			     title: "]] print(i18n("protocol")) print[[",
-				 field: "column_proto_l4",
-				 sortable: true,
-	 	             css: {
-			        textAlign: 'center'
-			     }
-				 },]]
+         hidden: true,
+      }, {
+         title: "",
+         field: "hash_id",
+         hidden: true,
+      }, {
+         title: "",
+         field: "column_key",
+         css: {
+            textAlign: 'center'
+         }
+      }, {
+         title: "]] print(i18n("application")) print[[",
+         field: "column_ndpi",
+         sortable: true,
+         css: {
+            textAlign: 'center'
+         }
+      }, {
+         title: "]] print(i18n("protocol")) print[[",
+         field: "column_proto_l4",
+         sortable: true,
+         css: {
+            textAlign: 'center'
+         }
+      },
+]]
 
 if(show_vlan) then
    print('{ title: "'..i18n("vlan")..'",\n')
@@ -1703,59 +1704,59 @@ if(show_vlan) then
 ]]
 end
 print [[
-			     {
-			     title: "]] print(i18n("client")) print[[",
-				 field: "column_client",
-				 sortable: true,
-				 },
-			     {
-			     title: "]] print(i18n("server")) print[[",
-				 field: "column_server",
-				 sortable: true,
-				 },
-			     {
+                             {
+                             title: "]] print(i18n("client")) print[[",
+                                 field: "column_client",
+                                 sortable: true,
+                                 },
+                             {
+                             title: "]] print(i18n("server")) print[[",
+                                 field: "column_server",
+                                 sortable: true,
+                                 },
+                             {
                              title: "]] print(i18n("duration")) print[[",
-				 field: "column_duration",
-				 sortable: true,
-	 	             css: {
-			        textAlign: 'center'
-			       }
-			       },
-			     {
+                                 field: "column_duration",
+                                 sortable: true,
+                             css: {
+                                textAlign: 'center'
+                               }
+                               },
+                             {
                              title: "]] print(i18n("breakdown")) print[[",
-				 field: "column_breakdown",
-				 sortable: true,
-	 	             css: {
-			        textAlign: 'center'
-			       }
-			       },
-			     {
-			     title: "]] print(i18n("flows_page.actual_throughput")) print[[",
-				 field: "column_thpt",
-				 sortable: true,
-	 	             css: {
-			        textAlign: 'right'
-			     }
-				 },
-			     {
+                                 field: "column_breakdown",
+                                 sortable: true,
+                             css: {
+                                textAlign: 'center'
+                               }
+                               },
+                             {
+                             title: "]] print(i18n("flows_page.actual_throughput")) print[[",
+                                 field: "column_thpt",
+                                 sortable: true,
+                             css: {
+                                textAlign: 'right'
+                             }
+                                 },
+                             {
                              title: "]] print(i18n("flows_page.total_bytes")) print[[",
-				 field: "column_bytes",
-				 sortable: true,
-	 	             css: {
-			        textAlign: 'right'
-			     }
+                                 field: "column_bytes",
+                                 sortable: true,
+                             css: {
+                                textAlign: 'right'
+                             }
 
-				 }
-			     ,{
+                                 }
+                             ,{
                              title: "]] print(i18n("info")) print[[",
-				 field: "column_info",
-				 sortable: true,
-	 	             css: {
-			        textAlign: 'left'
-			     }
-				 }
-			     ]
-	       });
+                                 field: "column_info",
+                                 sortable: true,
+                             css: {
+                                textAlign: 'left'
+                             }
+                                 }
+                             ]
+               });
 ]]
 
 if(have_nedge) then

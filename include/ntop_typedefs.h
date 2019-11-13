@@ -56,9 +56,16 @@ typedef enum {
 /* Struct used to pass parameters when walking hosts and flows periodically to update their stats */
 class AlertCheckLuaEngine;
 typedef struct {
+  NetworkInterface *iface;
   AlertCheckLuaEngine *acle;
   struct timeval *tv;
-} update_stats_user_data_t;
+  time_t deadline;
+  bool quick_update;
+} periodic_ht_state_update_user_data_t;
+
+typedef struct {
+  struct timeval *tv;
+} periodic_stats_update_user_data_t;
 
 /* Keep in sync with alert_consts.alerts_granularities and Utils */
 typedef enum {
@@ -115,49 +122,9 @@ typedef enum {
   policy_source_schedule = 5,
 } L7PolicySource_t;
 
-/* keep in sync with alert_consts.alert_types in alert_const.lua */
-typedef enum {
-  alert_none = -1,
-  alert_syn_flood = 0,
-  alert_flow_flood,
-  alert_threshold_exceeded,
-  alert_suspicious_activity,
-  alert_connection_issues,
-  alert_flow_misbehaviour,
-  alert_remote_to_remote,
-  alert_flow_blacklisted,
-  alert_flow_blocked,
-  alert_mac_ip_association_change = 17,
-  alert_flow_web_mining = 21,
-  alert_nfq_flushed = 22,
-  alert_device_protocol_not_allowed = 24,
-  alert_user_activity = 25,
-  alert_influxdb_export_failure = 26,
-  alert_port_errors = 27,
-  alert_broadcast_domain_too_large = 34,
-  alert_external = 35,
-  misconfigured_dhcp_range = 36,
-  slow_periodic_activity = 40,
-  login_failed = 42,
-  alert_potentially_dangerous_protocol = 43,
-  alert_malicious_signature = 48,
-
-  /* Custom user alerts */
-  alert_custom_1 = 59,
-  alert_custom_2 = 60,
-  alert_custom_3 = 61,
-  alert_custom_4 = 62,
-  alert_custom_5 = 63,
-
-  /* 
-     IMPORTANT IMPORTANT IMPORTANT
-     If # status >= 64 then extend Utils.h and Lua bitmap functions to handle it
-  */
-} AlertType; /*
-	       NOTE:
-	       keep it in sync with alert_type_keys
-	       in ntopng/scripts/lua/modules/lua_utils.lua
-	     */
+/* Status are handled in Lua (alert_consts.lua) */
+typedef uint8_t AlertType;
+#define alert_none ((uint8_t)-1)
 
 typedef enum {
   alert_level_none = -1,
@@ -341,54 +308,9 @@ struct string_list {
   struct string_list *prev, *next;
 };
 
-/*
-  Remember to update
-  - Utils.cpp        Utils::flowStatus2str()
-  - flow_consts.lua  flow_consts.flow_status_types
- */
-typedef enum {
-  status_normal = 0,
-  status_slow_tcp_connection /* 1 */,
-  status_slow_application_header /* 2 */,
-  status_slow_data_exchange /* 3 */,
-  status_low_goodput /* 4 */,
-  status_suspicious_tcp_syn_probing /* 5 */,
-  status_tcp_connection_issues /* 6 - i.e. too many retransmission, ooo... or similar */,
-  status_suspicious_tcp_probing /* 7 */,
-  status_flow_when_interface_alerted /* 8 */,
-  status_tcp_connection_refused /* 9 */,
-  status_ssl_certificate_mismatch /* 10 */,
-  status_dns_invalid_query /* 11 */,
-  status_remote_to_remote /* 12 */,
-  status_blacklisted /* 13 */,
-  status_blocked /* 14 */,
-  status_web_mining_detected /* 15 */,
-  status_device_protocol_not_allowed /* 16 */,
-  status_elephant_local_to_remote, /* 17 */
-  status_elephant_remote_to_local, /* 18 */
-  status_longlived, /* 19 */
-  status_not_purged, /* 20 */
-  status_external_alert /* 21 */,
-  status_tcp_severe_connection_issues /* 22 - higher severity than status_tcp_connection_issues */,
-  status_ssl_unsafe_ciphers /* 23 */,
-  status_data_exfiltration /* 24 */,
-  status_ssl_old_protocol_version /* 25 */,
-  status_potentially_dangerous /* 26 */,
-  status_malicious_signature /* 27 */,
-  num_flow_status,
-  /* 
-     IMPORTANT IMPORTANT IMPORTANT
-     If # status >= 32 then change to 64 bit disabled_flow_status in Host.h 
-     If # status >= 64 then change FlowStatusMap
-  */
-
-  /* Custom user alerts */
-  status_custom_1 = 59,
-  status_custom_2 = 60,
-  status_custom_3 = 61,
-  status_custom_4 = 62,
-  status_custom_5 = 63,
-} FlowStatus;
+/* Status are handled in Lua (flow_consts.lua) */
+typedef uint8_t FlowStatus;
+#define status_normal 0
 
 typedef enum {
   flow_lua_call_protocol_detected = 0,
@@ -506,7 +428,6 @@ typedef enum {
   hash_entry_state_flow_protocoldetected, /* Flow only */
   hash_entry_state_active,
   hash_entry_state_idle,
-  hash_entry_state_ready_to_be_purged
 } HashEntryState;
 
 typedef enum {
@@ -749,8 +670,7 @@ typedef struct dhcp_range {
 } dhcp_range;
 
 typedef struct cpu_load_stats {
-  uint64_t active;
-  uint64_t idle;
+  float load;
 } cpu_load_stats;
 
 typedef struct grouped_alerts_counters {

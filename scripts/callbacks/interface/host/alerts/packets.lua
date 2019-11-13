@@ -6,7 +6,6 @@ local alerts_api = require("alerts_api")
 local user_scripts = require("user_scripts")
 
 local script = {
-  key = "packets",
   local_only = true,
 
   hooks = {
@@ -24,7 +23,9 @@ local script = {
 -- #################################################################
 
 function script.get_threshold_value(granularity, info)
-  return alerts_api.host_delta_val(script.key, granularity, info["packets.sent"] + info["packets.rcvd"])
+  local num_packets = host.getPackets()
+
+  return alerts_api.host_delta_val(script.key, granularity, num_packets["packets.sent"] + num_packets["packets.rcvd"])
 end
 
 -- #################################################################

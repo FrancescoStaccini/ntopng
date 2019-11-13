@@ -8,8 +8,6 @@ local user_scripts = require("user_scripts")
 -- #################################################################
 
 local script = {
-   key = "blacklisted",
-
    -- NOTE: hooks defined below
    hooks = {},
 
@@ -22,9 +20,9 @@ local script = {
 
 -- #################################################################
 
-function script.hooks.protocolDetected(params)
+function script.hooks.protocolDetected(now)
    if flow.isBlacklisted() then
-      flow.triggerStatus(flow_consts.status_types.status_blacklisted.status_id)
+      flow.triggerStatus(flow_consts.status_types.status_blacklisted.status_id, flow.getBlacklistedInfo())
    end
 end
 

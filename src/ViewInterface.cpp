@@ -82,24 +82,26 @@ bool ViewInterface::walker(u_int32_t *begin_slot,
 			   bool walk_all,
 			   WalkerType wtype,
 			   bool (*walker)(GenericHashEntry *h, void *user_data, bool *matched),
-			   void *user_data,
-			   bool walk_idle) {
+			   void *user_data) {
   bool ret = false;
   u_int32_t flows_begin_slot = 0; /* Always from the beginning, all flows */
+
+  if(id == SYSTEM_INTERFACE_ID)
+    return(false);
 
   switch(wtype) {
   case walker_flows:
     for(u_int8_t s = 0; s < num_viewed_interfaces; s++) {
       flows_begin_slot = 0; /* Always visit all the flows starting from slot 0 */
-      ret |= viewed_interfaces[s]->walker(&flows_begin_slot, true /* walk_all == true */, wtype, walker, user_data, walk_idle);
+      ret |= viewed_interfaces[s]->walker(&flows_begin_slot, true /* walk_all == true */, wtype, walker, user_data);
     }
     break;
   default:
-    ret = NetworkInterface::walker(begin_slot, walk_all, wtype, walker, user_data, walk_idle);
+    ret = NetworkInterface::walker(begin_slot, walk_all, wtype, walker, user_data);
     break;
   }
 
-  return ret;
+  return(ret);
 }
 
 /* **************************************************** */
@@ -260,29 +262,16 @@ Flow* ViewInterface::findFlowByTuple(u_int16_t vlan_id,
 
 /* **************************************************** */
 
-typedef struct {
-  struct timeval tv;
-  ViewInterface *iface;
-} viewed_flows_walker_user_data_t;
+void ViewInterface::periodicHTStateUpdate(time_t deadline, lua_State* vm) {
+  for(u_int8_t s = 0; s < num_viewed_interfaces; s++)
+    viewed_interfaces[s]->periodicHTStateUpdate(deadline, vm);
+}
 
 /* **************************************************** */
 
-static bool viewed_flows_walker(GenericHashEntry *flow, void *user_data, bool *matched) {
-  viewed_flows_walker_user_data_t *viewed_flows_walker_user_data = (viewed_flows_walker_user_data_t*)user_data;
-  ViewInterface *iface = viewed_flows_walker_user_data->iface;
-  const struct timeval *tv = &viewed_flows_walker_user_data->tv;
-  Flow *f = (Flow*)flow;
-  bool acked_to_purge;
-
-  acked_to_purge = f->is_acknowledged_to_purge();
-
-  if(acked_to_purge) {
-    /* We can set the 'ready to be purged' state on behalf of the underlying viewed interface.
-       It is safe as this view is in sync with the viewed interfaces by mean of acked_to_purge */
-    f->set_hash_entry_state_ready_to_be_purged();
-  }
-
-  f->dumpFlow(tv, iface);
+void ViewInterface::viewed_flows_walker(Flow *f, void *user_data) {
+  periodic_ht_state_update_user_data_t *periodic_ht_state_update_user_data = (periodic_ht_state_update_user_data_t*)user_data;
+  const struct timeval *tv = periodic_ht_state_update_user_data->tv;
 
   FlowTrafficStats partials;
   bool first_partial; /* Whether this is the first time the view is visiting this flow */
@@ -295,9 +284,9 @@ static bool viewed_flows_walker(GenericHashEntry *flow, void *user_data, bool *m
     if(cli_ip && srv_ip) {
       Host *cli_host = NULL, *srv_host = NULL;
 
-      iface->findFlowHosts(f->get_vlan_id(),
-			   NULL /* no src mac yet */, (IpAddress*)cli_ip, &cli_host,
-			   NULL /* no dst mac yet */, (IpAddress*)srv_ip, &srv_host);
+      findFlowHosts(f->get_vlan_id(),
+		    NULL /* no src mac yet */, (IpAddress*)cli_ip, &cli_host,
+		    NULL /* no dst mac yet */, (IpAddress*)srv_ip, &srv_host);
 
       if(cli_host) {
 	cli_host->incStats(tv->tv_sec, f->get_protocol(),
@@ -310,7 +299,7 @@ static bool viewed_flows_walker(GenericHashEntry *flow, void *user_data, bool *m
 	if(first_partial)
 	  cli_host->incNumFlows(f->get_last_seen(), true, srv_host), cli_host->incUses();
 
-	if(acked_to_purge)
+	if(f->idle())
 	  cli_host->decNumFlows(f->get_last_seen(), true, srv_host), cli_host->decUses();
       }
 
@@ -325,17 +314,17 @@ static bool viewed_flows_walker(GenericHashEntry *flow, void *user_data, bool *m
 	if(first_partial)
 	  srv_host->incUses(), srv_host->incNumFlows(f->get_last_seen(), false, cli_host);
 
-	if(acked_to_purge)
+	if(f->idle())
 	  srv_host->decUses(), srv_host->decNumFlows(f->get_last_seen(), false, cli_host);
       }
 
-      iface->incStats(true /* ingressPacket */,
-		      tv->tv_sec, cli_ip && cli_ip->isIPv4() ? ETHERTYPE_IP : ETHERTYPE_IPV6,
-		      f->getStatsProtocol(), f->get_protocol_category(),
-		      f->get_protocol(),
-		      partials.srv2cli_bytes + partials.cli2srv_bytes,
-		      partials.srv2cli_packets + partials.cli2srv_packets,
-		      24 /* 8 Preamble + 4 CRC + 12 IFG */ + 14 /* Ethernet header */);
+      incStats(true /* ingressPacket */,
+	       tv->tv_sec, cli_ip && cli_ip->isIPv4() ? ETHERTYPE_IP : ETHERTYPE_IPV6,
+	       f->getStatsProtocol(), f->get_protocol_category(),
+	       f->get_protocol(),
+	       partials.srv2cli_bytes + partials.cli2srv_bytes,
+	       partials.srv2cli_packets + partials.cli2srv_packets,
+	       24 /* 8 Preamble + 4 CRC + 12 IFG */ + 14 /* Ethernet header */);
 
       Flow::incTcpBadStats(true /* src2dst */, NULL, cli_host, srv_host,
 			   partials.tcp_stats_s2d.pktOOO, partials.tcp_stats_s2d.pktRetr,
@@ -346,26 +335,6 @@ static bool viewed_flows_walker(GenericHashEntry *flow, void *user_data, bool *m
 			   partials.tcp_stats_d2s.pktLost, partials.tcp_stats_d2s.pktKeepAlive);
     }
   }
-
-  return false; /* Move on to the next flow, keep walking */
-}
-
-/* **************************************************** */
-
-void ViewInterface::viewedFlowsWalker() {
-  u_int32_t begin_slot;
-  viewed_flows_walker_user_data_t viewed_flows_walker_user_data;
-
-  viewed_flows_walker_user_data.tv.tv_sec = time(NULL),
-    viewed_flows_walker_user_data.tv.tv_usec = 0,
-    viewed_flows_walker_user_data.iface = this;      
-
-  begin_slot = 0; /* Always visit all flows starting from the first slot */
-  walker(&begin_slot, true /* walk all the flows */, walker_flows, viewed_flows_walker, &viewed_flows_walker_user_data, true /* visit also idle flows (required to acknowledge the purge) */);
-
-#ifdef NTOPNG_PRO
-  dumpAggregatedFlows(&viewed_flows_walker_user_data.tv);
-#endif
 }
 
 /* **************************************************** */
@@ -373,12 +342,28 @@ void ViewInterface::viewedFlowsWalker() {
 void ViewInterface::flowPollLoop() {
   while(!ntop->getGlobals()->isShutdownRequested()) {
     while(idle()) sleep(1);
-
-    viewedFlowsWalker();
-
-    purgeIdle(time(NULL));
-    usleep(500000);
+    /* Nothing to do, everything is done in ViewInterface::generic_periodic_hash_entry_state_update */
+    usleep(1000000);
   }
+}
+
+/* **************************************************** */
+
+void ViewInterface::generic_periodic_hash_entry_state_update(GenericHashEntry *node, void *user_data) {
+  periodic_ht_state_update_user_data_t *periodic_ht_state_update_user_data = (periodic_ht_state_update_user_data_t*)user_data;
+  /* The user data contains the pointer to the original underlying viewed interface which has called us.
+     So in order to reterieve `this` pointer, it suffices to access iface method viewedBy() */
+  ViewInterface *this_view = periodic_ht_state_update_user_data->iface->viewedBy();
+
+  /* Trigger the walker only for flows - it's that walker which triggers the creation of hosts
+     and other hash table entries. */
+  if(Flow *flow = dynamic_cast<Flow*>(node)) {
+    this_view->viewed_flows_walker(flow, user_data);
+  }
+
+  /* purgeIdle must be called here as this is the only point where the update of the hash tables
+     is sequential with the purging of the same. */
+  this_view->purgeIdle(time(NULL));
 }
 
 /* **************************************************** */

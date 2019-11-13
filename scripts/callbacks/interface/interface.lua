@@ -18,6 +18,7 @@ local do_trace = false             -- Trace lua calls
 local config_alerts = nil
 local ifid = nil
 local available_modules = nil
+local interface_entity = alert_consts.alert_entities.interface.entity_id
 
 -- The function below ia called once (#pragma once)
 function setup(str_granularity)
@@ -49,15 +50,16 @@ function checkAlerts(granularity)
       return
    end
 
-   local suppressed_alerts = interface.hasAlertsSuppressed()
+   local granularity_id = alert_consts.alerts_granularities[granularity].granularity_id
+   local interface_key   = "iface_"..ifid
+   local suppressed_alerts = alerts_api.hasSuppressedAlerts(ifid, interface_entity, interface_key)
 
    if suppressed_alerts then
-      releaseAlerts(granularity)
+      releaseAlerts(granularity_id)
    end
 
    local info = interface.getStats()
-   local ifid = interface.getId()
-   local interface_key   = "iface_"..ifid
+   local cur_alerts = interface.getAlerts(granularity_id)
    local interface_config = config_alerts[interface_key] or {}
    local global_config = config_alerts["interfaces"] or {}
    local has_configuration = (table.len(interface_config) or table.len(global_config))
@@ -84,6 +86,7 @@ function checkAlerts(granularity)
               granularity = granularity,
               alert_entity = entity_info,
               entity_info = info,
+	      cur_alerts = cur_alerts,
               alert_config = config,
               user_script = check,
            })
@@ -91,7 +94,12 @@ function checkAlerts(granularity)
       end
    end
 
-   alerts_api.releaseEntityAlerts(entity_info, interface.getExpiredAlerts(granularity2id(granularity)))
+  -- cur_alerts now contains unprocessed triggered alerts, that is,
+  -- those alerts triggered but then disabled or unconfigured (e.g., when
+  -- the user removes a threshold from the gui)
+  if #cur_alerts > 0 then
+     alerts_api.releaseEntityAlerts(entity_info, cur_alerts)
+  end
 end
 
 -- #################################################################

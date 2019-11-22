@@ -9,10 +9,9 @@ local schema
 -- PERIODIC_SCRIPTS SCHEMAS
 -------------------------------------------------------
 
-schema = ts_utils.newSchema("periodic_script:duration_ms", {step = 60, rrd_fname="ps_duration_ms", metrics_type = ts_utils.metrics.gauge})
+schema = ts_utils.newSchema("periodic_script:duration", {step = 60, rrd_fname="ps_duration", metrics_type = ts_utils.metrics.gauge})
 schema:addTag("ifid")
 schema:addTag("periodic_script")
-schema:addMetric("num_ms_max")
 schema:addMetric("num_ms_last")
 
 -------------------------------------------------------
@@ -302,7 +301,6 @@ schema:addMetric("as_server")
 -- PROCESS SCHEMAS
 -------------------------------------------------------
 
-schema = ts_utils.newSchema("process:memory", {step=60, metrics_type=ts_utils.metrics.gauge})
+schema = ts_utils.newSchema("process:resident_memory", {step=60, metrics_type=ts_utils.metrics.gauge})
 schema:addTag("ifid")
 schema:addMetric("resident_bytes")
-schema:addMetric("virtual_bytes")

@@ -326,6 +326,20 @@ end
 
 -- ##############################################
 
+function user_scripts.getLastBenchmark(ifid, subdir)
+   local scripts_benchmarks = ntop.getCache(user_scripts_benchmarks_key(ifid, subdir))
+
+   if(not isEmptyString(scripts_benchmarks)) then
+      scripts_benchmarks = json.decode(scripts_benchmarks)
+   else
+      scripts_benchmarks = nil
+   end
+
+   return(scripts_benchmarks)
+end
+
+-- ##############################################
+
 -- @brief Load the user scripts.
 -- @params script_type one of user_scripts.script_types
 -- @params ifid the interface ID
@@ -350,12 +364,6 @@ function user_scripts.load(script_type, ifid, subdir, hook_filter, ignore_disabl
    end
 
    local check_dirs = getScriptsDirectories(script_type, subdir)
-   local scripts_benchmarks = ntop.getCache(user_scripts_benchmarks_key(ifid, subdir))
-
-   if(not isEmptyString(scripts_benchmarks)) then
-      scripts_benchmarks = json.decode(scripts_benchmarks)
-   end
-   scripts_benchmarks = scripts_benchmarks or {}
 
    for _, checks_dir in pairs(check_dirs) do
       package.path = checks_dir .. "/?.lua;" .. package.path
@@ -393,10 +401,18 @@ function user_scripts.load(script_type, ifid, subdir, hook_filter, ignore_disabl
             end
 
             if(table.empty(user_script.hooks)) then
-               traceError(TRACE_WARNING, TRACE_CONSOLE, string.format("No 'hooks' defined in user script '%s'", user_script.key))
-               -- This guarantees that the "hooks" field is always available
-               user_script.hooks = {}
+               traceError(TRACE_WARNING, TRACE_CONSOLE, string.format("No 'hooks' defined in user script '%s', skipping", user_script.key))
+               goto next_module
             end
+
+	    if(user_script.l7_proto ~= nil) then
+	       user_script.l7_proto_id = interface.getnDPIProtoId(user_script.l7_proto)
+
+	       if(user_script.l7_proto_id == -1) then
+		  traceError(TRACE_WARNING, TRACE_CONSOLE, string.format("Unknown L7 protocol filter '%s' in user script '%s', skipping", user_script.l7_proto, user_script.key))
+		  goto next_module
+	       end
+	    end
 
             -- Augument with additional attributes
             user_script.enabled = user_scripts.isEnabled(ifid, subdir, user_script.key)
@@ -430,8 +446,6 @@ function user_scripts.load(script_type, ifid, subdir, hook_filter, ignore_disabl
                goto next_module
             end
 
-	    user_script["benchmark"] = scripts_benchmarks[mod_fname]
-
             -- Populate hooks fast lookup table
             for hook, hook_fn in pairs(user_script.hooks) do
 	       -- load previously computed benchmarks (if any)
@@ -458,6 +472,24 @@ function user_scripts.load(script_type, ifid, subdir, hook_filter, ignore_disabl
 		  end
                end
             end
+
+	    if(rv.hooks["periodicUpdate"] ~= nil) then
+	       -- Set the update frequency
+	       local default_update_freq = 120		-- Default: every 2 minutes
+
+	       if(user_script.periodic_update_seconds ~= nil) then
+		  if((user_script.periodic_update_seconds % 30) ~= 0) then
+		     traceError(TRACE_WARNING, TRACE_CONSOLE, string.format(
+			"Update_periodicity '%s' is not multiple of 30 in '%s', using default (%u)",
+			user_script.periodic_update_seconds, user_script.key, default_update_freq))
+		     user_script.periodic_update_seconds = default_update_freq
+		  end
+	       else
+		  user_script.periodic_update_seconds = default_update_freq
+	       end
+
+	       user_script.periodic_update_divisor = math.floor(user_script.periodic_update_seconds / 30)
+	    end
 
             rv.modules[user_script.key] = user_script
          end

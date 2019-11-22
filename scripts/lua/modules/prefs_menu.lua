@@ -158,6 +158,9 @@ local menu_subpages = {
     }, toggle_ndpi_timeseries_creation = {
       title       = i18n("prefs.toggle_ndpi_timeseries_creation_title"),
       description = i18n("prefs.toggle_ndpi_timeseries_creation_description"),
+    }, toggle_system_probes_timeseries = {
+      title       = i18n("prefs.toggle_system_probes_timeseries_title"),
+      description = i18n("prefs.toggle_system_probes_timeseries_description"),
     }, toggle_flow_rrds = {
       title       = i18n("prefs.toggle_flow_rrds_title"),
       description = i18n("prefs.toggle_flow_rrds_description"),
@@ -275,6 +278,14 @@ local menu_subpages = {
     email_notification_server = {
       title       = i18n("prefs.email_notification_server_title"),
       description = i18n("prefs.email_notification_server_description"),
+    },
+    email_notification_username = {
+      title       = i18n("prefs.email_notification_username_title"),
+      description = i18n("prefs.email_notification_username_description"),
+    },
+    email_notification_password = {
+      title       = i18n("prefs.email_notification_password_title"),
+      description = i18n("prefs.email_notification_password_description"),
     },
     toggle_slack_notification = {
       title       = i18n("prefs.toggle_slack_notification_title", {url="http://www.slack.com"}),

@@ -36,11 +36,13 @@ ThreadedActivity::ThreadedActivity(const char* _path,
 				   u_int32_t _periodicity_seconds,
 				   bool _align_to_localtime,
 				   bool _exclude_viewed_interfaces,
+				   bool _exclude_pcap_dump_interfaces,
 				   ThreadPool *_pool) {
   terminating = false;
   periodicity = _periodicity_seconds;
   align_to_localtime = _align_to_localtime;
   exclude_viewed_interfaces = _exclude_viewed_interfaces;
+  exclude_pcap_dump_interfaces = _exclude_pcap_dump_interfaces;
   thread_started = false, systemTaskRunning = false;
   path = strdup(_path); /* ntop->get_callbacks_dir() */;
   interfaceTasksRunning = (bool *) calloc(MAX_NUM_INTERFACE_IDS, sizeof(bool));
@@ -140,18 +142,16 @@ void ThreadedActivity::activityBody() {
 /* ******************************************* */
 
 void ThreadedActivity::run() {
-  bool run_script = false;
+  bool pcap_dump_only = true;
 
   for(int i = 0; i < ntop->get_num_interfaces(); i++) {
     NetworkInterface *iface = ntop->getInterface(i);
-
-    if(iface->isProcessingPackets()) {
-       run_script = true;
-       break;
-    }
+    if(iface && iface->getIfType() != interface_type_PCAP_DUMP)
+      pcap_dump_only = false;
   }
-
-  if(!run_script) return;
+  /* Don't schedule periodic activities it we are processing pcap files only. */
+  if (exclude_pcap_dump_interfaces && pcap_dump_only)
+    return;
 
   if(pthread_create(&pthreadLoop, NULL, startActivity, (void*)this) == 0) {
     thread_started = true;
@@ -197,7 +197,7 @@ void ThreadedActivity::runScript() {
 	   ntop->get_callbacks_dir(), path);
 
   if(stat(script_path, &buf) == 0) {
-    runScript(script_path, NULL);
+    runScript(script_path, NULL, 0 /* No deadline */);
   } else
     ntop->getTrace()->traceEvent(TRACE_WARNING, "Unable to find script %s", path);
 }
@@ -205,7 +205,7 @@ void ThreadedActivity::runScript() {
 /* ******************************************* */
 
 /* Run a script - both periodic and one-shot scripts are called here */
-void ThreadedActivity::runScript(char *script_path, NetworkInterface *iface) {
+void ThreadedActivity::runScript(char *script_path, NetworkInterface *iface, time_t deadline) {
   LuaEngine *l;
   u_long max_duration_ms = periodicity * 1e3;
   u_long msec_diff;
@@ -235,7 +235,7 @@ void ThreadedActivity::runScript(char *script_path, NetworkInterface *iface) {
   }
 
   gettimeofday(&begin, NULL);
-  l->run_script(script_path, iface);
+  l->run_script(script_path, iface, false /* Execute */, deadline);
   gettimeofday(&end, NULL);
 
   msec_diff = (end.tv_sec - begin.tv_sec) * 1000 + (end.tv_usec - begin.tv_usec) / 1000;
@@ -323,10 +323,10 @@ void ThreadedActivity::periodicActivityBody() {
     u_int now = (u_int)time(NULL);
 
     if(now >= next_run) {
-      schedulePeriodicActivity(pool);
-
       next_run = Utils::roundTime(now, periodicity,
 				  align_to_localtime ? ntop->get_time_offset() : 0);
+
+      schedulePeriodicActivity(pool, next_run /* next_run is now also the deadline of the current script */);
     }
 
     sleep(1);
@@ -342,7 +342,7 @@ void ThreadedActivity::periodicActivityBody() {
  * ThreadedActivity::runScript. The variables systemTaskRunning and interfaceTasksRunning
  * are used to ensure that only a single instance of the job is running for a given
  * NetworkInterface. */
-void ThreadedActivity::schedulePeriodicActivity(ThreadPool *pool) {
+void ThreadedActivity::schedulePeriodicActivity(ThreadPool *pool, time_t deadline) {
   /* Schedule per system / interface */
   char script_path[MAX_PATH];
 #ifdef WIN32
@@ -358,7 +358,7 @@ void ThreadedActivity::schedulePeriodicActivity(ThreadPool *pool) {
     
     if(stat(script_path, &buf) == 0) {
       systemTaskRunning = true;
-      pool->queueJob(this, script_path, NULL);
+      pool->queueJob(this, script_path, NULL, deadline);
 #ifdef THREAD_DEBUG
       ntop->getTrace()->traceEvent(TRACE_NORMAL, "Queued system job %s", script_path);
 #endif
@@ -374,9 +374,9 @@ void ThreadedActivity::schedulePeriodicActivity(ThreadPool *pool) {
       NetworkInterface *iface = ntop->getInterface(i);
 
       if(iface
-	 && iface->isProcessingPackets()
+	 && (iface->getIfType() != interface_type_PCAP_DUMP || !exclude_pcap_dump_interfaces)
 	 && !isInterfaceTaskRunning(iface)) {
-        pool->queueJob(this, script_path, iface);
+        pool->queueJob(this, script_path, iface, deadline);
         setInterfaceTaskRunning(iface, true);
 
 #ifdef THREAD_DEBUG

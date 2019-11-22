@@ -34,6 +34,7 @@ class ThreadedActivity {
   u_int32_t periodicity;
   bool align_to_localtime;
   bool exclude_viewed_interfaces;
+  bool exclude_pcap_dump_interfaces;
   bool thread_started;
   bool systemTaskRunning;
   bool *interfaceTasksRunning;
@@ -44,7 +45,7 @@ class ThreadedActivity {
   void periodicActivityBody();
   void aperiodicActivityBody();
   void uSecDiffPeriodicActivityBody();
-  void schedulePeriodicActivity(ThreadPool *pool);
+  void schedulePeriodicActivity(ThreadPool *pool, time_t deadline);
   void setInterfaceTaskRunning(NetworkInterface *iface, bool running);
   bool isInterfaceTaskRunning(NetworkInterface *iface);
   void updateThreadedActivityStats(NetworkInterface *iface, u_long latest_duration);
@@ -54,13 +55,14 @@ class ThreadedActivity {
 		   u_int32_t _periodicity_seconds = 0,
 		   bool _align_to_localtime = false,
 		   bool _exclude_viewed_interfaces = false,
+		   bool _exclude_pcap_dump_interfaces = false,
 		   ThreadPool* _pool = NULL);
   ~ThreadedActivity();
 
   const char *activityPath() { return path; };
   void activityBody();
   void runScript();
-  void runScript(char *script_path, NetworkInterface *iface);
+  void runScript(char *script_path, NetworkInterface *iface, time_t deadline);
 
   inline void shutdown()      { terminating = true; };
   void terminateEnqueueLoop();

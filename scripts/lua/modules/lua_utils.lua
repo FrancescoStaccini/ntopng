@@ -921,7 +921,6 @@ function addGauge(name, url, maxValue, width, height)
   </div>
   ]]
   if(url ~= nil) then print('</A>\n') end
-
 end
 
 -- Compute the difference in seconds between local time and UTC.
@@ -1380,8 +1379,8 @@ function flowinfo2hostname(flow_info, host_type, alerts_view)
 	 -- remove possible ports from the name
 	 return(flow_info["host_server_name"]:gsub(":%d+$", ""))
       end
-      if(flow_info["protos.ssl.certificate"] ~= nil and flow_info["protos.ssl.certificate"] ~= "") then
-	 return(flow_info["protos.ssl.certificate"])
+      if(flow_info["protos.tls.certificate"] ~= nil and flow_info["protos.tls.certificate"] ~= "") then
+	 return(flow_info["protos.tls.certificate"])
       end
    end
 

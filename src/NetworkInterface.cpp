@@ -177,7 +177,7 @@ NetworkInterface::NetworkInterface(const char *name,
 
   loadScalingFactorPrefs();
 
-  statsManager = NULL, alertsManager = NULL;
+  statsManager = NULL, alertsManager = NULL, alertsQueue = NULL;
   ndpiStats = NULL;
 
   host_pools = new HostPools(this);
@@ -228,7 +228,7 @@ void NetworkInterface::init() {
   ifname = NULL, bridge_lan_interface_id = bridge_wan_interface_id = 0;
     inline_interface = false,
     has_vlan_packets = false, has_ebpf_events = false,
-    has_seen_dhcp_addresses = false, packet_processing_completed = false;
+    has_seen_dhcp_addresses = false,
     has_seen_containers = false, has_seen_pods = false,
     last_pkt_rcvd = last_pkt_rcvd_remote = 0,
     next_idle_flow_purge = next_idle_host_purge = 0,
@@ -251,6 +251,7 @@ void NetworkInterface::init() {
     pollLoopCreated = false, bridge_interface = false,
     mdns = NULL, discovery = NULL, ifDescription = NULL,
     flowHashingMode = flowhashing_none;
+    num_dropped_flow_scripts_calls = 0;
 
   flows_hash = NULL, hosts_hash = NULL;
   macs_hash = NULL, ases_hash = NULL, vlans_hash = NULL;
@@ -552,6 +553,7 @@ NetworkInterface::~NetworkInterface() {
   if(discovery)      delete discovery;
   if(statsManager)   delete statsManager;
   if(alertsManager)  delete alertsManager;
+  if(alertsQueue)    delete alertsQueue;
   if(ndpiStats)      delete ndpiStats;
   if(networkStats) {
     u_int8_t numNetworks = ntop->getNumLocalNetworks();
@@ -1625,7 +1627,7 @@ bool NetworkInterface::processPacket(u_int32_t bridge_iface_idx,
 
     case NDPI_PROTOCOL_TLS:
       if(trusted_payload_len > 0)
-	flow->dissectSSL((char *)payload, trusted_payload_len);
+	flow->dissectTLS((char *)payload, trusted_payload_len);
       break;
     }
 
@@ -2798,8 +2800,11 @@ void NetworkInterface::periodicHTStateUpdate(time_t deadline, lua_State* vm) {
 			macs_hash
   };
   time_t update_end;
-  
-  periodicUpdateInitTime(&tv);
+
+  /* Always use the current time to update the hash tables states, also when processing pcap dumps. This
+     is necessary as hash table states changes and periodic lua scripts call assume the time flows normally. */
+  gettimeofday(&tv, NULL);
+
   periodic_ht_state_update_user_data.acle = NULL,
     periodic_ht_state_update_user_data.iface = this,
     periodic_ht_state_update_user_data.deadline = deadline,
@@ -2810,7 +2815,7 @@ void NetworkInterface::periodicHTStateUpdate(time_t deadline, lua_State* vm) {
 
   for(u_int i = 0; i < sizeof(ghs) / sizeof(ghs[0]); i++) {
     if(ghs[i]) {
-      ghs[i]->walkIdle(generic_periodic_hash_entry_state_update, &periodic_ht_state_update_user_data);
+      ghs[i]->walkAllStates(generic_periodic_hash_entry_state_update, &periodic_ht_state_update_user_data);
 
       if(periodic_ht_state_update_user_data.acle) {
 	periodic_ht_state_update_user_data.acle->lua_stats(ghs[i]->getName(), vm);
@@ -3079,6 +3084,7 @@ struct mac_find_info {
   u_int16_t vlan_id;
   Mac *m;
   DeviceType dtype;
+  lua_State *vm;
 };
 
 /* **************************************************** */
@@ -3124,22 +3130,6 @@ static bool find_host_by_name(GenericHashEntry *h, void *user_data, bool *matche
       *matched = true;
       return(true); /* found */
     }
-  }
-
-  return(false); /* false = keep on walking */
-}
-
-/* **************************************************** */
-
-static bool find_mac_by_name(GenericHashEntry *h, void *user_data, bool *matched) {
-  struct mac_find_info *info = (struct mac_find_info*)user_data;
-  Mac *m = (Mac*)h;
-
-  if((info->m == NULL) && (!memcmp(info->mac, m->get_mac(), 6))) {
-    info->m = m;
-    *matched = true;
-
-    return(true); /* found */
   }
 
   return(false); /* false = keep on walking */
@@ -3626,7 +3616,7 @@ static bool flow_matches(Flow *f, struct flowHostRetriever *retriever) {
     /* Flow Status filter */
     if(retriever->pag
        && retriever->pag->flowStatusFilter(&flow_status_filter)
-       && status != flow_status_filter)
+       && !f->getStatusBitmap().issetBit(flow_status_filter))
       return(false);
 
 #ifdef HAVE_NEDGE
@@ -3639,8 +3629,8 @@ static bool flow_matches(Flow *f, struct flowHostRetriever *retriever) {
 
     if(retriever->pag
        && retriever->pag->unidirectionalTraffic(&unidirectional)
-       && ((unidirectional && (f->get_packets() > 0) && (f->get_packets_cli2srv() > 0) && (f->get_packets_srv2cli() > 0))
-	   || (!unidirectional && (f->get_packets() > 0) && ((f->get_packets_cli2srv() == 0) || (f->get_packets_srv2cli() == 0)))))
+       && ((unidirectional && !f->isOneWay())
+	   || (!unidirectional && f->isBidirectional())))
       return(false);
 
     /* Unicast: at least one between client and server is unicast address */
@@ -5269,6 +5259,7 @@ void NetworkInterface::lua(lua_State *vm) {
   lua_push_uint64_table_entry(vm, "local_hosts", getNumLocalHosts());
   lua_push_uint64_table_entry(vm, "http_hosts",  getNumHTTPHosts());
   lua_push_uint64_table_entry(vm, "drops",       getNumPacketDrops());
+  lua_push_uint64_table_entry(vm, "num_dropped_flow_scripts_calls", getNumDroppedFlowScriptsCalls());
   lua_push_uint64_table_entry(vm, "devices",     getNumL2Devices());
   lua_push_uint64_table_entry(vm, "current_macs",  getNumMacs());
   lua_push_uint64_table_entry(vm, "num_live_captures", num_live_captures);
@@ -6454,6 +6445,43 @@ int NetworkInterface::getActiveMacManufacturers(lua_State* vm,
 
 /* **************************************** */
 
+static bool find_mac_hosts(GenericHashEntry *h, void *user_data, bool *matched) {
+  struct mac_find_info *info = (struct mac_find_info*)user_data;
+  Host *host = (Host*)h;
+
+  if(host->getMac() == info->m)
+    host->lua(info->vm, NULL /* Already checked */, false, false, false, true);
+
+  return false; /* false = keep on walking */
+}
+
+/* **************************************** */
+
+bool NetworkInterface::getActiveMacHosts(lua_State* vm, const char *mac) {
+  struct mac_find_info info;
+  bool res = false;
+  u_int32_t begin_slot = 0;
+
+  if(!macs_hash)
+    return res;
+
+  memset(&info, 0, sizeof(info));
+  Utils::parseMac(info.mac, mac);
+  info.vm = vm;
+
+  info.m = macs_hash->get(info.mac, false /* Not an inline call */);
+
+  if(!info.m
+     || !info.m->getNumHosts() /* Avoid walking the hosts hash table when there are no hosts associated */)
+    return res;
+
+  walker(&begin_slot, true /* walk_all */, walker_hosts, find_mac_hosts, &info);
+
+  return res;
+}
+
+/* **************************************** */
+
 int NetworkInterface::getActiveDeviceTypes(lua_State* vm,
 					   u_int8_t bridge_iface_idx,
 					   bool sourceMacsOnly,
@@ -6510,20 +6538,20 @@ int NetworkInterface::getActiveDeviceTypes(lua_State* vm,
 
 bool NetworkInterface::getMacInfo(lua_State* vm, char *mac) {
   struct mac_find_info info;
-  bool ret;
-  u_int32_t begin_slot = 0;
-  bool walk_all = true;
+  bool ret = false;
+
+  if(!macs_hash)
+    return ret;
 
   memset(&info, 0, sizeof(info));
   Utils::parseMac(info.mac, mac);
 
-  walker(&begin_slot, walk_all,  walker_macs, find_mac_by_name, (void*)&info);
+  info.m = macs_hash->get(info.mac, false /* Not an inline call */);
 
   if(info.m) {
     info.m->lua(vm, true, false);
     ret = true;
-  } else
-    ret = false;
+  }
 
   return ret;
 }
@@ -6532,14 +6560,15 @@ bool NetworkInterface::getMacInfo(lua_State* vm, char *mac) {
 
 bool NetworkInterface::resetMacStats(lua_State* vm, char *mac, bool delete_data) {
   struct mac_find_info info;
-  bool ret;
-  u_int32_t begin_slot = 0;
-  bool walk_all = true;
+  bool ret = false;
+
+  if(!macs_hash)
+    return ret;
 
   memset(&info, 0, sizeof(info));
   Utils::parseMac(info.mac, mac);
 
-  walker(&begin_slot, walk_all,  walker_macs, find_mac_by_name, (void*)&info);
+  info.m = macs_hash->get(info.mac, false /* Not an inline call */);
 
   if(info.m) {
     if(delete_data)
@@ -6547,8 +6576,7 @@ bool NetworkInterface::resetMacStats(lua_State* vm, char *mac, bool delete_data)
     else
       info.m->requestStatsReset();
     ret = true;
-  } else
-    ret = false;
+  }
 
   return ret;
 }

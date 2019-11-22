@@ -44,19 +44,23 @@ local function print_callbacks_config_table(descr, expert_view)
       tot_num_calls = 0,
    }
 
+   local benchmarks = user_scripts.getLastBenchmark(ifid, "flow")
+
    -- A user module link is currently required for the total
    local total_user_module = nil
 
    for mod_k, user_script in pairsByKeys(descr.modules, asc) do
+      local hooks_benchmarks = benchmarks[mod_k] or {}
+
       -- Calculate the total stats
-      for _, mod_benchmark in pairs(user_script.benchmark or {}) do
+      for _, mod_benchmark in pairs(hooks_benchmarks) do
 	 total_stats.tot_elapsed = total_stats.tot_elapsed + mod_benchmark["tot_elapsed"]
 	 total_stats.tot_num_calls = total_stats.tot_num_calls + mod_benchmark["tot_num_calls"]
       end
    end
 
    for mod_k, user_script in pairsByKeys(descr.modules, asc) do
-      local hooks_benchmarks = user_script.benchmark or {}
+      local hooks_benchmarks = benchmarks[mod_k] or {}
       local num_hooks = table.len(hooks_benchmarks)
       local title
       local description
@@ -104,7 +108,9 @@ local function print_callbacks_config_table(descr, expert_view)
 	    for mod_fn, mod_benchmark in pairsByKeys(hooks_benchmarks, asc) do
 	       print("<td>".. mod_fn .."</td>")
 
-	       printStatsCols(total_stats, mod_benchmark["tot_elapsed"], mod_benchmark["tot_num_calls"], mod_benchmark["avg_speed"])
+	       local avg_speed = (mod_benchmark["tot_num_calls"] / mod_benchmark["tot_elapsed"])
+
+	       printStatsCols(total_stats, mod_benchmark["tot_elapsed"], mod_benchmark["tot_num_calls"], avg_speed)
 	       ctr = ctr + 1
 
 	       if(ctr ~= num_hooks) then
@@ -120,7 +126,7 @@ local function print_callbacks_config_table(descr, expert_view)
 	    local total_duration = 0
 	    local num_calls = 0
 
-	    for mod_fn, mod_benchmark in pairsByKeys(user_script.benchmark or {}, asc) do
+	    for mod_fn, mod_benchmark in pairsByKeys(hooks_benchmarks, asc) do
 	       total_duration = total_duration + mod_benchmark["tot_elapsed"]
 	       num_calls = num_calls + mod_benchmark["tot_num_calls"]
 	    end

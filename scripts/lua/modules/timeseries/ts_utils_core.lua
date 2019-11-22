@@ -288,6 +288,7 @@ function ts_utils.getQueryOptions(overrides)
     initial_point = false,   -- add an extra initial point, not accounted in statistics but useful for drawing graphs
     with_series = false,    -- in topk query, if true, also get top items series data
     no_timeout = true,      -- do not abort queries automatically by default
+    fill_series = false,    -- if true, filling missing points is required
   }, overrides or {})
 end
 
@@ -486,7 +487,7 @@ function ts_utils.queryTopk(schema_name, tags, tstart, tend, options)
     top_items.series = {}
 
     -- Query the top items data
-    local options = table.merge(query_options, {calculate_stats = false})
+    local options = table.merge(query_options, {calculate_stats = false, fill_series = true})
     local count = 0
     local step = nil
     local raw_step = nil
@@ -858,7 +859,7 @@ function ts_utils.getPossiblyChangedSchemas()
     "influxdb:rtt",
     "monitored_host:rtt",
     "system:cpu_load",
-    "process:memory",
+    "process:resident_memory",
     "redis:keys",
     "redis:memory",
   }

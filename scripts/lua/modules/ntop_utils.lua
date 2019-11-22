@@ -187,7 +187,13 @@ end
 -- ###############################################
 
 function tolongint(what)
+   what = tonumber(what)
+
    if(what == nil) then
+      return("0")
+   elseif(type(what) ~= "number") then
+      traceError(TRACE_ERROR, TRACE_CONSOLE, "tolongint got a non-number argument: " .. type(what))
+      traceError(TRACE_ERROR, TRACE_CONSOLE, debug.traceback())
       return("0")
    elseif(what ~= what) then
       traceError(TRACE_ERROR, TRACE_CONSOLE, "Trying to convert NaN to integer")
@@ -195,6 +201,10 @@ function tolongint(what)
       return("0")
    elseif(what == math.huge) then
      traceError(TRACE_ERROR, TRACE_CONSOLE, "Trying to convert inf to integer")
+     traceError(TRACE_ERROR, TRACE_CONSOLE, debug.traceback())
+     return("0")
+   elseif((what >= math.maxinteger) or (what <= math.mininteger)) then
+     traceError(TRACE_ERROR, TRACE_CONSOLE, "Number out of integers range: " .. what)
      traceError(TRACE_ERROR, TRACE_CONSOLE, debug.traceback())
      return("0")
    else

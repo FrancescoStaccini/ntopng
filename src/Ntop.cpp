@@ -69,12 +69,17 @@ Ntop::Ntop(char *appName) {
   cpu_load = 0;
   malicious_ja3 = malicious_ja3_shadow = NULL;
   new_malicious_ja3 = new std::set<std::string>();
+  system_interface = NULL;
 
   /* nDPI handling */
   last_ndpi_reload = 0;
   ndpi_struct_shadow = NULL;
   ndpi_struct = initnDPIStruct();
   ndpi_finalize_initalization(ndpi_struct);
+
+  sqlite_alerts_queue = new FifoStringsQueue(SQLITE_ALERTS_QUEUE_SIZE);
+  alerts_notifications_queue = new FifoStringsQueue(ALERTS_NOTIFICATIONS_QUEUE_SIZE);
+  internal_alerts_queue = new FifoStringsQueue(INTERNAL_ALERTS_QUEUE_SIZE);
 
   resolvedHostsBloom = new Bloom(NUM_HOSTS_RESOLVED_BITS);
   
@@ -193,7 +198,8 @@ Ntop::~Ntop() {
   }
 
   delete []iface;
-  delete system_interface;
+  if(system_interface)    delete system_interface;
+  if(extract)             delete extract;
 
   if(udp_socket != -1) closesocket(udp_socket);
 
@@ -213,7 +219,10 @@ Ntop::~Ntop() {
 #endif
 
   if(resolvedHostsBloom) delete resolvedHostsBloom;
-  
+  delete sqlite_alerts_queue;
+  delete alerts_notifications_queue;
+  delete internal_alerts_queue;
+
   if(ndpi_struct) {
     ndpi_exit_detection_module(ndpi_struct);
     ndpi_struct = NULL;
@@ -822,7 +831,8 @@ void Ntop::getUsers(lua_State* vm) {
   char **usernames;
   char *username;
   char *key, *val;
-  int rc, i, len;
+  int rc, i;
+  size_t len;
 
   lua_newtable(vm);
 

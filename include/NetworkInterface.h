@@ -78,7 +78,7 @@ class NetworkInterface : public AlertableEntity {
   u_int32_t bridge_lan_interface_id, bridge_wan_interface_id;
   u_int32_t num_alerts_engaged[MAX_NUM_PERIODIC_SCRIPTS];
   u_int64_t num_active_alerted_flows, num_idle_alerted_flows;
-  u_int32_t num_dropped_alerts;
+  u_int32_t num_dropped_alerts, num_dropped_flow_scripts_calls;
   bool has_stored_alerts;
   AlertsQueue *alertsQueue;
 
@@ -181,7 +181,8 @@ class NetworkInterface : public AlertableEntity {
   CountriesHash *countries_hash;
 
   /* ARP Matrix Hash */
-  ArpStatsHashMatrix *arp_hash_matrix; /** Hash used to store ARP pkts counters related to pkt_src and pkt_dst */
+  ArpStatsHashMatrix *arp_hash_matrix;/**<Hash used to store ARP pkts counters related to pkt_src and pkt_dst */
+
 
   /* Vlans */
   VlanHash *vlans_hash; /**< Hash used to store Vlans information. */
@@ -198,7 +199,7 @@ class NetworkInterface : public AlertableEntity {
   bool has_seen_pods, has_seen_containers;
   time_t last_pkt_rcvd, last_pkt_rcvd_remote, /* Meaningful only for ZMQ interfaces */
     next_idle_flow_purge, next_idle_host_purge;
-  bool running, is_idle, packet_processing_completed;
+  bool running, is_idle;
   NetworkStats **networkStats;
   InterfaceStatsHash *interfaceStats;
   dhcp_range* dhcp_ranges, *dhcp_ranges_shadow;
@@ -369,6 +370,7 @@ class NetworkInterface : public AlertableEntity {
   virtual void checkPointCounters(bool drops_only);
   bool registerSubInterface(NetworkInterface *sub_iface, u_int32_t criteria);
 
+  /* Overridden in ViewInterface.cpp */
   virtual u_int64_t getCheckPointNumPackets();
   virtual u_int64_t getCheckPointNumBytes();
   virtual u_int32_t getCheckPointNumPacketDrops();
@@ -516,6 +518,7 @@ class NetworkInterface : public AlertableEntity {
 				bool sourceMacsOnly,
 				u_int32_t maxHits, u_int8_t devtype_filter,
 				u_int8_t location_filter);
+  bool getActiveMacHosts(lua_State* vm, const char *mac);
   int getActiveDeviceTypes(lua_State* vm,
 			   u_int8_t bridge_iface_idx,
 			   bool sourceMacsOnly,
@@ -541,10 +544,12 @@ class NetworkInterface : public AlertableEntity {
   u_int purgeIdleFlows(bool force_idle);
   u_int purgeIdleHostsMacsASesVlans(bool force_idle);
 
+  /* Overridden in ViewInterface.cpp */
   virtual u_int64_t getNumPackets();
   virtual u_int64_t getNumBytes();
   virtual void      updatePacketsStats() { };
   virtual u_int32_t getNumDroppedPackets() { return 0; };
+  virtual u_int32_t getNumDroppedFlowScriptsCalls() { return num_dropped_flow_scripts_calls; };
   virtual u_int     getNumPacketDrops();
   virtual u_int     getNumFlows();
   u_int             getNumL2Devices();
@@ -785,6 +790,7 @@ class NetworkInterface : public AlertableEntity {
   void walkAlertables(int entity_type, const char *entity_value, std::set<int> *entity_excludes, alertable_callback *callback, void *user_data);
   void getEngagedAlertsCount(lua_State *vm, int entity_type, const char *entity_value, std::set<int> *entity_excludes);
   void getEngagedAlerts(lua_State *vm, int entity_type, const char *entity_value, AlertType alert_type, AlertLevel alert_severity, std::set<int> *entity_excludes);
+  inline void incNumDroppedFlowScriptsCalls()             { num_dropped_flow_scripts_calls++; }
 
   /* unlockExternalAlertable must be called after use whenever a non-null reference is returned */
   AlertableEntity* lockExternalAlertable(AlertEntity entity, const char *entity_val, bool create_if_missing);
@@ -793,8 +799,6 @@ class NetworkInterface : public AlertableEntity {
   virtual bool reproducePcapOriginalSpeed() const         { return(false); }
   u_int32_t getNumEngagedAlerts();
   void releaseAllEngagedAlerts();
-  inline bool isProcessingPackets() { return(!packet_processing_completed); }
-  inline void processingCompleted() { packet_processing_completed = true;   }
 };
 
 #endif /* _NETWORK_INTERFACE_H_ */

@@ -54,7 +54,6 @@ class Flow : public GenericHashEntry {
   u_int32_t vrfId;
   u_int8_t protocol, src2dst_tcp_flags, dst2src_tcp_flags;
   u_int16_t alert_score;
-  time_t performed_lua_calls[FLOW_LUA_CALL_MAX_VAL];
   struct ndpi_flow_struct *ndpiFlow;
 
   Bitmap status_map;              /* The bitmap of the possible problems on the flow */
@@ -70,7 +69,7 @@ class Flow : public GenericHashEntry {
   bool detection_completed, protocol_processed, fully_processed,
     cli2srv_direction, twh_over, twh_ok, dissect_next_http_packet, passVerdict,
     l7_protocol_guessed, flow_dropped_counts_increased,
-    good_low_flow_detected, good_ssl_hs, update_flow_port_stats,
+    good_tls_hs, update_flow_port_stats,
     quota_exceeded, has_malicious_cli_signature, has_malicious_srv_signature;
 #ifdef ALERTED_FLOWS_DEBUG
   bool iface_alert_inc, iface_alert_dec;
@@ -99,7 +98,10 @@ class Flow : public GenericHashEntry {
   u_int32_t marker;
 #endif
   char *external_alert;
-  bool trigger_scheduled_periodic_update, trigger_immediate_periodic_update;
+  bool trigger_immediate_periodic_update; /* needed to process external alerts */
+  bool pending_lua_call_protocol_detected; /* Whether the protocol detected lua script has been called on this flow */
+  time_t next_lua_call_periodic_update; /* The time at which the periodic lua script on this flow shall be called */
+  u_int32_t periodic_update_ctr;
  
   union {
     struct {
@@ -124,7 +126,7 @@ class Flow : public GenericHashEntry {
     } ssh;
 
     struct {
-      u_int16_t ssl_version;
+      u_int16_t tls_version;
       char *certificate, *server_certificate;
       /* Certificate dissection */
       char *certificate_buf_leftover;
@@ -137,7 +139,7 @@ class Flow : public GenericHashEntry {
 	u_int16_t server_cipher;
 	ndpi_cipher_weakness server_unsafe_cipher;
       } ja3;
-    } ssl;
+    } tls;
 
     struct {
       u_int8_t icmp_type, icmp_code;
@@ -217,18 +219,9 @@ class Flow : public GenericHashEntry {
   void allocDPIMemory();
   bool checkTor(char *hostname);
   void setBittorrentHash(char *hash);
-  bool isLowGoodput() const;
   static void updatePacketStats(InterarrivalStats *stats, const struct timeval *when, bool update_iat);
   bool isReadyToBeMarkedAsIdle();
-  inline bool isDeviceAllowedProtocol() const {
-      return(!cli_host || !srv_host ||
-        ((cli_host->getDeviceAllowedProtocolStatus(ndpiDetectedProtocol, true) == device_proto_allowed) &&
-         (srv_host->getDeviceAllowedProtocolStatus(ndpiDetectedProtocol, false) == device_proto_allowed)));
-  }
   char* printTCPflags(u_int8_t flags, char * const buf, u_int buf_len) const;
-  inline bool isProto(u_int16_t p) const { return(((ndpiDetectedProtocol.master_protocol == p)
-						   || (ndpiDetectedProtocol.app_protocol == p))
-						  ? true : false); }
   void update_pools_stats(const struct timeval *tv,
 			  u_int64_t diff_sent_packets, u_int64_t diff_sent_bytes,
 			  u_int64_t diff_rcvd_packets, u_int64_t diff_rcvd_bytes);
@@ -238,8 +231,26 @@ class Flow : public GenericHashEntry {
   void updateHASSH(bool as_client);
   const char* cipher_weakness2str(ndpi_cipher_weakness w) const;
   bool get_partial_traffic_stats(FlowTrafficStats **dst, FlowTrafficStats *delta, bool *first_partial) const;
-  bool isLuaCallPerformed(FlowLuaCall flow_lua_call, const struct timeval *tv);
-  void performLuaCall(FlowLuaCall flow_lua_call, const struct timeval *tv, periodic_ht_state_update_user_data_t *periodic_ht_state_update_user_data, bool quick);
+  /**
+   * @brief Method to call a given lua script on the flow
+   * @details This method calls a lua script on the flow if there is time, that is, when quick is false. Otherwise
+   *          it keep track of skipped calls by opportunely increasing certain counters in the lua engine.
+   *
+   * @param flow_lua_call The time of the call that should be performed on the flow
+   * @param tv Pointer to a timeval struct indicating the current time at which the update is performed
+   * @param periodic_ht_state_update_user_data Pointer to a structure holding update-related data (including the lua engine)
+   * @param quick Whether lua calls should be performed in quick mode as there is no more time left to fully perform them
+   */  
+  bool performLuaCall(FlowLuaCall flow_lua_call, const struct timeval *tv, periodic_ht_state_update_user_data_t *periodic_ht_state_update_user_data, bool quick);
+  /**
+   * @brief Method to possibly call lua scripts on the flow
+   * @details This method evaluates the states of the flow and possibly calls lua functions on this flow.
+   *
+   * @param tv Pointer to a timeval struct indicating the current time at which the update is performed
+   * @param periodic_ht_state_update_user_data Pointer to a structure holding update-related data (including the lua engine)
+   * @param quick Whether lua calls should be performed in quick mode as there is no more time left to fully perform them
+   */
+  void performLuaCalls(const struct timeval *tv, periodic_ht_state_update_user_data_t *periodic_ht_state_update_user_data, bool quick);
 
  public:
   Flow(NetworkInterface *_iface,
@@ -263,17 +274,27 @@ class Flow : public GenericHashEntry {
   void freeDPIMemory();
   static const ndpi_protocol ndpiUnknownProtocol;
   bool isTiny() const;
-  inline bool isSSL()  const { return(isProto(NDPI_PROTOCOL_TLS));  }
+  inline bool isProto(u_int16_t p) const { return(((ndpiDetectedProtocol.master_protocol == p)
+						   || (ndpiDetectedProtocol.app_protocol == p))
+						  ? true : false); }
+  inline bool isTLS()  const { return(isProto(NDPI_PROTOCOL_TLS));  }
   inline bool isSSH()  const { return(isProto(NDPI_PROTOCOL_SSH));  }
   inline bool isDNS()  const { return(isProto(NDPI_PROTOCOL_DNS));  }
   inline bool isDHCP() const { return(isProto(NDPI_PROTOCOL_DHCP)); }
   inline bool isHTTP() const { return(isProto(NDPI_PROTOCOL_HTTP)); }
   inline bool isICMP() const { return(isProto(NDPI_PROTOCOL_IP_ICMP) || isProto(NDPI_PROTOCOL_IP_ICMPV6)); }
+  inline bool isDeviceAllowedProtocol() const {
+      return(!cli_host || !srv_host ||
+        ((cli_host->getDeviceAllowedProtocolStatus(ndpiDetectedProtocol, true) == device_proto_allowed) &&
+         (srv_host->getDeviceAllowedProtocolStatus(ndpiDetectedProtocol, false) == device_proto_allowed)));
+  }
   inline bool isMaskedFlow() {
     return(!get_cli_host() || Utils::maskHost(get_cli_host()->isLocalHost())
 	   || !get_srv_host() || Utils::maskHost(get_srv_host()->isLocalHost()));
   };
+  inline const char* getServerCipherClass()  const { return(isTLS() ? cipher_weakness2str(protos.tls.ja3.server_unsafe_cipher) : NULL); }
   char* serialize(bool es_json = false);
+  void flow2alertJson(ndpi_serializer *serializer, time_t now);
   json_object* flow2json();
   json_object* flow2es(json_object *flow_object);
   inline u_int8_t getTcpFlags()        const { return(src2dst_tcp_flags | dst2src_tcp_flags);  };
@@ -298,7 +319,7 @@ class Flow : public GenericHashEntry {
   void timeval_diff(struct timeval *begin, const struct timeval *end, struct timeval *result, u_short divide_by_two);
   const char* getFlowInfo();
   inline char* getFlowServerInfo() {
-    return (isSSL() && protos.ssl.certificate) ? protos.ssl.certificate : host_server_name;
+    return (isTLS() && protos.tls.certificate) ? protos.tls.certificate : host_server_name;
   }
   inline char* getBitTorrentHash() { return(bt_hash);          };
   inline void  setBTHash(char *h)  { if(!h) return; if(bt_hash) free(bt_hash); bt_hash = h; }
@@ -345,6 +366,8 @@ class Flow : public GenericHashEntry {
 		    u_int in_fragments, u_int out_fragments, time_t last_seen);
   inline bool isThreeWayHandshakeOK()    const { return(twh_ok);                          };
   inline bool isDetectionCompleted()     const { return(detection_completed);             };
+  inline bool isOneWay()                 const { return(get_packets() && (!get_packets_cli2srv() || !get_packets_srv2cli())); };
+  inline bool isBidirectional()          const { return(get_packets_cli2srv() && get_packets_cli2srv());                      };
   inline void* get_cli_id()              const { return(cli_id);                          };
   inline void* get_srv_id()              const { return(srv_id);                          };
   inline u_int32_t get_cli_ipv4()        const { return(cli_host->get_ip()->get_ipv4());  };
@@ -439,7 +462,6 @@ class Flow : public GenericHashEntry {
 		       u_int16_t protocol);
   void lua(lua_State* vm, AddressTree * ptree, DetailsLevel details_level, bool asListElement);
   void lua_get_min_info(lua_State* vm);
-  void lua_get_tcp_packet_issues(lua_State* vm);
   void lua_duration_info(lua_State* vm);
   void lua_device_protocol_allowed_info(lua_State *vm);
   void lua_get_icmp_info(lua_State *vm) const;
@@ -456,7 +478,7 @@ class Flow : public GenericHashEntry {
   void lua_get_time(lua_State* vm) const;
   void lua_get_ip(lua_State *vm, bool client) const;
   void lua_get_info(lua_State *vm, bool client) const;
-  void lua_get_ssl_info(lua_State *vm) const;
+  void lua_get_tls_info(lua_State *vm) const;
   void lua_get_ssh_info(lua_State *vm) const;
   void lua_get_http_info(lua_State *vm) const;
   void lua_get_dns_info(lua_State *vm) const;
@@ -473,7 +495,7 @@ class Flow : public GenericHashEntry {
   bool dumpFlow(const struct timeval *tv, NetworkInterface *dumper);
   bool match(AddressTree *ptree);
   void dissectHTTP(bool src2dst_direction, char *payload, u_int16_t payload_len);
-  void dissectSSL(char *payload, u_int16_t payload_len);
+  void dissectTLS(char *payload, u_int16_t payload_len);
   void dissectSSDP(bool src2dst_direction, char *payload, u_int16_t payload_len);
   void dissectMDNS(u_int8_t *payload, u_int16_t payload_len);
   void dissectBittorrent(char *payload, u_int16_t payload_len);
@@ -490,6 +512,11 @@ class Flow : public GenericHashEntry {
   inline void getICMP(u_int8_t *_icmp_type, u_int8_t *_icmp_code, u_int16_t *_icmp_echo_id) {
     *_icmp_type = protos.icmp.icmp_type, *_icmp_code = protos.icmp.icmp_code, *_icmp_echo_id = protos.icmp.icmp_echo_id;
   }
+  inline u_int8_t getICMPType()     { return(isICMP() ? protos.icmp.icmp_type : 0); }
+  inline bool hasInvalidDNSQueryChars() { return(isDNS() && protos.dns.invalid_chars_in_query); }
+  inline bool hasMaliciousSignature() { return(has_malicious_cli_signature || has_malicious_srv_signature); }
+  inline bool shouldCheckTLSCertificate() { return(isTLS() && !protos.tls.subject_alt_name_match
+              && protos.tls.server_certificate && protos.tls.certificate); }
   inline char* getDNSQuery()        { return(isDNS() ? protos.dns.last_query : (char*)"");  }
   inline void  setDNSQuery(char *v) { if(isDNS()) { if(protos.dns.last_query) free(protos.dns.last_query);  protos.dns.last_query = v; } }
   inline void  setDNSQueryType(u_int16_t t) { if(isDNS()) { protos.dns.last_query_type = t; } }
@@ -502,8 +529,8 @@ class Flow : public GenericHashEntry {
   inline void  setHTTPMethod(char *v)  { if(isHTTP()) { if(protos.http.last_method) free(protos.http.last_method);  protos.http.last_method = v; } }
   inline void  setHTTPRetCode(u_int16_t c) { if(isHTTP()) { protos.http.last_return_code = c; } }
   inline char* getHTTPContentType() { return(isHTTP() ? protos.http.last_content_type : (char*)"");   }
-  inline char* getSSLCertificate()  { return(isSSL() ? protos.ssl.certificate : (char*)""); }
-  bool isSSLProto();
+  inline char* getTLSCertificate()  { return(isTLS() ? protos.tls.certificate : (char*)""); }
+  bool isTLSProto();
 
   void setExternalAlert(json_object *a);
   void luaRetrieveExternalAlert(lua_State *vm);
@@ -563,7 +590,6 @@ class Flow : public GenericHashEntry {
 
   inline void setScore(u_int16_t score)    { alert_score = score; };
   inline u_int16_t getScore()              { return(alert_score); };
-  inline bool isTwhOver()                  { return(twh_over); };
 
 #ifdef HAVE_NEDGE
   inline void setLastConntrackUpdate(u_int32_t when) { last_conntrack_update = when; }
@@ -613,7 +639,7 @@ class Flow : public GenericHashEntry {
      && !idle() && isIdle(10 * getInterface()->getFlowMaxIdle()));
   }
 
-  inline u_int16_t getSSLVersion()  { return(isSSL() ? (protos.ssl.ssl_version) : 0); }
+  inline u_int16_t getTLSVersion()  { return(isTLS() ? (protos.tls.tls_version) : 0); }
 };
 
 #endif /* _FLOW_H_ */

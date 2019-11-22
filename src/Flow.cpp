@@ -42,8 +42,8 @@ Flow::Flow(NetworkInterface *_iface,
   vlanId = _vlanId, protocol = _protocol, cli_port = _cli_port, srv_port = _srv_port;
   cli2srv_last_packets = 0, cli2srv_last_bytes = 0,
     srv2cli_last_packets = 0, srv2cli_last_bytes = 0,
-    cli_host = srv_host = NULL, good_low_flow_detected = false,
-    srv2cli_last_goodput_bytes = cli2srv_last_goodput_bytes = 0, good_ssl_hs = true,
+    cli_host = srv_host = NULL,
+    srv2cli_last_goodput_bytes = cli2srv_last_goodput_bytes = 0, good_tls_hs = true,
     flow_dropped_counts_increased = false, vrfId = 0;
     alert_score = CONST_NO_SCORE_SET;
 
@@ -57,6 +57,7 @@ Flow::Flow(NetworkInterface *_iface,
   fully_processed = false;
   ndpiDetectedProtocol = ndpiUnknownProtocol;
   doNotExpireBefore = iface->getTimeLastPktRcvd() + DONT_NOT_EXPIRE_BEFORE_SEC;
+  periodic_update_ctr = 0;
 
 #ifdef HAVE_NEDGE
   last_conntrack_update = 0;
@@ -64,7 +65,6 @@ Flow::Flow(NetworkInterface *_iface,
 #endif
 
   icmp_info = _icmp_info ? new (std::nothrow) ICMPinfo(*_icmp_info) : NULL;
-  memset(performed_lua_calls, 0, sizeof(performed_lua_calls));
 
   ndpiFlow = NULL, cli_id = srv_id = NULL;
   cli_ebpf = srv_ebpf = NULL;
@@ -86,7 +86,9 @@ Flow::Flow(NetworkInterface *_iface,
     ndpi_init_data_analysis(&stats.srv2cli_bytes_stats, 0);
   
   external_alert = NULL;
-  trigger_scheduled_periodic_update = trigger_immediate_periodic_update = false;
+  trigger_immediate_periodic_update = false;
+  pending_lua_call_protocol_detected = false;
+  next_lua_call_periodic_update = 0;
 
   memset(&last_db_dump, 0, sizeof(last_db_dump));
   memset(&protos, 0, sizeof(protos));
@@ -215,8 +217,8 @@ Flow::Flow(NetworkInterface *_iface,
     break;
   }
 
-  protos.ssl.dissect_certificate = true,
-    protos.ssl.subject_alt_name_match = false;
+  protos.tls.dissect_certificate = true,
+    protos.tls.subject_alt_name_match = false;
 }
 
 /* *************************************** */
@@ -286,11 +288,11 @@ Flow::~Flow() {
     if(protos.ssh.server_signature)  free(protos.ssh.server_signature);
     if(protos.ssh.hassh.client_hash) free(protos.ssh.hassh.client_hash);
     if(protos.ssh.hassh.server_hash) free(protos.ssh.hassh.server_hash);
-  } else if(isSSL()) {
-    if(protos.ssl.certificate)         free(protos.ssl.certificate);
-    if(protos.ssl.server_certificate)  free(protos.ssl.server_certificate);
-    if(protos.ssl.ja3.client_hash)     free(protos.ssl.ja3.client_hash);
-    if(protos.ssl.ja3.server_hash)     free(protos.ssl.ja3.server_hash);
+  } else if(isTLS()) {
+    if(protos.tls.certificate)         free(protos.tls.certificate);
+    if(protos.tls.server_certificate)  free(protos.tls.server_certificate);
+    if(protos.tls.ja3.client_hash)     free(protos.tls.ja3.client_hash);
+    if(protos.tls.ja3.server_hash)     free(protos.tls.ja3.server_hash);
   }
 
   if(bt_hash)                free(bt_hash);
@@ -400,10 +402,10 @@ void Flow::processDetectedProtocol() {
 				 ndpiFlow->protos.stun_ssl.ssl.server_certificate);
 #endif
 
-    if(protos.ssl.certificate
+    if(protos.tls.certificate
        && cli_host
        && cli_host->isLocalHost())
-      cli_host->incrVisitedWebSite(protos.ssl.certificate);
+      cli_host->incrVisitedWebSite(protos.tls.certificate);
 
     protocol_processed = true;
     break;
@@ -436,98 +438,106 @@ void Flow::processDetectedProtocol() {
  * including extra dissection information (e.g. the TLS certificate), is
  * available. */
 void Flow::processFullyDissectedProtocol() {
-  u_int16_t l7proto;
-
-  if((ndpiFlow == NULL) || (fully_processed))
+  if(fully_processed)
     return;
 
-  l7proto = ndpi_get_lower_proto(ndpiDetectedProtocol);
+  if(ndpiFlow) {
+    u_int16_t l7proto;
 
-  switch(l7proto) {
+    l7proto = ndpi_get_lower_proto(ndpiDetectedProtocol);
 
-  case NDPI_PROTOCOL_SSH:
-    if(protos.ssh.client_signature == NULL)
-      protos.ssh.client_signature = strdup(ndpiFlow->protos.ssh.client_signature);
-    if(protos.ssh.server_signature == NULL)
-      protos.ssh.server_signature = strdup(ndpiFlow->protos.ssh.server_signature);
+    switch(l7proto) {
 
-    if(protos.ssh.hassh.client_hash == NULL
-       && ndpiFlow->protos.ssh.hassh_client[0] != '\0') {
-      protos.ssh.hassh.client_hash = strdup(ndpiFlow->protos.ssh.hassh_client);
-      updateHASSH(true /* As client */);
-    }
+    case NDPI_PROTOCOL_SSH:
+      if(protos.ssh.client_signature == NULL)
+	protos.ssh.client_signature = strdup(ndpiFlow->protos.ssh.client_signature);
+      if(protos.ssh.server_signature == NULL)
+	protos.ssh.server_signature = strdup(ndpiFlow->protos.ssh.server_signature);
 
-    if(protos.ssh.hassh.server_hash == NULL
-       && ndpiFlow->protos.ssh.hassh_server[0] != '\0') {
-      protos.ssh.hassh.server_hash = strdup(ndpiFlow->protos.ssh.hassh_server);
-      updateHASSH(false /* As server */);
-    }
-    break;
+      if(protos.ssh.hassh.client_hash == NULL
+	 && ndpiFlow->protos.ssh.hassh_client[0] != '\0') {
+	protos.ssh.hassh.client_hash = strdup(ndpiFlow->protos.ssh.hassh_client);
+	updateHASSH(true /* As client */);
+      }
 
-  case NDPI_PROTOCOL_TLS:
-    protos.ssl.ssl_version = ndpiFlow->protos.stun_ssl.ssl.ssl_version;
+      if(protos.ssh.hassh.server_hash == NULL
+	 && ndpiFlow->protos.ssh.hassh_server[0] != '\0') {
+	protos.ssh.hassh.server_hash = strdup(ndpiFlow->protos.ssh.hassh_server);
+	updateHASSH(false /* As server */);
+      }
+      break;
 
-    if((protos.ssl.server_certificate == NULL)
-       && (ndpiFlow->protos.stun_ssl.ssl.server_certificate[0] != '\0')) {
-      protos.ssl.server_certificate = strdup(ndpiFlow->protos.stun_ssl.ssl.server_certificate);
-    }
+    case NDPI_PROTOCOL_TLS:
+      protos.tls.tls_version = ndpiFlow->protos.stun_ssl.ssl.ssl_version;
 
-    if((protos.ssl.certificate == NULL)
-       && (ndpiFlow->protos.stun_ssl.ssl.client_certificate[0] != '\0')) {
-      protos.ssl.certificate = strdup(ndpiFlow->protos.stun_ssl.ssl.client_certificate);
-    }
+      if((protos.tls.server_certificate == NULL)
+	 && (ndpiFlow->protos.stun_ssl.ssl.server_certificate[0] != '\0')) {
+	protos.tls.server_certificate = strdup(ndpiFlow->protos.stun_ssl.ssl.server_certificate);
+      }
 
-    if((protos.ssl.ja3.client_hash == NULL) && (ndpiFlow->protos.stun_ssl.ssl.ja3_client[0] != '\0')) {
-      protos.ssl.ja3.client_hash = strdup(ndpiFlow->protos.stun_ssl.ssl.ja3_client);
-      updateCliJA3();
-    }
+      if((protos.tls.certificate == NULL)
+	 && (ndpiFlow->protos.stun_ssl.ssl.client_certificate[0] != '\0')) {
+	protos.tls.certificate = strdup(ndpiFlow->protos.stun_ssl.ssl.client_certificate);
+      }
 
-    if((protos.ssl.ja3.server_hash == NULL) && (ndpiFlow->protos.stun_ssl.ssl.ja3_server[0] != '\0')) {
-      protos.ssl.ja3.server_hash = strdup(ndpiFlow->protos.stun_ssl.ssl.ja3_server);
-      protos.ssl.ja3.server_unsafe_cipher = ndpiFlow->protos.stun_ssl.ssl.server_unsafe_cipher;
-      protos.ssl.ja3.server_cipher = ndpiFlow->protos.stun_ssl.ssl.server_cipher;
-      updateSrvJA3();
-    }
-    break;
+      if((protos.tls.ja3.client_hash == NULL) && (ndpiFlow->protos.stun_ssl.ssl.ja3_client[0] != '\0')) {
+	protos.tls.ja3.client_hash = strdup(ndpiFlow->protos.stun_ssl.ssl.ja3_client);
+	updateCliJA3();
+      }
 
-  case NDPI_PROTOCOL_DNS:
-    if(ntop->getPrefs()->decode_dns_responses()) {
+      if((protos.tls.ja3.server_hash == NULL) && (ndpiFlow->protos.stun_ssl.ssl.ja3_server[0] != '\0')) {
+	protos.tls.ja3.server_hash = strdup(ndpiFlow->protos.stun_ssl.ssl.ja3_server);
+	protos.tls.ja3.server_unsafe_cipher = ndpiFlow->protos.stun_ssl.ssl.server_unsafe_cipher;
+	protos.tls.ja3.server_cipher = ndpiFlow->protos.stun_ssl.ssl.server_cipher;
+	updateSrvJA3();
+      }
+      break;
 
-      if(ndpiFlow->host_server_name[0] != '\0') {
-	char delimiter = '@', *name = NULL;
-	char *at = (char*)strchr((const char*)ndpiFlow->host_server_name, delimiter);
+    case NDPI_PROTOCOL_DNS:
+      if(ntop->getPrefs()->decode_dns_responses()) {
 
-	/* Consider only positive DNS replies */
-	if(at != NULL)
-	  name = &at[1], at[0] = '\0';
-	else if((!strstr((const char*)ndpiFlow->host_server_name, ".in-addr.arpa"))
-		&& (!strstr((const char*)ndpiFlow->host_server_name, ".ip6.arpa")))
-	  name = (char*)ndpiFlow->host_server_name;
+	if(ndpiFlow->host_server_name[0] != '\0') {
+	  char delimiter = '@', *name = NULL;
+	  char *at = (char*)strchr((const char*)ndpiFlow->host_server_name, delimiter);
 
-	if(name) {
-	  // ntop->getTrace()->traceEvent(TRACE_NORMAL, "[DNS] %s", (char*)ndpiFlow->host_server_name);
-	  protos.dns.last_return_code = ndpiFlow->protos.dns.reply_code;
+	  /* Consider only positive DNS replies */
+	  if(at != NULL)
+	    name = &at[1], at[0] = '\0';
+	  else if((!strstr((const char*)ndpiFlow->host_server_name, ".in-addr.arpa"))
+		  && (!strstr((const char*)ndpiFlow->host_server_name, ".ip6.arpa")))
+	    name = (char*)ndpiFlow->host_server_name;
 
-	  if(ndpiFlow->protos.dns.reply_code == 0) {
-	    if(ndpiFlow->protos.dns.num_answers > 0) {
-	      protocol_processed = true;
+	  if(name) {
+	    // ntop->getTrace()->traceEvent(TRACE_NORMAL, "[DNS] %s", (char*)ndpiFlow->host_server_name);
+	    protos.dns.last_return_code = ndpiFlow->protos.dns.reply_code;
 
-	      if(at != NULL) {
-		// ntop->getTrace()->traceEvent(TRACE_NORMAL, "[DNS] %s <-> %s", name, (char*)ndpiFlow->host_server_name);
-		ntop->getRedis()->setResolvedAddress(name, (char*)ndpiFlow->host_server_name);
+	    if(ndpiFlow->protos.dns.reply_code == 0) {
+	      if(ndpiFlow->protos.dns.num_answers > 0) {
+		protocol_processed = true;
+
+		if(at != NULL) {
+		  // ntop->getTrace()->traceEvent(TRACE_NORMAL, "[DNS] %s <-> %s", name, (char*)ndpiFlow->host_server_name);
+		  ntop->getRedis()->setResolvedAddress(name, (char*)ndpiFlow->host_server_name);
+		}
 	      }
 	    }
 	  }
 	}
       }
+      break;
     }
-    break;
-  };
-
-  fully_processed = true;
+  }
 
   /* Free the nDPI memory */
   freeDPIMemory();
+
+  fully_processed = true;
+
+  /*
+    We need to change state here as in Lua scripts we need to know
+    all metadata available
+  */
+  set_hash_entry_state_flow_protocoldetected();
 }
 
 /* *************************************** */
@@ -601,12 +611,6 @@ void Flow::setDetectedProtocol(ndpi_protocol proto_id, bool forceDetection) {
 
       /* Always called, not just for TCP or UDP */
       processFullyDissectedProtocol();
-
-      /*
-	We need to change state here as in Lua scripts we need to know
-	all metadata available
-      */
-      set_hash_entry_state_flow_protocoldetected();
     }
 
 #ifdef BLACKLISTED_FLOWS_DEBUG
@@ -858,9 +862,9 @@ char* Flow::print(char *buf, u_int buf_len) const {
 	   (long long unsigned) stats.cli2srv_bytes, (long long unsigned) stats.srv2cli_bytes,
 	   printTCPflags(src2dst_tcp_flags, buf3, sizeof(buf3)),
 	   printTCPflags(dst2src_tcp_flags, buf4, sizeof(buf4)),
-	   (isSSL() && protos.ssl.certificate) ? "[" : "",
-	   (isSSL() && protos.ssl.certificate) ? protos.ssl.certificate : "",
-	   (isSSL() && protos.ssl.certificate) ? "]" : ""
+	   (isTLS() && protos.tls.certificate) ? "[" : "",
+	   (isTLS() && protos.tls.certificate) ? protos.tls.certificate : "",
+	   (isTLS() && protos.tls.certificate) ? "]" : ""
 #if defined(NTOPNG_PRO) && defined(SHAPER_DEBUG)
 	   , shapers
 #endif
@@ -1061,11 +1065,6 @@ void Flow::periodic_stats_update(void *user_data, bool quick) {
     diff_rcvd_bytes = rcvd_bytes - srv2cli_last_bytes, diff_rcvd_goodput_bytes = rcvd_goodput_bytes - srv2cli_last_goodput_bytes;
   prev_srv2cli_last_bytes = srv2cli_last_bytes, prev_srv2cli_last_goodput_bytes = srv2cli_last_goodput_bytes,
     prev_srv2cli_last_packets = srv2cli_last_packets;
-
-  if(diff_sent_packets || diff_rcvd_packets) {
-    /* New packets have been exchanged, the lua update callback needs be called */
-    trigger_scheduled_periodic_update = true;
-  }
 
   cli2srv_last_packets = sent_packets, cli2srv_last_bytes = sent_bytes,
     cli2srv_last_goodput_bytes = sent_goodput_bytes;
@@ -1304,27 +1303,6 @@ void Flow::periodic_stats_update(void *user_data, bool quick) {
 	bytes_thpt = bytes_msec, goodput_bytes_thpt = goodput_bytes_msec;
 	if(top_bytes_thpt < bytes_thpt) top_bytes_thpt = bytes_thpt;
 	if(top_goodput_bytes_thpt < goodput_bytes_thpt) top_goodput_bytes_thpt = goodput_bytes_thpt;
-
-	if(!idle() /* set_idle() deals with low goodput flows when they become idle */
-	   && iface->getIfType() != interface_type_ZMQ
-	   && protocol == IPPROTO_TCP
-	   && get_goodput_bytes() > 0
-	   && ndpiDetectedProtocol.app_protocol != NDPI_PROTOCOL_SSH) {
-	  if(isLowGoodput()) {
-	    if(!good_low_flow_detected) {
-	      if(cli_host) cli_host->incLowGoodputFlows(tv->tv_sec, true);
-	      if(srv_host) srv_host->incLowGoodputFlows(tv->tv_sec, false);
-	      good_low_flow_detected = true;
-	    }
-	  } else {
-	    if(good_low_flow_detected) {
-	      /* back to normal */
-	      if(cli_host) cli_host->decLowGoodputFlows(tv->tv_sec, true);
-	      if(srv_host) srv_host->decLowGoodputFlows(tv->tv_sec, false);
-	      good_low_flow_detected = false;
-	    }
-	  }
-	}
 
 #ifdef NTOPNG_PRO
 	throughputTrend.update(bytes_thpt), goodputTrend.update(goodput_bytes_thpt);
@@ -1599,8 +1577,6 @@ void Flow::lua(lua_State* vm, AddressTree * ptree,
     lua_push_int32_table_entry(vm, "cli.devtype", (cli_host && cli_host->getMac()) ? cli_host->getMac()->getDeviceType() : device_unknown);
     lua_push_int32_table_entry(vm, "srv.devtype", (srv_host && srv_host->getMac()) ? srv_host->getMac()->getDeviceType() : device_unknown);
 
-    lua_push_bool_table_entry(vm, "flow_goodput.low", isLowGoodput());
-
 #ifdef HAVE_NEDGE
     if(iface->is_bridge_interface())
       lua_push_bool_table_entry(vm, "verdict.pass", isPassVerdict() ? (json_bool)1 : (json_bool)0);
@@ -1654,8 +1630,8 @@ void Flow::lua(lua_State* vm, AddressTree * ptree,
       if(isSSH())
 	lua_get_ssh_info(vm);
 
-      if(isSSL())
-	lua_get_ssl_info(vm);
+      if(isTLS())
+	lua_get_tls_info(vm);
     }
 
     if(get_json_info()) {
@@ -1820,24 +1796,27 @@ void Flow::periodic_hash_entry_state_update(void *user_data, bool quick) {
     break;
 
   case hash_entry_state_flow_protocoldetected:
-    performLuaCall(flow_lua_call_protocol_detected, tv, periodic_ht_state_update_user_data, quick);
+    pending_lua_call_protocol_detected = true;
     set_hash_entry_state_active();
     break;
 
   case hash_entry_state_active:
-    performLuaCall(flow_lua_call_periodic_update, tv, periodic_ht_state_update_user_data, quick);
+    if(next_lua_call_periodic_update == 0) next_lua_call_periodic_update = tv->tv_sec + FLOW_LUA_CALL_PERIODIC_UPDATE_SECS;
     if(!quick)
-      periodic_dump_check(tv); /* NOTE: this call can take a long time! */
+      periodic_dump_check(tv); /* TODO: move it in a lua script; NOTE: this call can take a long time! */
     /* Don't change state: purgeIdle() will do */
     break;
 
   case hash_entry_state_idle:
     postFlowSetIdle(tv, quick);
-    performLuaCall(flow_lua_call_idle, tv, periodic_ht_state_update_user_data, quick);
     if(!quick)
-      periodic_dump_check(tv); /* NOTE: this call can take a long time! */
+      periodic_dump_check(tv); /* TODO: move it in a lua script; NOTE: this call can take a long time! */
     break;
   }
+
+  /* Now that the states in the finite state machine have been moved forward, it is time to check and 
+     possibly perform lua calls on the flow. */
+  performLuaCalls(tv, periodic_ht_state_update_user_data, quick);
 
   GenericHashEntry::periodic_hash_entry_state_update(user_data, quick);
 }
@@ -2061,8 +2040,8 @@ json_object* Flow::flow2json() {
   if(bt_hash)
     json_object_object_add(my_object, "BITTORRENT_HASH", json_object_new_string(bt_hash));
 
-  if(isSSL() && protos.ssl.certificate)
-    json_object_object_add(my_object, "SSL_SERVER_NAME", json_object_new_string(protos.ssl.certificate));
+  if(isTLS() && protos.tls.certificate)
+    json_object_object_add(my_object, "SSL_SERVER_NAME", json_object_new_string(protos.tls.certificate));
 
 #ifdef HAVE_NEDGE
   if(iface && iface->is_bridge_interface())
@@ -2074,6 +2053,62 @@ json_object* Flow::flow2json() {
   if(srv_ebpf) srv_ebpf->getJSONObject(my_object, false);
 
   return(my_object);
+}
+
+/* *************************************** */
+
+/* Create a JSON in the alerts format
+ * Using the nDPI json serializer instead of jsonc for faster speed (~2.5x) */
+void Flow::flow2alertJson(ndpi_serializer *s, time_t now) {
+  ndpi_serializer json_info;
+  u_int32_t buflen;
+  const char *info;
+  char buf[64];
+
+  ndpi_init_serializer(&json_info, ndpi_serialization_format_json);
+
+  /* AlertsManager::storeFlowAlert requires a string */
+  info = getFlowInfo();
+  ndpi_serialize_string_string(&json_info, "info", info ? info : "");
+  ndpi_serialize_string_string(&json_info, "status_info", alert_status_info ? alert_status_info : "");
+  ndpi_serialize_string_string(s, "alert_json", ndpi_serializer_get_buffer(&json_info, &buflen));
+  ndpi_term_serializer(&json_info);
+
+  ndpi_serialize_string_int32(s, "ifid", iface->get_id());
+  ndpi_serialize_string_string(s, "action", "store");
+
+  ndpi_serialize_string_boolean(s, "is_flow_alert", true);
+  ndpi_serialize_string_int64(s, "alert_tstamp", now);
+  ndpi_serialize_string_int64(s, "flow_status", alerted_status);
+  ndpi_serialize_string_int32(s, "alert_type", alert_type);
+  ndpi_serialize_string_int32(s, "alert_severity", alert_level);
+
+  ndpi_serialize_string_int32(s, "vlan_id", get_vlan_id());
+  ndpi_serialize_string_int32(s, "proto", protocol);
+  ndpi_serialize_string_int32(s, "l7_master_proto", ndpiDetectedProtocol.master_protocol);
+  ndpi_serialize_string_int32(s, "l7_proto", ndpiDetectedProtocol.app_protocol);
+
+  ndpi_serialize_string_int64(s, "cli2srv_bytes", get_bytes_cli2srv());
+  ndpi_serialize_string_int64(s, "cli2srv_packets", get_packets_cli2srv());
+  ndpi_serialize_string_int64(s, "srv2cli_bytes", get_bytes_srv2cli());
+  ndpi_serialize_string_int64(s, "srv2cli_packets", get_packets_srv2cli());
+
+  if(cli_host) {
+    ndpi_serialize_string_string(s, "cli_addr", cli_host->get_ip()->print(buf, sizeof(buf)));
+    ndpi_serialize_string_string(s, "cli_country", cli_host->get_country(buf, sizeof(buf)));
+    ndpi_serialize_string_string(s, "cli_os", cli_host->getOSDetail(buf, sizeof(buf)));
+    ndpi_serialize_string_int32(s, "cli_asn", cli_host->get_asn());
+    ndpi_serialize_string_boolean(s, "cli_localhost", cli_host->isLocalHost());
+    ndpi_serialize_string_boolean(s, "cli_blacklisted", cli_host->isBlacklisted());
+  }
+  if(srv_host) {
+    ndpi_serialize_string_string(s, "srv_addr", srv_host->get_ip()->print(buf, sizeof(buf)));
+    ndpi_serialize_string_string(s, "srv_country", srv_host->get_country(buf, sizeof(buf)));
+    ndpi_serialize_string_string(s, "srv_os", srv_host->getOSDetail(buf, sizeof(buf)));
+    ndpi_serialize_string_int32(s, "srv_asn", srv_host->get_asn());
+    ndpi_serialize_string_boolean(s, "srv_localhost", srv_host->isLocalHost());
+    ndpi_serialize_string_boolean(s, "srv_blacklisted", srv_host->isBlacklisted());
+  }
 }
 
 /* *************************************** */
@@ -2220,7 +2255,7 @@ bool Flow::isBlacklistedFlow() const {
 
 /* *************************************** */
 
-bool Flow::isSSLProto() {
+bool Flow::isTLSProto() {
   u_int16_t lower = ndpi_get_lower_proto(ndpiDetectedProtocol);
 
   return(
@@ -2476,8 +2511,8 @@ const char* Flow::getFlowInfo() {
     else if(isHTTP() && protos.http.last_url)
       return protos.http.last_url;
 
-    else if(isSSL() && protos.ssl.certificate)
-      return protos.ssl.certificate;
+    else if(isTLS() && protos.tls.certificate)
+      return protos.tls.certificate;
 
     else if(bt_hash)
       return bt_hash;
@@ -3358,19 +3393,6 @@ void Flow::recheckQuota(const struct tm *now) {
 
 #endif
 
-/* *************************************** */
-
-bool Flow::isLowGoodput() const {
-  if(iface->getIfType() == interface_type_ZMQ
-     || iface->getIfType() == interface_type_NETFILTER
-     || iface->getIfType() == interface_type_SYSLOG
-     || protocol == IPPROTO_UDP)
-    return(false);
-  else
-    return((get_duration() >= FLOW_GOODPUT_MIN_DURATION
-	    && ((get_goodput_bytes()*100)/(get_bytes()+1 /* avoid zero divisions */)) < FLOW_GOODPUT_THRESHOLD) ? true : false);
-}
-
 /* ***************************************************** */
 
 bool Flow::isTiny() const {
@@ -3501,22 +3523,22 @@ void Flow::setParsedeBPFInfo(const ParsedeBPF * const ebpf, bool src2dst_directi
 /* ***************************************************** */
 
 void Flow::updateCliJA3() {
-  if(cli_host && isSSL() && protos.ssl.ja3.client_hash) {
-    cli_host->getJA3Fingerprint()->update(protos.ssl.ja3.client_hash,
+  if(cli_host && isTLS() && protos.tls.ja3.client_hash) {
+    cli_host->getJA3Fingerprint()->update(protos.tls.ja3.client_hash,
 					  cli_ebpf ? cli_ebpf->process_info.process_name : NULL);
 
-    has_malicious_cli_signature |= ntop->isMaliciousJA3Hash(protos.ssl.ja3.client_hash);
+    has_malicious_cli_signature |= ntop->isMaliciousJA3Hash(protos.tls.ja3.client_hash);
   }
 }
 
 /* ***************************************************** */
 
 void Flow::updateSrvJA3() {
-  if(srv_host && isSSL() && protos.ssl.ja3.server_hash) {
-    srv_host->getJA3Fingerprint()->update(protos.ssl.ja3.server_hash,
+  if(srv_host && isTLS() && protos.tls.ja3.server_hash) {
+    srv_host->getJA3Fingerprint()->update(protos.tls.ja3.server_hash,
 					  srv_ebpf ? srv_ebpf->process_info.process_name : NULL);
 
-    has_malicious_srv_signature |= ntop->isMaliciousJA3Hash(protos.ssl.ja3.server_hash);
+    has_malicious_srv_signature |= ntop->isMaliciousJA3Hash(protos.tls.ja3.server_hash);
   }
 }
 
@@ -3539,11 +3561,6 @@ void Flow::updateHASSH(bool as_client) {
 
 /* Called when a flow is set_idle */
 void Flow::postFlowSetIdle(const struct timeval *tv, bool quick) {
-  if(good_low_flow_detected) {
-    if(cli_host) cli_host->decLowGoodputFlows(tv->tv_sec, true);
-    if(srv_host) srv_host->decLowGoodputFlows(tv->tv_sec, false);
-  }
-
   if(status_map.get() != status_normal) {
 #if 0
     char buf[256];
@@ -3587,9 +3604,9 @@ void Flow::fillZmqFlowCategory() {
 
 /* ***************************************************** */
 
-void Flow::dissectSSL(char *payload, u_int16_t payload_len) {
-  if(protos.ssl.dissect_certificate) {
-    u_int16_t _payload_len = payload_len + protos.ssl.certificate_leftover;
+void Flow::dissectTLS(char *payload, u_int16_t payload_len) {
+  if(protos.tls.dissect_certificate) {
+    u_int16_t _payload_len = payload_len + protos.tls.certificate_leftover;
     u_char *_payload       = (u_char*)malloc(_payload_len);
     bool find_initial_pattern = true;
 
@@ -3598,10 +3615,10 @@ void Flow::dissectSSL(char *payload, u_int16_t payload_len) {
     else {
       int i = 0;
 
-      if(protos.ssl.certificate_leftover > 0) {
-	memcpy(_payload, protos.ssl.certificate_buf_leftover, (i = protos.ssl.certificate_leftover));
-	free(protos.ssl.certificate_buf_leftover);
-	protos.ssl.certificate_buf_leftover = NULL, protos.ssl.certificate_leftover = 0;
+      if(protos.tls.certificate_leftover > 0) {
+	memcpy(_payload, protos.tls.certificate_buf_leftover, (i = protos.tls.certificate_leftover));
+	free(protos.tls.certificate_buf_leftover);
+	protos.tls.certificate_buf_leftover = NULL, protos.tls.certificate_leftover = 0;
 	find_initial_pattern = false;
       }
 
@@ -3609,7 +3626,7 @@ void Flow::dissectSSL(char *payload, u_int16_t payload_len) {
     }
 
     if(_payload_len > 4) {
-      for(int i = (find_initial_pattern ? 9 : 0); i < _payload_len - 4 && protos.ssl.dissect_certificate; i++) {
+      for(int i = (find_initial_pattern ? 9 : 0); i < _payload_len - 4 && protos.tls.dissect_certificate; i++) {
 
 	/* Look for the Subject Alternative Name Extension with OID 55 1D 11 */
 	if((find_initial_pattern && (_payload[i] == 0x55) && (_payload[i+1] == 0x1d) && (_payload[i+2] == 0x11))
@@ -3634,7 +3651,7 @@ void Flow::dissectSSL(char *payload, u_int16_t payload_len) {
 		i += 2;
 
 		if(!isalpha(_payload[i]) && _payload[i] != '*') {
-		  protos.ssl.dissect_certificate = false;
+		  protos.tls.dissect_certificate = false;
 		  break;
 		}
 		else {
@@ -3644,17 +3661,17 @@ void Flow::dissectSSL(char *payload, u_int16_t payload_len) {
 		  buf[len] = '\0';
 
 #if 0
-		  ntop->getTrace()->traceEvent(TRACE_NORMAL, "%s [Len %u][sizeof(buf): %u][ssl cert: %s]", buf, len, sizeof(buf), getSSLCertificate());
+		  ntop->getTrace()->traceEvent(TRACE_NORMAL, "%s [Len %u][sizeof(buf): %u][tls cert: %s]", buf, len, sizeof(buf), getTLSCertificate());
 #endif
 
 		  /*
 		    CNs are NOT case sensitive as per RFC 5280
 		  */
-		  if (protos.ssl.certificate
-		      && ((buf[0] != '*' && !strncasecmp(protos.ssl.certificate, buf, sizeof(buf)))
-			  || (buf[0] == '*' && strcasestr(protos.ssl.certificate, &buf[1])))) {
-		    protos.ssl.subject_alt_name_match = true;
-		    protos.ssl.dissect_certificate = false;
+		  if (protos.tls.certificate
+		      && ((buf[0] != '*' && !strncasecmp(protos.tls.certificate, buf, sizeof(buf)))
+			  || (buf[0] == '*' && strcasestr(protos.tls.certificate, &buf[1])))) {
+		    protos.tls.subject_alt_name_match = true;
+		    protos.tls.dissect_certificate = false;
 		    break;
 		  }
 
@@ -3664,17 +3681,17 @@ void Flow::dissectSSL(char *payload, u_int16_t payload_len) {
 #if 0
 		ntop->getTrace()->traceEvent(TRACE_NORMAL, "Leftover %u bytes [%u len]", _payload_len - i, len);
 #endif
-		protos.ssl.certificate_leftover = _payload_len - i;
+		protos.tls.certificate_leftover = _payload_len - i;
 
-		if((protos.ssl.certificate_buf_leftover = (char*)malloc(protos.ssl.certificate_leftover)) != NULL)
-		  memcpy(protos.ssl.certificate_buf_leftover, &_payload[i], protos.ssl.certificate_leftover);
+		if((protos.tls.certificate_buf_leftover = (char*)malloc(protos.tls.certificate_leftover)) != NULL)
+		  memcpy(protos.tls.certificate_buf_leftover, &_payload[i], protos.tls.certificate_leftover);
 		else
-		  protos.ssl.certificate_leftover = 0;
+		  protos.tls.certificate_leftover = 0;
 
 		break;
 	      }
 	    } else {
-	      protos.ssl.dissect_certificate = false;
+	      protos.tls.dissect_certificate = false;
 	      break;
 	    }
 	  } /* while */
@@ -3684,50 +3701,6 @@ void Flow::dissectSSL(char *payload, u_int16_t payload_len) {
 
     free(_payload);
   }
-}
-
-/* ***************************************************** */
-
-bool Flow::isLuaCallPerformed(FlowLuaCall flow_lua_call, const struct timeval *tv) {
-  time_t latest_call;
-  bool res;
-
-  if(flow_lua_call != flow_lua_call_idle
-     && ntop->getGlobals()->isShutdownRequested())
-    return true; /* Only flow_lua_call_idle go through during a shutdown */
-
-  switch(flow_lua_call) {
-  case flow_lua_call_periodic_update:
-    if(trigger_immediate_periodic_update) {
-      /* Periodic update was forced */
-      return false;
-    }
-
-    if(!trigger_scheduled_periodic_update)
-      return true; /* Nothing to do, no changes in flow traffic */
-
-    latest_call = !performed_lua_calls[flow_lua_call] ? get_first_seen() : performed_lua_calls[flow_lua_call];
-    res = latest_call + 30 /* at least every 30 seconds */ > tv->tv_sec;
-
-#if 0
-      char buf[256];
-
-      if(!res) {
-	ntop->getTrace()->traceEvent(TRACE_WARNING, "Time to recall [%s][latest_call: %u][performed_lua_calls[flow_lua_call]: %u][tv->tv_sec: %u]",
-				     print(buf, sizeof(buf)),
-				     latest_call,
-				     performed_lua_calls[flow_lua_call],
-				     tv->tv_sec
-				     );
-      }
-#endif
-
-      return res;
-  default:
-    break;
-  }
-
-  return performed_lua_calls[flow_lua_call];
 }
 
 /* ***************************************************** */
@@ -3954,24 +3927,6 @@ void Flow::lua_get_min_info(lua_State *vm) {
 
 /* ***************************************************** */
 
-void Flow::lua_get_tcp_packet_issues(lua_State *vm) {
-  bool isIdle = idle();
-  bool lowGoodput = isLowGoodput();
-
-  lua_newtable(vm);
-
-  if(isIdle && lowGoodput) {
-    lua_push_bool_table_entry(vm, "has_slow_data_exchange", true);
-  } else if(!isIdle && lowGoodput) {
-    if(isTCPReset() && !hasTCP3WHSCompleted())
-      lua_push_bool_table_entry(vm, "is_connection_refused", true);
-    else
-      lua_push_bool_table_entry(vm, "has_low_goodput", true);
-  }
-}
-
-/* ***************************************************** */
-
 u_int32_t Flow::getCliTcpIssues() {
   return(stats.tcp_stats_s2d.pktRetr + stats.tcp_stats_s2d.pktOOO + stats.tcp_stats_s2d.pktLost);
 }
@@ -4045,33 +4000,33 @@ void Flow::lua_get_unicast_info(lua_State* vm) const {
 
 /* ***************************************************** */
 
-void Flow::lua_get_ssl_info(lua_State *vm) const {
-  if(isSSL()) {
-    lua_push_bool_table_entry(vm, "protos.ssl.subject_alt_name_match", protos.ssl.subject_alt_name_match);
-    lua_push_int32_table_entry(vm, "protos.ssl_version", protos.ssl.ssl_version);
+void Flow::lua_get_tls_info(lua_State *vm) const {
+  if(isTLS()) {
+    lua_push_bool_table_entry(vm, "protos.tls.subject_alt_name_match", protos.tls.subject_alt_name_match);
+    lua_push_int32_table_entry(vm, "protos.tls_version", protos.tls.tls_version);
 
-    if(protos.ssl.certificate)
-      lua_push_str_table_entry(vm, "protos.ssl.certificate", protos.ssl.certificate);
+    if(protos.tls.certificate)
+      lua_push_str_table_entry(vm, "protos.tls.certificate", protos.tls.certificate);
 
-    if(protos.ssl.server_certificate)
-      lua_push_str_table_entry(vm, "protos.ssl.server_certificate", protos.ssl.server_certificate);
+    if(protos.tls.server_certificate)
+      lua_push_str_table_entry(vm, "protos.tls.server_certificate", protos.tls.server_certificate);
 
-    if(protos.ssl.ja3.client_hash) {
-      lua_push_str_table_entry(vm, "protos.ssl.ja3.client_hash", protos.ssl.ja3.client_hash);
+    if(protos.tls.ja3.client_hash) {
+      lua_push_str_table_entry(vm, "protos.tls.ja3.client_hash", protos.tls.ja3.client_hash);
 
       if(has_malicious_cli_signature)
-	lua_push_bool_table_entry(vm, "protos.ssl.ja3.client_malicious", true);
+	lua_push_bool_table_entry(vm, "protos.tls.ja3.client_malicious", true);
     }
 
-    if(protos.ssl.ja3.server_hash) {
-      lua_push_str_table_entry(vm, "protos.ssl.ja3.server_hash", protos.ssl.ja3.server_hash);
-      lua_push_str_table_entry(vm, "protos.ssl.ja3.server_unsafe_cipher",
-			       cipher_weakness2str(protos.ssl.ja3.server_unsafe_cipher));
-      lua_push_int32_table_entry(vm, "protos.ssl.ja3.server_cipher",
-				 protos.ssl.ja3.server_cipher);
+    if(protos.tls.ja3.server_hash) {
+      lua_push_str_table_entry(vm, "protos.tls.ja3.server_hash", protos.tls.ja3.server_hash);
+      lua_push_str_table_entry(vm, "protos.tls.ja3.server_unsafe_cipher",
+			       cipher_weakness2str(protos.tls.ja3.server_unsafe_cipher));
+      lua_push_int32_table_entry(vm, "protos.tls.ja3.server_cipher",
+				 protos.tls.ja3.server_cipher);
 
       if(has_malicious_srv_signature)
-	lua_push_bool_table_entry(vm, "protos.ssl.ja3.server_malicious", true);
+	lua_push_bool_table_entry(vm, "protos.tls.ja3.server_malicious", true);
     }
   }
 }
@@ -4202,23 +4157,30 @@ void Flow::lua_get_geoloc(lua_State *vm, bool client, bool coords, bool country_
 
 /* ***************************************************** */
 
-void Flow::performLuaCall(FlowLuaCall flow_lua_call, const struct timeval *tv, periodic_ht_state_update_user_data_t *periodic_ht_state_update_user_data, bool quick) {
+bool Flow::performLuaCall(FlowLuaCall flow_lua_call, const struct timeval *tv, periodic_ht_state_update_user_data_t *periodic_ht_state_update_user_data, bool quick) {
   const char *lua_call_fn_name = NULL;
-  Bitmap prev_status = status_map;
-  std::map<FlowLuaCall, struct timeval>::iterator it;
 
-  if(isLuaCallPerformed(flow_lua_call, tv))
-     return; /* Already called */
+  if(flow_lua_call != flow_lua_call_idle
+     && ntop->getGlobals()->isShutdownRequested())
+    return false; /* Only flow_lua_call_idle go through during a shutdown */
 
   if(!periodic_ht_state_update_user_data->acle
      && !(periodic_ht_state_update_user_data->acle = new (std::nothrow) FlowAlertCheckLuaEngine(getInterface())))
-    return; /* Cannot allocate memory */
+    return false; /* Cannot allocate memory */
 
   FlowAlertCheckLuaEngine *acle = (FlowAlertCheckLuaEngine*)periodic_ht_state_update_user_data->acle;
 
   if(quick) {
-    acle->incSkippedPcalls(flow_lua_call);
-    return; /* Need to return as there's no time to do the actual call */
+    switch(get_state()) {
+    case hash_entry_state_idle:
+      acle->incSkippedPcalls(flow_lua_call);
+      break;
+    default:
+      acle->incPendingPcalls(flow_lua_call);
+      break;
+    }
+
+    return false; /* Need to return as there's no time to do the actual call */
   }
 
   lua_State *L = acle->getState();
@@ -4232,48 +4194,71 @@ void Flow::performLuaCall(FlowLuaCall flow_lua_call, const struct timeval *tv, p
     lua_call_fn_name = FLOW_LUA_CALL_FLOW_STATUS_CHANGE_FN_NAME;
     break;
   case flow_lua_call_periodic_update:
-    trigger_scheduled_periodic_update = false;
-    trigger_immediate_periodic_update = false;
     lua_call_fn_name = FLOW_LUA_CALL_PERIODIC_UPDATE_FN_NAME;
     break;
   case flow_lua_call_idle:
     lua_call_fn_name = FLOW_LUA_CALL_IDLE_FN_NAME;
     break;
   default:
-    lua_call_fn_name = NULL;
-    break;
+    return false;
   }
 
-  if(lua_call_fn_name) {
-#ifdef LUA_PROFILING
-    for(int i = 0; i < 200000; i++) {
-      /* Call the function */
-      lua_getglobal(L, lua_call_fn_name); /* Called function */
-      acle->pcall(0 /* 0 arguments */, 0 /* 0 results */);
-    }
-    return;
-#else
-    /* Call the function */
-    lua_getglobal(L, lua_call_fn_name); /* Called function */
-    lua_pushinteger(L, protocol);  /* pass the L4 protocol as first argument, needed for optimized L4 filter */
-    acle->pcall(1 /* 1 arguments */, 0 /* 0 results */);
-#endif
+  int num_args = 3;
 
-    /* Mark it as called */
-    performed_lua_calls[flow_lua_call] = tv->tv_sec;
+  /* Call the function */
+  lua_getglobal(L, lua_call_fn_name); /* Called function */
+  lua_pushinteger(L, protocol);
+  lua_pushinteger(L, ndpiDetectedProtocol.master_protocol);
+  lua_pushinteger(L, ndpiDetectedProtocol.app_protocol);
 
-    /* Check if the status has changed */
-    if((flow_lua_call != flow_lua_call_flow_status_changed)
-	&& (prev_status.get() != status_map.get())) {
-      if(!isLuaCallPerformed(flow_lua_call_flow_status_changed, tv)) {
-	/* The status has changed, call the status change script */
-	performLuaCall(flow_lua_call_flow_status_changed, tv, periodic_ht_state_update_user_data, quick);
-      }
+  if(flow_lua_call == flow_lua_call_periodic_update) {
+    /* pass the periodic_update counter as the second argument,
+     * needed to determine which periodic scripts to call. */
+    lua_pushinteger(L, periodic_update_ctr++);
+    num_args++;
+  }
 
-      /* Update the hosts status */
-      if(cli_host) cli_host->setAnomalousFlowsStatusMap(status_map, true);
-      if(srv_host) srv_host->setAnomalousFlowsStatusMap(status_map, false);
-    }
+  acle->pcall(num_args, 0 /* 0 results */);
+
+  return true;
+}
+
+
+/* ***************************************************** */
+
+void Flow::performLuaCalls(const struct timeval *tv, periodic_ht_state_update_user_data_t *periodic_ht_state_update_user_data, bool quick) {
+  Bitmap prev_status = status_map;
+  HashEntryState cur_state = get_state();
+
+  /* Check if it is time to call the protocol detected */
+  if(pending_lua_call_protocol_detected
+     && performLuaCall(flow_lua_call_protocol_detected, tv, periodic_ht_state_update_user_data, quick))
+    pending_lua_call_protocol_detected = false;
+
+  /* Check if it is time to call the periodic update. Need to make sure this is not called BEFORE
+     the protocol detected has been called */
+  if(cur_state >= hash_entry_state_active /* This check guarantees no periodic update is called before protocol detected */
+     && (trigger_immediate_periodic_update ||
+	 (next_lua_call_periodic_update > 0 /* 0 means not-yet-set */
+	  && next_lua_call_periodic_update <= tv->tv_sec))
+     && performLuaCall(flow_lua_call_periodic_update, tv, periodic_ht_state_update_user_data, quick)) {
+    next_lua_call_periodic_update = tv->tv_sec + FLOW_LUA_CALL_PERIODIC_UPDATE_SECS; /* Set the time of the new periodic call */
+    if(trigger_immediate_periodic_update) trigger_immediate_periodic_update = false; /* Reset if necessary */
+  }
+
+  /* Check if it is time to call the idle. There is no need to change any boolean here to remember
+     the call has been performed: each flow in idle state is visited exactly once. */
+  if(cur_state == hash_entry_state_idle)
+    performLuaCall(flow_lua_call_idle, tv, periodic_ht_state_update_user_data, quick);
+
+  /* Regardless of the calls performed previously, if someone of them has changed the state of the flow,
+     thi extra status_changed lua function is executed. */
+  if(prev_status.get() != status_map.get()) {
+    performLuaCall(flow_lua_call_flow_status_changed, tv, periodic_ht_state_update_user_data, quick);
+
+    /* Update the hosts status */
+    if(cli_host) cli_host->setAnomalousFlowsStatusMap(status_map, true);
+    if(srv_host) srv_host->setAnomalousFlowsStatusMap(status_map, false);
   }
 }
 

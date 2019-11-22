@@ -19,7 +19,6 @@ local alert_endpoints = require "alert_endpoints_utils"
 local flow_consts = require "flow_consts"
 local user_scripts = require "user_scripts"
 
-local store_alerts_queue = "ntopng.push_alerts_queue"
 local shaper_utils = nil
 
 if(ntop.isnEdge()) then
@@ -648,7 +647,7 @@ local function formatRawFlow(record, flow_json, skip_add_links)
       time_bounds = {getAlertTimeBounds(record)}
    end
 
-   local decoded = json.decode(flow_json)
+   local decoded = json.decode(flow_json) or {}
 
    if((type(decoded["status_info"]) == "string") and
          (string.sub(decoded["status_info"], 1, 1) == "{")) then
@@ -902,6 +901,8 @@ local function printConfigTab(entity_type, entity_value, page_name, page_params,
       trigger_alerts_checked = "checked"
    end
 
+  local enable_label = options.enable_label or i18n("show_alerts.trigger_alert_descr")
+
   print[[
    <br>
    <form id="alerts-config" class="form-inline" method="post">
@@ -912,7 +913,7 @@ local function printConfigTab(entity_type, entity_value, page_name, page_params,
          <td>
                <input type="checkbox" name="trigger_alerts" value="1" ]] print(trigger_alerts_checked) print[[>
                   <i class="fa fa-exclamation-triangle fa-lg"></i>
-                  ]] print(i18n("show_alerts.trigger_alert_descr")) print[[
+                  ]] print(enable_label) print[[
                </input>
          </td>
       </tr>]]
@@ -1148,12 +1149,8 @@ function drawAlertSourceSettings(entity_type, alert_source, delete_button_msg, d
             value    = _POST["value_"..k]
             operator = _POST["op_"..k] or "gt"
             if value == "on" then value = "1" end
+            if value == "off" then value = "0" end
             value = tonumber(value)
-
-            if(value ~= nil) then
-               if(alerts ~= "") then alerts = alerts .. "," end
-               alerts = alerts .. k .. ";" .. operator .. ";" .. value
-            end
 
             -- Handle global settings
             local global_value = _POST["value_global_"..k]
@@ -1176,6 +1173,20 @@ function drawAlertSourceSettings(entity_type, alert_source, delete_button_msg, d
                   if(global_alerts ~= "") then global_alerts = global_alerts .. "," end
                   global_alerts = global_alerts..cur_value
                end
+            end
+
+	    -- Handle Entity Specific settings
+	    if(value == global_value) then
+	       -- Do not save global values
+	       value = nil
+	    elseif(value == nil) then
+	       -- save an empty value to differentiate it from the global default
+	       value = ""
+	    end
+
+            if(value ~= nil) then
+               if(alerts ~= "") then alerts = alerts .. "," end
+               alerts = alerts .. k .. ";" .. operator .. ";" .. value
             end
          end --END for k,_ in pairs(available_modules) do
 
@@ -1246,6 +1257,8 @@ function drawAlertSourceSettings(entity_type, alert_source, delete_button_msg, d
 	    print[[<tr><td colspan=5>]] print(i18n("flow_callbacks.no_callbacks_available_disabled_alerts", {url = ntop.getHttpPrefix().."/lua/admin/prefs.lua?tab=alerts"})) print[[.</td></tr>]]
 	 end
       else
+	 local benchmarks = user_scripts.getLastBenchmark(ifid, entity_type) or {}
+
 	 for mod_k, user_script in pairsByKeys(available_modules.modules, asc) do
 	    local key = user_script.key
 	    local gui_conf = user_script.gui
@@ -1272,8 +1285,8 @@ function drawAlertSourceSettings(entity_type, alert_source, delete_button_msg, d
 	       goto next_module
 	    end
 
-	    print("<tr><td><b>".. i18n(gui_conf.i18n_title) .."</b><br>")
-	    print("<small>"..i18n(gui_conf.i18n_description).."</small>\n")
+	    print("<tr><td><b>".. (i18n(gui_conf.i18n_title) or gui_conf.i18n_title) .."</b><br>")
+	    print("<small>".. (i18n(gui_conf.i18n_description) or gui_conf.i18n_description) .."</small>\n")
 
 	    if(tab == "min") then
 	       print("<td class='text-center'>")
@@ -1287,6 +1300,12 @@ function drawAlertSourceSettings(entity_type, alert_source, delete_button_msg, d
 	       if user_script.gui.input_builder then
 		  local k = prefix..key
 		  local value = vals[k]
+		  local is_global = (prefix == "global_")
+
+		  if((not is_global) and (value == nil)) then
+		     -- No value specified for the entity, use the global value if any
+		     value = vals["global_" .. k]
+		  end
 
 		  if(user_script.gui.input_builder ~= user_scripts.threshold_cross_input_builder) then
 		     -- Temporary fix to handle non-thresholds
@@ -1304,18 +1323,20 @@ function drawAlertSourceSettings(entity_type, alert_source, delete_button_msg, d
 	    end
 	    print("</td><td align='center'>\n")
 
-	    if user_script.benchmark and (user_script.benchmark[tab] or user_script.benchmark["all"]) then
-	       local hook = ternary(user_script.benchmark[tab], tab, "all")
+	    local script_benchmark = benchmarks[mod_k]
 
-	       if user_script.benchmark[hook]["tot_elapsed"] then
-		  if user_script.benchmark[hook]["tot_num_calls"] > 1 then
+	    if script_benchmark and (script_benchmark[tab] or script_benchmark["all"]) then
+	       local hook = ternary(script_benchmark[tab], tab, "all")
+
+	       if script_benchmark[hook]["tot_elapsed"] then
+		  if script_benchmark[hook]["tot_num_calls"] > 1 then
 		     print(i18n("flow_callbacks.callback_function_duration_fmt_long",
-				{num_calls = format_utils.formatValue(user_script.benchmark[hook]["tot_num_calls"]),
-				 time = format_utils.secondsToTime(user_script.benchmark[hook]["tot_elapsed"]),
-				 speed = format_utils.formatValue(round(user_script.benchmark[hook]["avg_speed"], 0))}))
+				{num_calls = format_utils.formatValue(script_benchmark[hook]["tot_num_calls"]),
+				 time = format_utils.secondsToTime(script_benchmark[hook]["tot_elapsed"]),
+				 speed = format_utils.formatValue(round(script_benchmark[hook]["avg_speed"], 0))}))
 		  else
 		     print(i18n("flow_callbacks.callback_function_duration_fmt_short",
-				{time = format_utils.secondsToTime(user_script.benchmark[hook]["tot_elapsed"])}))
+				{time = format_utils.secondsToTime(script_benchmark[hook]["tot_elapsed"])}))
 		  end
 	       end
 	    end
@@ -1351,6 +1372,7 @@ function drawAlertSourceSettings(entity_type, alert_source, delete_button_msg, d
 
       print("<li>" .. i18n("alerts_thresholds_config.note_create_custom_scripts", {url = "https://github.com/ntop/ntopng/blob/dev/doc/README.alerts.md"}) .. "</li>")
       print("<li>" .. i18n("flow_callbacks.note_add_custom_scripts", {url = ntop.getHttpPrefix().."/lua/directories.lua", product=ntop.getInfo()["product"]}) .. "</li>")
+      print("<li>" .. i18n("flow_callbacks.note_scripts_list", {url = ntop.getHttpPrefix().."/lua/user_scripts_overview.lua", product=ntop.getInfo()["product"]}) .. "</li>")
 
       print("</ul></div>")
 
@@ -2600,7 +2622,9 @@ function formatAlertMessage(ifid, alert)
   else
     msg = alert["alert_json"]
 
-    if(string.sub(msg, 1, 1) == "{") then
+    if isEmptyString(msg) then
+      msg = {}
+    elseif(string.sub(msg, 1, 1) == "{") then
       msg = json.decode(msg)
     end
 
@@ -2726,8 +2750,7 @@ function checkStoreAlertsFromC(deadline)
   end
 
   while(os.time() <= deadline) do
-    -- TODO add max_length check and alert
-    local message = ntop.lpopCache(store_alerts_queue)
+    local message = ntop.popInternalAlerts()
 
     if((message == nil) or (message == "")) then
       break
@@ -2761,7 +2784,7 @@ function processAlertNotifications(now, periodic_frequency, force_export)
 
    -- Get new alerts
    while(true) do
-      local json_message = ntop.lpopCache("ntopng.alerts.notifications_queue")
+      local json_message = ntop.popAlertNotification()
 
       if((json_message == nil) or (json_message == "")) then
          break

@@ -74,14 +74,17 @@ print [[
       </a>
     <ul class="dropdown-menu">
       <li><a href="]] print(ntop.getHttpPrefix()) print [[/lua/about.lua"><i class="fa fa-question-circle"></i> ]] print(i18n("about.about_ntopng")) print[[</a></li>
-      <li><a href="]] print(ntop.getHttpPrefix()) print [[/lua/directories.lua"><i class="fa fa-folder"></i> ]] print(i18n("about.directories")) print[[</a></li>
       <li><a href="]] print(ntop.getHttpPrefix()) print[[/lua/telemetry.lua"><i class="fa fa-rss"></i> ]] print(i18n("telemetry")) print[[</a></li>
       <li><a href="http://blog.ntop.org/" target="_blank"><i class="fa fa-bullhorn"></i> ]] print(i18n("about.ntop_blog")) print[[ <i class="fa fa-external-link"></i></a></li>
       <li><a href="https://t.me/ntop_community" target="_blank"><i class="fa fa-telegram"></i> ]] print(i18n("about.telegram")) print[[ <i class="fa fa-external-link"></i></a></li>
       <li><a href="https://github.com/ntop/ntopng/issues" target="_blank"><i class="fa fa-bug"></i> ]] print(i18n("about.report_issue")) print[[ <i class="fa fa-external-link"></i></a></li>
-<li class="divider"></li><li><a href="https://www.ntop.org/guides/ntopng/" target="_blank"><i class="fa fa-book"></i> ]] print(i18n("about.readme_and_manual")) print[[ <i class="fa fa-external-link"></i></a></li>
 
-<li><a href="https://www.ntop.org/guides/ntopng/api/" target="_blank"><i class="fa fa-book"></i> ]] print("Lua/C API") print[[ <i class="fa fa-external-link"></i></a></li>
+      <li class="divider"></li>
+      <li><a href="]] print(ntop.getHttpPrefix()) print [[/lua/directories.lua"><i class="fa fa-folder"></i> ]] print(i18n("about.directories")) print[[</a></li>
+      <li><a href="]] print(ntop.getHttpPrefix()) print[[/lua/user_scripts_overview.lua"><i class="fa fa-superpowers"></i> ]] print(i18n("about.user_scripts")) print[[</a></li>
+      <li><a href="]] print(ntop.getHttpPrefix()) print[[/lua/defs_overview.lua"><i class="fa fa-warning"></i> ]] print(i18n("about.alert_defines")) print[[</a></li>
+      <li><a href="https://www.ntop.org/guides/ntopng/" target="_blank"><i class="fa fa-book"></i> ]] print(i18n("about.readme_and_manual")) print[[ <i class="fa fa-external-link"></i></a></li>
+      <li><a href="https://www.ntop.org/guides/ntopng/api/" target="_blank"><i class="fa fa-book"></i> ]] print("Lua/C API") print[[ <i class="fa fa-external-link"></i></a></li>
 
 </ul>
 ]]
@@ -431,7 +434,7 @@ end -- num_ifaces > 0
 if isAllowedSystemInterface() then
    local system_scripts = require("system_scripts_utils")
 
-   if active_page == "system_stats" then
+   if active_page == "system_stats" or active_page == "system_interfaces_stats" then
      print [[ <li class="dropdown active"> ]]
    else
      print [[ <li class="dropdown"> ]]
@@ -448,6 +451,10 @@ if isAllowedSystemInterface() then
    end
 
    print[[<li><a href="]] print(ntop.getHttpPrefix()) print[[/lua/system_stats.lua">]] print(i18n("system_status")) print[[</a></li>]]
+
+   if num_ifaces > 1 then
+      print[[<li><a href="]] print(ntop.getHttpPrefix()) print[[/lua/system_interfaces_stats.lua">]] print(i18n("system_interfaces_status")) print[[</a></li>]]
+   end
 
    local system_menu_entries = system_scripts.getSystemMenuEntries()
 

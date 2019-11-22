@@ -501,8 +501,10 @@
 #define CONST_INFLUXDB_FILE_QUEUE          "ntopng.influx_file_queue"
 #define CONST_INFLUXDB_FLUSH_TIME          10 /* sec */
 #define CONST_INFLUXDB_MAX_DUMP_SIZE       4194304 /* 4 MB */
-#define CONST_ALERT_STORE_QUEUE            "ntopng.push_alerts_queue"
 #define CONST_FLOW_ALERT_EVENT_QUEUE       "ntopng.cache.ifid_%d.flow_alerts_events_queue"
+#define SQLITE_ALERTS_QUEUE_SIZE           512
+#define ALERTS_NOTIFICATIONS_QUEUE_SIZE    4096
+#define INTERNAL_ALERTS_QUEUE_SIZE         1024
 #define CONST_REMOTE_TO_REMOTE_MAX_QUEUE   32
 #define CONST_SQL_QUEUE                    "ntopng.sql_queue"
 #define CONST_SQL_BATCH_SIZE               32
@@ -658,6 +660,7 @@
 #define FLOW_LUA_CALL_FLOW_STATUS_CHANGE_FN_NAME "statusChanged"
 #define FLOW_LUA_CALL_PERIODIC_UPDATE_FN_NAME    "periodicUpdate"
 #define FLOW_LUA_CALL_IDLE_FN_NAME               "flowEnd"
+#define FLOW_LUA_CALL_PERIODIC_UPDATE_SECS       30
 
 /* Tiny Flows */
 #define CONST_DEFAULT_IS_TINY_FLOW_EXPORT_ENABLED        true  /* disabled by default */
@@ -834,8 +837,6 @@
 #define ALERTS_MANAGER_SEVERITY_FIELD        "alert_severity"
 #define STATS_MANAGER_STORE_NAME             "top_talkers.db"
 
-#define ALERTS_MANAGER_NOTIFICATION_QUEUE_NAME "ntopng.alerts.notifications_queue"
-
 #define CONST_MAX_NUM_THREADED_ACTIVITIES 64
 #define STARTUP_SCRIPT_PATH        "startup.lua"
 #define BOOT_SCRIPT_PATH           "boot.lua" /* Executed as root before networking is setup */
@@ -869,8 +870,6 @@
 #define GRE_HEADER_SEQ_NUM       0x1000 /* 32 bit */
 
 #define HOST_LOW_GOODPUT_THRESHOLD  25 /* No more than X low goodput flows per host */
-#define FLOW_GOODPUT_THRESHOLD      40 /* 40% */
-#define FLOW_GOODPUT_MIN_DURATION   60 /* 60 seconds */
 
 #define NTOP_USERNAME_MAXLEN        33 /* NOTE: do not change, is this bound to mg_md5 ? */
 #define NTOP_GROUP_MAXLEN           33
@@ -940,16 +939,16 @@
 
 #define BITMAP_NUM_BITS               64
 
-#define SSL_HANDSHAKE_PACKET          0x16
-#define SSL_PAYLOAD_PACKET            0x17
-#define SSL_CLIENT_HELLO              0x01
-#define SSL_SERVER_HELLO              0x02
-#define SSL_CLIENT_KEY_EXCHANGE       0x10
-#define SSL_SERVER_CHANGE_CIPHER_SPEC 0x14
-#define SSL_NEW_SESSION_TICKET        0x04
+#define TLS_HANDSHAKE_PACKET          0x16
+#define TLS_PAYLOAD_PACKET            0x17
+#define TLS_CLIENT_HELLO              0x01
+#define TLS_SERVER_HELLO              0x02
+#define TLS_CLIENT_KEY_EXCHANGE       0x10
+#define TLS_SERVER_CHANGE_CIPHER_SPEC 0x14
+#define TLS_NEW_SESSION_TICKET        0x04
 
-#define SSL_MAX_HANDSHAKE_PCKS          15
-#define SSL_MIN_PACKET_SIZE             10
+#define TLS_MAX_HANDSHAKE_PCKS          15
+#define TLS_MIN_PACKET_SIZE             10
 
 #define HTTP_MAX_CONTENT_TYPE_LENGTH    63
 #define HTTP_MAX_HEADER_LINES           20

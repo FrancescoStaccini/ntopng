@@ -25,6 +25,7 @@
 
 FlowAlertCheckLuaEngine::FlowAlertCheckLuaEngine(NetworkInterface *iface) : AlertCheckLuaEngine(alert_entity_flow, minute_script /* doesn't matter */, iface) {
   num_skipped_idle = num_skipped_periodic_update = num_skipped_proto_detected = 0;
+  num_pending_proto_detected = num_pending_periodic_update = 0;
 }
 
 /* ****************************************** */
@@ -48,6 +49,23 @@ void FlowAlertCheckLuaEngine::incSkippedPcalls(FlowLuaCall flow_lua_call) {
   default:
     break;
   }
+
+  iface->incNumDroppedFlowScriptsCalls();
+}
+
+/* ****************************************** */
+
+void FlowAlertCheckLuaEngine::incPendingPcalls(FlowLuaCall flow_lua_call) {
+  switch(flow_lua_call) {
+  case flow_lua_call_protocol_detected:
+    num_pending_proto_detected++;
+    break;
+  case flow_lua_call_periodic_update:
+    num_pending_periodic_update++;
+    break;
+  default:
+    break;
+  }
 }
 
 /* ****************************************** */
@@ -56,4 +74,7 @@ void FlowAlertCheckLuaEngine::lua_stats_skipped(lua_State *vm) const {
   lua_push_uint64_table_entry(vm, "num_skipped_idle", num_skipped_idle);
   lua_push_uint64_table_entry(vm, "num_skipped_periodic_update", num_skipped_periodic_update);
   lua_push_uint64_table_entry(vm, "num_skipped_proto_detected", num_skipped_proto_detected);
+
+  lua_push_uint64_table_entry(vm, "num_pending_proto_detected", num_pending_proto_detected);
+  lua_push_uint64_table_entry(vm, "num_pending_periodic_update", num_pending_periodic_update);
 }

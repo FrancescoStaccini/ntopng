@@ -25,6 +25,7 @@ end
 local do_benchmark = true          -- Compute benchmarks and store their results
 local do_print_benchmark = false   -- Print benchmarks results to standard output
 local do_trace = false             -- Trace lua calls
+local calculate_stats = false
 
 local available_modules = nil
 local benchmarks = {}
@@ -40,6 +41,14 @@ local hosts_disabled_status
 -- Save them as they are overridden
 local c_flow_set_status = flow.setStatus
 local c_flow_clear_status = flow.clearStatus
+
+local stats = {
+   num_invocations = 0, 	-- Total number of invocations of this module
+   num_complete_scripts = 0,	-- Number of invoked scripts on flows with THW completed
+   num_partial_scripts = 0,	-- Number of invoked scripts on flows with THW not-completed
+   num_try_alerts = 0,  	-- Number of calls to triggerFlowAlert
+   partial_scripts = {},	-- List of scripts invoked on flow with THW not-completed
+}
 
 -- #################################################################
 
@@ -110,19 +119,23 @@ function teardown()
    if(available_modules ~= nil) then
       user_scripts.teardown(available_modules, do_benchmark, do_print_benchmark)
    end
+
+   if(calculate_stats) then
+      tprint(stats)
+   end
 end
 
 -- #################################################################
 
 -- @brief Store more information into the flow status. Such information
 -- does not depend the specific flow status being triggered
--- @param flow_info as returned by flow.getInfo()
+-- @param l4_proto the flow L4 protocol ID
 -- @param flow_status the status table to augument
-local function augumentFlowStatusInfo(flow_info, flow_status)
+local function augumentFlowStatusInfo(l4_proto, flow_status)
    flow_status["ntopng.key"] = flow.getKey()
    flow_status["hash_entry_id"] = flow.getHashEntryId()
 
-   if(flow_info["proto.ndpi"] == "ICMP") then
+   if(l4_proto == 1 --[[ ICMP ]]) then
       -- NOTE: this information is parsed by getFlowStatusInfo()
       flow_status["icmp"] = flow.getICMPStatusInfo()
    end
@@ -130,61 +143,9 @@ end
 
 -- #################################################################
 
-local function enqueueFlowAlert(flow_info, status, alert_type, alert_severity, status_info)
-  local now = os.time()
-
-  if ntop.getPrefs().are_alerts_enabled == false then
-    return false
-  end
-
-  local alert = {}
- 
-  alert.is_flow_alert = true
-  alert.alert_tstamp = now
-  alert.flow_status = status
-  alert.alert_type = alert_type
-  alert.alert_severity = alert_severity
-
-  local alert_json_info = {}
-  alert_json_info.status_info = status_info
-  alert_json_info.info = flow_info['info']
-  alert.alert_json = json.encode(alert_json_info)
-
-  alert.vlan_id = flow_info['vlan']
-  alert.proto = flow_info['proto.l4_id']
-  alert.l7_master_proto = flow_info['proto.master_ndpi_id']
-  alert.l7_proto = flow_info['proto.ndpi_id']
-
-  alert.cli_addr = flow_info['cli.ip']
-  alert.cli_country = flow_info['cli.country']
-  alert.cli_os = flow_info['cli.os']
-  alert.cli_asn = flow_info['cli.asn']
-  alert.cli_localhost = flow_info['cli.localhost']
-  alert.cli_blacklisted = flow_info['cli.blacklisted']
-
-  alert.srv_addr = flow_info['srv.ip']
-  alert.srv_country = flow_info['srv.country']
-  alert.srv_os = flow_info['srv.os']
-  alert.srv_asn = flow_info['srv.asn']
-  alert.srv_localhost = flow_info['srv.localhost']
-  alert.srv_blacklisted = flow_info['srv.blacklisted']
-
-  alert.cli2srv_bytes = flow_info['cli2srv.bytes']
-  alert.cli2srv_packets = flow_info['cli2srv.packets']
-
-  alert.srv2cli_bytes = flow_info['srv2cli.bytes']
-  alert.srv2cli_packets = flow_info['srv2cli.packets']
-
-  alerts_api.storeFlow(alert) 
-
-  return true
-end
-
--- #################################################################
-
-local function triggerFlowAlert(info)
-   local cli_key = hostinfo2hostkey(hostkey2hostinfo(info["cli.ip"]), nil, true --[[ force VLAN]])
-   local srv_key = hostinfo2hostkey(hostkey2hostinfo(info["srv.ip"]), nil, true --[[ force VLAN]])
+local function triggerFlowAlert(now, l4_proto)
+   local cli_key = flow.getClientKey()
+   local srv_key = flow.getServerKey()
    local cli_disabled_status = hosts_disabled_status[cli_key] or 0
    local srv_disabled_status = hosts_disabled_status[srv_key] or 0
    local status_id = alerted_status.status_id
@@ -207,30 +168,23 @@ local function triggerFlowAlert(info)
          alertTypeRaw(alerted_status.alert_type.alert_id), alertSeverityRaw(alerted_status.alert_severity.severity_id)))
    end
 
-   -- The message can be either a table or a localized string message.
-   -- When using tables the status can possibly be augumented with augumentFlowStatusInfo
    alerted_status_msg = alerted_status_msg or {}
 
    if(type(alerted_status_msg) == "table") then
-      augumentFlowStatusInfo(info, alerted_status_msg)
+      -- NOTE: porting this to C is not feasable as the lua table can contain
+      -- arbitrary data
+      augumentFlowStatusInfo(l4_proto, alerted_status_msg)
 
       -- Need to convert to JSON
       alerted_status_msg = json.encode(alerted_status_msg)
    end
 
-   local triggered = flow.triggerAlert(status_id, 
+   local triggered = flow.triggerAlert(status_id,
       alerted_status.alert_type.alert_id,
-      alerted_custom_severity or alerted_status.alert_severity.severity_id, 
-      alerted_status_msg)
+      alerted_custom_severity or alerted_status.alert_severity.severity_id,
+      now, alerted_status_msg)
 
-   if triggered then
-      enqueueFlowAlert(info, status_id, 
-        alerted_status.alert_type.alert_id,
-        alerted_custom_severity or alerted_status.alert_severity.severity_id,
-        alerted_status_msg)
-   end
-
-   return triggered
+   return(triggered)
 end
 
 -- #################################################################
@@ -238,9 +192,15 @@ end
 -- Function for the actual module execution. Iterates over available (and enabled)
 -- modules, calling them one after one.
 -- @param l4_proto the L4 protocol of the flow
+-- @param master_id the L7 master protocol of the flow
+-- @param app_id the L7 app protocol of the flow
 -- @param mod_fn the callback to call
 -- @return true if some module was called, false otherwise
-local function call_modules(l4_proto, mod_fn)
+local function call_modules(l4_proto, master_id, app_id, mod_fn, update_ctr)
+   if calculate_stats then
+      stats.num_invocations = stats.num_invocations + 1
+   end
+
    if not(available_modules) then
       return
    end
@@ -275,18 +235,55 @@ local function call_modules(l4_proto, mod_fn)
       info = flow.getInfo()
    end
 
+   local twh_in_progress = ((l4_proto == 6 --[[TCP]]) and (not flow.isTwhOK()))
+
    for mod_key, hook_fn in pairs(hooks) do
       local script = all_modules[mod_key]
 
-      if(script.l7_proto ~= nil) then
-         -- Check if the L7 protocol correspond
-         if(not flow.matchesL7(script.l7_proto)) then
-            if do_trace then print(string.format("%s() [check: %s]: skipping flow with proto=%s (wants %s)\n", mod_fn, mod_key, flow_proto, script.l7_proto)) end
-            goto continue
-         end
+      if(mod_fn == "periodicUpdate") then
+	 -- Check if the script should be invoked
+	 if((update_ctr % script.periodic_update_divisor) ~= 0) then
+	    if do_trace then
+	       print(string.format("%s() [check: %s]: skipping periodicUpdate [ctr: %s, divisor: %s, frequency: %s]\n",
+		  mod_fn, mod_key, update_ctr, script.periodic_update_divisor, script.periodic_update_seconds))
+	    end
+
+	    goto continue
+	 end
       end
 
-      if do_trace then print(string.format("%s() [check: %s]: %s\n", mod_fn, mod_key, shortFlowLabel(info))) end
+      -- Check if the script requires the flow to have successfully completed the three-way handshake
+      if(script.three_way_handshake_ok and twh_in_progress) then
+	 -- Check if the script wants the three way handshake completed
+	 if do_trace then
+	    print(string.format("%s() [check: %s]: skipping flow with incomplete three way handshake\n", mod_fn, mod_key))
+	 end
+
+	 goto continue
+      end
+
+      local script_l7 = script.l7_proto_id
+
+      if((script_l7 ~= nil) and (master_id ~= script_l7) and (app_id ~= script_l7)) then
+	 if do_trace then
+	    print(string.format("%s() [check: %s]: skipping flow with proto=%s/%s [wants: %s]\n", mod_fn, mod_key, master_id, app_id, script_l7))
+	 end
+
+	 goto continue
+      end
+
+      if calculate_stats then
+	 if twh_in_progress then
+	    stats.num_partial_scripts = stats.num_partial_scripts + 1
+	    stats.partial_scripts[mod_key] = 1
+	 else
+	    stats.num_complete_scripts = stats.num_complete_scripts + 1
+	 end
+      end
+
+      if do_trace then
+	 print(string.format("%s() [check: %s]: %s\n", mod_fn, mod_key, shortFlowLabel(info)))
+      end
 
       hook_fn(now)
       rv = true
@@ -307,9 +304,12 @@ local function call_modules(l4_proto, mod_fn)
       flow.setPredominantStatus(predominant_status.status_id)
    end
 
-   if(alerted_status ~= nil) then
-      info = flow.getFullInfo()
-      triggerFlowAlert(info)
+   if((alerted_status ~= nil) and flow.canTriggerAlert()) then
+      triggerFlowAlert(now, l4_proto)
+
+      if calculate_stats then
+	 stats.num_try_alerts = stats.num_try_alerts + 1
+      end
    end
 
    return(rv)
@@ -367,24 +367,24 @@ end
 
 -- Given an L4 protocol, we must call both the hooks registered for that protocol and
 -- the hooks registered for any L4 protocol (id 255)
-function protocolDetected(l4_proto)
-   call_modules(l4_proto, "protocolDetected")
+function protocolDetected(l4_proto, master_id, app_id)
+   call_modules(l4_proto, master_id, app_id, "protocolDetected")
 end
 
 -- #################################################################
 
-function statusChanged(l4_proto)
-   call_modules(l4_proto, "statusChanged")
+function statusChanged(l4_proto, master_id, app_id)
+   call_modules(l4_proto, master_id, app_id, "statusChanged")
 end
 
 -- #################################################################
 
-function flowEnd(l4_proto)
-   call_modules(l4_proto, "flowEnd")
+function flowEnd(l4_proto, master_id, app_id)
+   call_modules(l4_proto, master_id, app_id, "flowEnd")
 end
 
 -- #################################################################
 
-function periodicUpdate(l4_proto)
-   call_modules(l4_proto, "periodicUpdate")
+function periodicUpdate(l4_proto, master_id, app_id, update_ctr)
+   call_modules(l4_proto, master_id, app_id, "periodicUpdate", update_ctr)
 end

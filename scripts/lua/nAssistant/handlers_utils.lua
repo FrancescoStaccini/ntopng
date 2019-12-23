@@ -11,7 +11,7 @@ local net_state = require "nAssistant/network_state"
 local df_utils = require "nAssistant/dialogflow_utils" 
 
 --+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
---####################################- nAssistant - UTILS -###############################################
+--#################################### - Handlers - Utils - ###############################################
 --+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 local h_utils = {}
 
@@ -46,7 +46,7 @@ function h_utils.get_aggregated_info_traffic()
 end
 
 --#########################################################################################################
-
+--note: for retrocompatibility
 function h_utils.get_aggregated_info_devices()
   local info, devices_num = net_state.check_devices_type()
   local text2 = ""
@@ -61,22 +61,18 @@ function h_utils.get_aggregated_info_devices()
     text =  text .. "Including ".. text2
   end
 
-  --text = text .. ". Vuoi informazioni più dettagliate? Altrimenti dimmi il nome, o l'indirizzo, di un dispositivo"
   return text
 end
 
 --#########################################################################################################
-
+--note: for retrocompatibility
 function h_utils.are_app_and_hosts_good()
   local ndpi_breeds, blacklisted_host_num, danger  = net_state.check_bad_hosts_and_app()
   local prc_safe = ndpi_breeds["Safe"] or 0 
   local safe_text, score, text = "", 0, ""
 
   if ndpi_breeds == nil then
-    --TODO:rifai, è pericoloso perché viene utilizzato anche per comporre frasi!
-    --google.send("Non sono riuscito ad eseguire la richiesta") 
     return ""
-    --credo sia meglio ritornare stringa vuota, fai i test! (tipo vedi la handler_network_state())
   end
 
   if ndpi_breeds["Safe"] then
@@ -90,9 +86,6 @@ function h_utils.are_app_and_hosts_good()
     score = score + ( (ndpi_breeds["Acceptable"]["perc"] or 0) * 0.8 )
   end
 
-  --score = ( ndpi_breeds["Safe"]["perc"] or 0 )  +  ( (ndpi_breeds["Fun"]["perc"] or 0) * 0.85 )  +  ( (ndpi_breeds["Acceptable"]["perc"] or 0) * 0.8 )
-
-  --TODO: ripensa a modo le soglie del safe score
   if score >= 99 then 
     safe_text = ", in general, are safe"
   elseif score >= 90 then
@@ -137,7 +130,6 @@ function h_utils.get_aggregated_info_network()
     for i,v in pairs(severity) do
       if v > 0 then  alert_text = alert_text .. v .. " " .. i .. ", " end
     end
-
     alert_text = string.sub(alert_text,1,-2)
     alert_text = string.sub(alert_text,1,-2)
     alert_text = alert_text..".\n"
@@ -147,19 +139,7 @@ function h_utils.get_aggregated_info_network()
   end
 
   local app_host_good_text, b, danger = are_app_and_hosts_good() --TODO: "b" a che serve? rimuovila in caso
-
   local text = alert_text.. app_host_good_text
-
-  -- local sugg = {}
-  -- if danger and alert_num > 0 then 
-  --   sugg = {"traffico pericoloso", "allarmi attivi"}
-  -- elseif danger and alert_num == 0  then
-  --   sugg = {"traffico pericoloso"}
-  -- elseif not danger and alert_num > 0   then
-  --   sugg = {"allarmi attivi"}
-  -- else --not danger and alert_num == 0
-  --   sugg = {}
-  -- end
 
   return text
 end
@@ -195,17 +175,12 @@ function h_utils.get_aggregated_info_generic()
 end
 
 --#########################################################################################################
-
+--note: for retrocompatibility
 --return: a table with every host(IP and name) for a specific MAC
-
---NOTE: qui ho sia host info che mac info, posso combinarle se mi interessa
---"name" può essere una stringa qualunque, è data dall'utente e il chiamante, attualmente, non la controlla
 function h_utils.find_mac_hosts(name) 
 
   local hosts_names = interface.findHost(name) --it search "names" among (and inside) all the host names
   if not hosts_names then return 0, nil end
-
-  --tprint(hosts_names)
 
   local macs_table, tmp_host_info, tmp_mac_info = {}, {}, {}
 
@@ -227,9 +202,7 @@ function h_utils.find_mac_hosts(name)
 
 end
 --#########################################################################################################
-
---DOMANDA: ma il nome è legato all'host o al mac? una machina può avere più nomi?
---parte del codice è di find_host.lua
+--note: for retrocompatibility
 function h_utils.find_device_name_and_addresses(query)
 
   local max_total_items = 8
@@ -247,15 +220,9 @@ function h_utils.find_device_name_and_addresses(query)
   local ip_to_name = ntop.getHashAllCache(getHostAltNamesKey()) or {}
   for ip,name in pairs(ip_to_name) do
     if string.contains(string.lower(name), string.lower(query)) then
-        res[ip] = hostVisualization(ip, name)     --note: hostVisualization(...) mette "[IPv6]"agli host con ip v6
+        res[ip] = hostVisualization(ip, name)     --note: hostVisualization(...) put "[IPv6]" for ipv6 hosts
     end
   end
-
-    --NOTE: in questa cache c'è il problema che ci vengono a finire anche i dispositivi che sono stati "purgiati",
-        -- come tratto il caso? se li voglio togliere basta non controllare nella 
-        --cache dhcp. MA! attualmente questa funzione viene invocata dall'utente per cercare un dispositivo
-        --quindi l'utente presumibilmente vuole info a riguardo, deve poter continuare la ricerca di info. QUINDI:
-        --TOLGO IL CONTROLLO IN CACHE
 
   local ips = {}
   local info_host_by_mac = nil
@@ -264,12 +231,11 @@ function h_utils.find_device_name_and_addresses(query)
     if num_items >= max_total_items then break end
 
     if v ~= "" then
-      --note: non so se lasciarlo [IPv6], vediamo, se non da noia lascialo
       if isIPv6(v) and (not string.contains(v, "%[IPv6%]")) then
         v = v.." [IPv6]"
       end
 
-      if isMacAddress(v) then         --caso in cui il mac è anche il nome --> v = k
+      if isMacAddress(v) then         --case v = k
         info_host_by_mac = interface.findHostByMac(v)
         for _,vv in pairs(info_host_by_mac) do
           table.insert(ips,vv)
@@ -278,16 +244,15 @@ function h_utils.find_device_name_and_addresses(query)
         results[v] = {name = v, ip = ips}
         num_items = num_items + 1 
 
-      elseif isMacAddress(k) then     --caso in cui la chiave è il mac
+      elseif isMacAddress(k) then     --case: mac is the key
 
-        --NOTE: col check alla cache dhcp tolto, pare non avere senso questo caso
         info_host_by_mac = interface.findHostByMac(k)
         for _,vv in pairs(info_host_by_mac) do
           table.insert(ips,vv)
         end
         results[k] = {name = v, ip = ips}
         num_items = num_items + 1 
-      else                            --caso in cui ne k ne v sono mac --> k è ip, v è nome
+      else                            --case: k = ip, v = name
 
         local h_info = interface.getHostInfo(k)
         if h_info then
@@ -311,12 +276,7 @@ function h_utils.find_device_name_and_addresses(query)
 end
 
 --#########################################################################################################
-
---TODO: -METTI UN LIMITE TEMPORALE SE CI SONO MOLTI IP NELLA IP_TABLE
---      -astrai di più! fai una funzione per iterare tra gli host di un mac, che accetti una callback per elaborare le info
---      -studia le varie "duration" in getMacInfo / getHostInfo / categories / app ecc.... (guarda le viste di dettaglio dei mac/host)
---      -ANCHE "total_activity_time" in getHostInfo
-
+--note: for retrocompatibility
 --return info about a device and it's hosts
 function h_utils.merge_hosts_info(ip_table)
   local res = nil
@@ -418,21 +378,5 @@ function h_utils.merge_hosts_info(ip_table)
 end
 
 --#########################################################################################################
-
---TODO & test
---function h_utils.findHostByQuery()
-
-
---   local mac_to_name = ntop.getHashAllCache(getDhcpNamesKey(getInterfaceId(ifname))) or {}
---   for mac, name in pairs(mac_to_name) do
---      if string.contains(string.lower(name), string.lower(query)) then
---         res[mac] = hostVisualization(mac, name)
---      end
---   end
-  
---    print( json.encode( res, {indent = true}) )
---    print( json.encode( interface.findHostByMac("00:1F:CF:61:19:64"), {indent = true}) )
-
--- end
 
  return h_utils

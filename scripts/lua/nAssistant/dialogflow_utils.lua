@@ -26,6 +26,7 @@ function utils.url_encode(str)
     return str	
 end
 
+--##############################################################################################
 
 function utils.create_top_traffic_speech_text(top_app)
     local text, top_num, j = "", 0, 1
@@ -39,7 +40,6 @@ function utils.create_top_traffic_speech_text(top_app)
       top_num = top_num + 1
       if top_num == 3 then break end
     end
-    --NOTE:tiene conto solo dei primi 3 proto per una questione di pesantezza cognitiva: l'assistente non deve parlare troppo 
     if top_num == 1 then 
       text = "I note only "..app_names[1].." with "..app_perc[1] .." % of traffic."
     end
@@ -56,8 +56,9 @@ function utils.create_top_traffic_speech_text(top_app)
     return text 
 end
 
+--##############################################################################################
 
---TODO: unisci top_app/cat_speech_text
+
 function utils.create_top_categories_speech_text(top_cat)
   local text, top_num, j = "", 0, 1
   local cat_names, cat_perc = {}, {}
@@ -68,7 +69,6 @@ function utils.create_top_categories_speech_text(top_cat)
     top_num = top_num + 1
     if top_num == 3 then break end
   end
-  --NOTE:tiene conto solo dei primi 3 proto per una questione di pesantezza cognitiva: l'assistente non deve parlare troppo 
   if top_num == 1 then 
     text = "I note only "..cat_names[1].." with "..cat_perc[1] .." % of traffic."
   end
@@ -85,12 +85,12 @@ function utils.create_top_categories_speech_text(top_cat)
   return text 
 end
 
-
+--##############################################################################################
 --PARAMETER: data must contaim 3 field: labels = X axis; values = Y axis; legend_label = the legend;
 --          options must contain 4 field: bkg_color = background color; w = width; h = height; chart_type = the type of the chart
 
 function utils.create_chart_url(data, options)
-    local w,h,site_name = options.w, options.h, "https://quickchart.io/chart?" --TODO: indaga sulle possibili dim dell'img (mantenere un certo rapporto tra w e h?)
+    local w,h,site_name = options.w, options.h, "https://quickchart.io/chart?" 
     local chart_type = options.chart_type --also Radar, Line, Pie, Doughnut, Scatter, Bubble, Radial, Sparklines, Mixed
     local bkg_color = options.bkg_color
     --local option = ""--check docs (chart.js) because that's a loooot of stuff (a lot of plugins like Annotation)
@@ -101,10 +101,10 @@ function utils.create_chart_url(data, options)
     local c = {
         type = options.chart_type,
         data = {
-            labels = data.labels,--labels deve essere un array di valori
-            datasets = {{--datasets deve essere un array di valori
+            labels = data.labels,--labels must be an array
+            datasets = {{--datasets must be an array
                 label = data.legend_label,  
-                data = data["values"] or data.datasets.data, --(inner)data deve essere un array di valori
+                data = data["values"] or data.datasets.data, --(inner)data must be an array
             }}
         }
     }
@@ -169,30 +169,6 @@ function utils.create_chart_url(data, options)
     return url
 end
 
-
-
-
+--##############################################################################################
 ---------------
 return utils
-
---test:
--- {
---   "data":{
---     "labels":["Unspecified","Network","Cloud","Web","System","Email"],
---     "datasets":[{
---       "data":[4509.6435546875,1070.927734375,893.7392578125,618.6279296875,113.142578125,42.2421875],
---       "label":"Traffic (KB)"
---     }]
---   },
---   "type":"bar"
--- }
-
---[[
-cosi ho creato il json per esportare i proto e meterli come entity
-
-local t = {}
-for i,v in pairs(interface.getnDPIProtocols()) do 
-    table.insert(t,{value = i, synonyms = {i} })
-end
---ho rimosso a mano "sina(weibo)", a Dialogflow non piacciono le parentesi
-]]

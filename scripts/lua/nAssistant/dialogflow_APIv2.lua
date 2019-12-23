@@ -114,7 +114,7 @@ function ga_module.create_card(text, image, optional)
   return card
 end
 
---TODO: rifai le fun per i context!? architetturalmente i contesti li tocca solo l'agente dialogflow
+--##############################################################################################
 --Used to set an arbitrary context (and overwrite the old one) call setContext()
 --For complex structures use as many prefs as there are fields to save
 function ga_module.setContext(name, lifespan, parameter) 
@@ -131,11 +131,15 @@ function ga_module.setContext(name, lifespan, parameter)
   end
 end
 
+--##############################################################################################
+
 function ga_module.deleteContext()
   ntop.delCache("context_name")
   ntop.delCache("context_lifespan")
   ntop.delCache("context_param")
 end
+
+--##############################################################################################
 
 function ga_module.getContext()
 
@@ -157,19 +161,14 @@ function ga_module.getContext()
   return mycontext
 end
 
-
---TODO!: rifai a modo la send, tenendo conto dei componeni non implementati.
-  --    metti solo i parametri obbligatori e in "optional" il resto
+--##############################################################################################
 
 --[[PARAM
   speech_text, diplay_text: self explanatory
   expect_response: boolean to let the assistant listen
   suggestions_strings: suggestions displayed on the bottom of the screen (MAX 8)
   (basic)card: one of the "rich message" response [https://dialogflow.com/docs/intents/rich-messages]
-  ]]
-
---idea: metto tra i parametri i campi che uso spesso, in optional le altre varie ed eventuali da implementare
---function ga_module.send(speech_text, display_text, expect_response, suggestions_strings, card )
+]]
 function ga_module.send(speech_text, display_text, suggestions_strings, card, optional )
 
   if suggestions_strings then 
@@ -190,6 +189,38 @@ function ga_module.send(speech_text, display_text, suggestions_strings, card, op
       io.write("\n---------------------------------------------------------\n")
     end
 end
+
+--##############################################################################################
+
+--TODO: rimuovi appena finito il driver
+function ga_module.receive()
+  local payload = _POST["payload"] 
+  local info, pos, err = json.decode(payload, 1, nil)
+
+    if debug then   
+      io.write("\n")
+      io.write("DIALOGFLOW REQUEST")
+      tprint(payload)
+      io.write("\n---------------------------------------------------------\n")
+    end
+
+  return info
+end
+
+--##############################################################################################
+
+--TODO: per il driver
+function ga_module.create_json_response(response)
+  jres = {}
+
+  
+  return jres
+end
+
+--##############################################################################################
+
+
+return ga_module
 
 --DIALOGFLOW REQUEST EXAMPLE:
  --[[
@@ -280,24 +311,3 @@ end
   "session": "projects/nassistant02-qbmwmv/agent/sessions/ABwppHHFEUZ0n4OextFk2WXwY0w1T1CFpInJ-kJnfnvuh1cJmXEkgQrmetaijJl88IkTWtDryG8UuBtesBtf8qTQUg"
 }
  ]] 
-
---TODO: voglio che il precedente (NON attuale) contesto sia a disposizione
-function ga_module.receive()
-  local payload = _POST["payload"] 
-  local info, pos, err = json.decode(payload, 1, nil)
-  --WIP: volgio in pratica passare direttamente la richiesta decodificata, qui solo gestione errori, cache etc
-
-  --TODO: gestione cache! es:salvo info per l'intent successivo. sì, ciò spezza un pò l'architettura che creo su dialogflow,
-      --  la quale coi strumenti della piattaforma dovrebbe saper direzionare il dialogo.
-
-    if debug then   
-      io.write("\n")
-      io.write("DIALOGFLOW REQUEST")
-      tprint(payload)
-      io.write("\n---------------------------------------------------------\n")
-    end
-
-  return info
-end
-
-return ga_module

@@ -1,7 +1,6 @@
 --
 -- (C) 2019 - ntop.org
 --
-
 dirs = ntop.getDirs()
 package.path = dirs.installdir .. "/scripts/lua/?.lua;" .. package.path
 if((dirs.scriptdir ~= nil) and (dirs.scriptdir ~= "")) then package.path = dirs.scriptdir .. "/lua/modules/?.lua;" .. package.path 
@@ -11,27 +10,17 @@ require "lua_utils"
 local network_state = {}
 local if_stats = interface.getStats()
 
---[[
---TODO: normalizza i nomi delle funzioni: aaa_bbb_ccc() e non aaaBbbCc()
---TODO: documenta meglio le funzioni
-]]
---------------------------------------------------------------------------------------------------------------
---os.time() --> [...] the number of seconds since some given start time (the "epoch")
 
---note: tieni conto che la guardia della deadline è (os.time() >= deadline))
-local deadline = 3 --seconds
-local group_of = 10 --paginazione 
+--------------------------------------------------------------------------------------------------------------
+local deadline = 4 
+local group_of = 10 
 
 --[[ 
+note: the caller can set the deadline
 
-idea: check quando/se la deadline è scaduta (e avverto l'utente), ma dovrei modificare callback_utils.lua 
-
-note: il chiamante può decidere la deadline (es. vuole fare più iterazioni, dovrà calcolarsi il tempo a modo suo) 
-
-"type"    contiene il tipo dell'entità su cui iterare, unico campo obbligatorio 
-"res"     tabella col risultato, indicizzato per "name". Necessario se si vuole il risultato della callback di default
-"params"  array contenente il nome (stringhe) dei parametri che interessano al chiamante
-          (se params cotiene un campo non presente tra le stats dell'entità, tale valore sarà nil)
+-"type"    is the type of entity to iterate over. Mandatory 
+-"res"     table with the result, indexed by "name". Required if you want the result of the default callback
+-"params"  array containing the name of the parameters of interest to the caller
 ]]
 function network_state.get_stats( type, res, params, caller_deadline,  caller_callback) 
   local callback_utils = require "callback_utils"
@@ -62,9 +51,8 @@ function network_state.get_stats( type, res, params, caller_deadline,  caller_ca
   local custom_deadline = deadline
   if caller_deadline then custom_deadline = caller_deadline end 
 
-  --note: l'iteratore per gli host remoti non è implementato come utils, ma c'è tra i batched iterator
   if type == "flow" then 
-    --note: per i flow, nella callback -->  name = flow_key  &  stats = flow
+    --note: for the flows in the callback -->  name = flow_key  &  stats = flow
     ret = callback_utils.foreachFlow(ifname, os.time() + custom_deadline, callback )
   elseif type == "devices" then 
     ret = callback_utils.foreachDevice(ifname, os.time() + custom_deadline, callback )
@@ -73,9 +61,7 @@ function network_state.get_stats( type, res, params, caller_deadline,  caller_ca
   elseif type == "localhost" then 
     ret = callback_utils.foreachLocalHost(ifname, os.time() + custom_deadline, callback )
   elseif type == "localhost_ts" then
-       --note: per i local rrd host, nella callback -->  stats = host_ts
-       --TODO: decidi se tenere a true o false il terzo campo, quelli dei "dettagli"
-       --note: PARE che se è a true ti da i valori all'ultimo istante, a false ti da alcune(?) info sull'host stesso
+       --note: for 'local rrd host', in the callback -->  stats = host_ts
     ret = callback_utils.foreachLocalRRDHost(ifname, os.time() + custom_deadline, true, callback )
   else
     ret = false
@@ -84,7 +70,7 @@ function network_state.get_stats( type, res, params, caller_deadline,  caller_ca
   return ret
 end
 
-----------------------------------------------------------------------------------------------------------
+--##############################################################################################
 
 --return ndpi categoty table [ "category_name" = "bytes" ]
 function network_state.check_ndpi_categories()
@@ -127,7 +113,6 @@ function network_state.check_traffic_categories()
   end
 
   local function compare(a, b) return a.perc > b.perc end
-
   table.sort( res, compare )
 
   return res
@@ -199,7 +184,7 @@ function network_state.check_devices_type()
 end
 
 --##############################################################################################
-
+--NOTE: here only for retrocompatibility
 --return respectively: 1) total percentage of goodput, 2) num of bad goodput client, 3) num of bad goodput server, 4) num of total flow
 function network_state.get_aggregated_TCP_flow_goodput_percentage()
   local bad_gp_client, bad_gp_server, flow_tot, prbl = 0,0,0,0
@@ -227,8 +212,7 @@ function network_state.get_aggregated_TCP_flow_goodput_percentage()
 end
 
 --##############################################################################################
-
---!!NOTE!!: La sto lasciando SOLO percompatibilità con nAssistant01, appena sistemato l'assistente in italiano va cancellata/spostata/rinominata
+--NOTE: here only for retrocompatibility
 --return respectively: state of goodput, number of total flow, total number of bad goodput flow
 function network_state.check_TCP_flow_goodput()
   local bad_gp_client, bad_gp_server, flow_tot, prbl = 0,0,0,0
@@ -250,7 +234,6 @@ function network_state.check_TCP_flow_goodput()
     seen = seen + group_of
   until (seen < tot) or (os.time() > deadline)
 
-  --'sta parte di dialogo va messa dentro l'assistente, in questo file non si tratta la parte grammaticale
   local perc, state = 100 - math.floor( (bad_gp_client + bad_gp_server) / flow_tot) * 100 
   if perc > 90 then 
     state = "complessivamente ottima" 
@@ -266,7 +249,7 @@ function network_state.check_TCP_flow_goodput()
 end
 
 --##############################################################################################
-
+--NOTE: here only for retrocompatibility
 --return a table with tot traffic, remote/local percentage and pkt drop
 function network_state.check_net_communication()
 
@@ -285,7 +268,7 @@ function network_state.check_net_communication()
 end
 
 --##############################################################################################
-
+--NOTE: here only for retrocompatibility
 --return a table ["breed_name" = "perentage of that breed"], number of blacklisted active host and a flag to report Dangerous traffic
 function network_state.check_bad_hosts_and_app()
   local blacklisted, danger_flag = 0, false
@@ -322,7 +305,7 @@ function network_state.check_bad_hosts_and_app()
 end
 
 --##############################################################################################
-
+--NOTE: here only for retrocompatibility
 --return a table with ndpi application name and traffic volume for each ndpi application with "Dangerous" breed 
 function network_state.check_dangerous_traffic()
   local res= {}
@@ -345,30 +328,10 @@ function network_state.check_dangerous_traffic()
 end
 
 --##############################################################################################
----------------------------------------- ALERTS ------------------------------------------------
---##############################################################################################
---TODO: NOTIFICHE se possibile. Notificare almeno gli allarmi importanti
---      distingui/separa/etichetta gli allarmi engaged - released - di flusso...
---      di sicuro c'è da far capire bene: Soggetto, stato allarme, gravità, tipo. [VEDI APPUNTI ALERT] 
---  !!  funzioni per controllare gloi alert per host/mac
+--NOTE: here only for retrocompatibility
 
---NOTE: le funzion iattuali si riferiscono alla totalità degli alert
-require "alert_utils"
-
---
--- function network_state.get_alerts()--TODO: cambia nome in get_aletrs
---   local engaged_alerts = getAlerts("engaged", getTabParameters(_GET, "engaged"))
---   local past_alerts    = getAlerts("historical", getTabParameters(_GET, "historical"))
---   local flow_alerts    = getAlerts("historical-flows", getTabParameters(_GET, "historical-flows"))
-
---   return engaged_alerts, past_alerts, flow_alerts
--- end
-
---##############################################################################################
-
---TODO: TEST
 function network_state.get_num_alerts_and_severity()
-
+  require "alert_utils"
   local severity = {} --severity: (none,) info, warning, error
 
   local function severity_cont(alerts, severity_table )
@@ -406,11 +369,10 @@ function network_state.get_num_alerts_and_severity()
   return alerts_num, severity
 end
 
---------------------------------------------------------------------------------------------
-
---rilevanza è la somma degli "alert_counter" dei vari alert in cui un host compare come cli o serv
---LA SOMMA DEGLI ALERT COUNTER DI TUTTI GLI ALERT È IL NUMERO DI "ALERT FLOWS" cioè i flussi con status ~= da normal
+--##############################################################################################
+--NOTE: here only for retrocompatibility
 function network_state.get_hosts_flow_alerts_stats()
+  require "alert_utils"
   local flows = {} 
 
   local hosts_score = {}
@@ -420,7 +382,6 @@ function network_state.get_hosts_flow_alerts_stats()
     local alert_type, rowid, t_stamp, srv_addr, cli_addr, severity, alert_counter
     for _,v in pairs(past_flow_alerts) do 
 
-      --TODO: si vede che non avevo ancora scoperto ternary(), usalo per mettere questi if direttamente dentro "e"
       if v.alert_type       then alert_type = alertTypeLabel( v.alert_type, true )      else  alert_type      = "Unknown" end
       if v.rowid            then rowid  =  v.rowid                                      else  rowid           = "Unknown" end
       if v.alert_tstamp     then t_stamp =  os.date( "%c", tonumber(v.alert_tstamp))    else  t_stamp         = "Unknown" end
@@ -438,14 +399,10 @@ function network_state.get_hosts_flow_alerts_stats()
         cli_addr     = cli_addr,
         alert_counter= alert_counter
       }
-      --tprint(severity.." ("..alert_counter.. ") for "..cli_addr.." - "..srv_addr)
-      --table.insert( tmp, e )
 
-      --qui sommo i contatori:
       if hosts_score[srv_addr] then 
         hosts_score[srv_addr].alert_counter = hosts_score[srv_addr].alert_counter + alert_counter
         hosts_score[srv_addr].tot_flows_bytes = hosts_score[srv_addr].tot_flows_bytes + v.srv2cli_bytes + v.cli2srv_bytes
-
         hosts_score[srv_addr].severity[severity] = hosts_score[srv_addr].severity[severity] + alert_counter
       else 
         hosts_score[srv_addr] = {
@@ -458,7 +415,6 @@ function network_state.get_hosts_flow_alerts_stats()
         }
         hosts_score[srv_addr].severity[severity] = hosts_score[srv_addr].severity[severity] + alert_counter
       end
-
       if hosts_score[cli_addr] then
         hosts_score[cli_addr].alert_counter = hosts_score[cli_addr].alert_counter + alert_counter
         hosts_score[cli_addr].tot_flows_bytes = hosts_score[cli_addr].tot_flows_bytes + v.srv2cli_bytes + v.cli2srv_bytes
@@ -475,25 +431,16 @@ function network_state.get_hosts_flow_alerts_stats()
         }
         hosts_score[cli_addr].severity[severity] = hosts_score[cli_addr].severity[severity] + alert_counter
       end
-
     end
   end
 
-    local tmp ={}
-    for i,v in pairs(hosts_score) do
-      table.insert(tmp, table.merge(v,{addr= i}) )
-    end
-  
+  local tmp ={}
+  for i,v in pairs(hosts_score) do
+    table.insert(tmp, table.merge(v,{addr= i}) )
+  end
   local function compare(a, b) return a.alert_counter > b.alert_counter end
   table.sort( tmp, compare )
-  --tprint(tmp)
   hosts_score = tmp
-
-
-  --TODO: CALCOLO SCORE e aggiungo in tabella
-  --come calcolo lo score? per ora SOLO il numero di alert scattati, ergo uso direttamente alert_counter
-
-
 
   return hosts_score
 end
@@ -508,74 +455,73 @@ function network_state.get_hosts_flow_misbehaving_stats()
       local tmp = {}
       if not res then return false end
 
-      if stats["flow.status"] ~= flow_consts.status_normal then
+      if stats["flow.status"] ~= 0 --[[status_normal]] then
         table.insert(res, stats)
       end
       return true
   end
+  network_state.get_stats("flow",res,nil,nil, misbehaving_flows)
 
-  network_state.get_stats("flow",res,nil,nil, misbehaving_flows) --TODO: error check
+  local flow_status_relevance_map = {} 
+  local j = 1
+
+  for _ in pairs(flow_consts.status_types) do
+    flow_status_relevance_map[j] = 0
+    j= j+1
+  end
+  for _,v in pairs(flow_consts.status_types) do 
+    flow_status_relevance_map[v.status_id] = v.relevance
+  end
 
   local hosts_score = {}
-
   for i,v in pairs(res) do
     local cli_addr, srv_addr, status = v["cli.ip"], v["srv.ip"], v["flow.status"]
 
     if hosts_score[cli_addr] then
       hosts_score[cli_addr].flow_counter = hosts_score[cli_addr].flow_counter + 1
       hosts_score[cli_addr].tot_flows_bytes = hosts_score[cli_addr].tot_flows_bytes + v.bytes
-      hosts_score[cli_addr].score = hosts_score[cli_addr].score + flow_consts.flow_status_types[status].relevance
-      
+      hosts_score[cli_addr].score = hosts_score[cli_addr].score + flow_status_relevance_map[status]
       if hosts_score[cli_addr].status[status ] then 
         hosts_score[cli_addr].status[ status ] = hosts_score[cli_addr].status[ status ] +1
       else 
         hosts_score[cli_addr].status[ status ] = 1
       end
-
     else
       hosts_score[cli_addr] = {
         flow_counter = 1,
         tot_flows_bytes = v.bytes,
         status= {},
-        score = flow_consts.flow_status_types[status].relevance
+        score = flow_status_relevance_map[status]
       }
       hosts_score[cli_addr].status[status] = 1
     end
-
     if hosts_score[srv_addr] then
       hosts_score[srv_addr].flow_counter = hosts_score[srv_addr].flow_counter + 1
       hosts_score[srv_addr].tot_flows_bytes = hosts_score[srv_addr].tot_flows_bytes + v.bytes
-      hosts_score[srv_addr].score = hosts_score[srv_addr].score + flow_consts.flow_status_types[status].relevance
+      hosts_score[srv_addr].score = hosts_score[srv_addr].score + flow_status_relevance_map[status]
 
       if hosts_score[srv_addr].status[ status ] then 
         hosts_score[srv_addr].status[ status ] = hosts_score[srv_addr].status[ status ] +1
       else 
         hosts_score[srv_addr].status[ status ] = 1
       end
-
     else
       hosts_score[srv_addr] = {
         flow_counter = 1,
         tot_flows_bytes = v.bytes,
         status = { },
-        score = flow_consts.flow_status_types[status].relevance
+        score = flow_status_relevance_map[status]
       }
       hosts_score[srv_addr].status[status] = 1
     end
-
   end
-  --tprint(hosts_score)
-
   --NOTE:  score ==> ( #misbehaving flows * "relevance" )
-
   local tmp ={}
   for i,v in pairs(hosts_score) do
     table.insert(tmp, table.merge(v,{addr= i}) )
   end
-
   local function compare(a, b) return a.score > b.score end
   table.sort( tmp, compare )
- -- tprint(tmp)
   hosts_score = table.clone(tmp)
 
   return hosts_score
@@ -583,7 +529,7 @@ end
 
 --##############################################################################################
 
---return table with entry like [ghost domain name - hits ] what are "hits"?????
+--return table with entry like [ghost domain name - hits ]
 function network_state.get_interface_ghost_network()
   local res = {}
 
@@ -599,135 +545,7 @@ function network_state.get_interface_ghost_network()
   return res
 end
 
-
-
---##############################################################################################
-
-  -- function network_state.alerts_details()
-  --   local engaged_alerts, past_alerts, flow_alerts = network_state.get_alerts() 
-  --   local tmp_alerts, alerts = {}, {}
-  --   local limit= 3 --temporary limit, add effective selection criterion (eg. text limit is 640 char )
-
-  --   j = 0
-  --   for i,v in pairs(engaged_alerts)  do
-  --     if j < limit then 
-  --        table.insert( tmp_alerts, v )
-  --        j = j+1
-  --     else break end
-  --   end
-
-  --   j = 0
-  --   for i,v in pairs(flow_alerts)  do
-  --     if j < limit then 
-  --        table.insert( tmp_alerts, v )
-  --        j = j+1
-  --     else break end
-  --   end
-
-  --   j = 0
-  --   for i,v in pairs(past_alerts)  do
-  --     if j < limit then 
-  --        table.insert( tmp_alerts, v )
-  --        j = j+1
-  --     else break end
-  --   end
-
-  --   local alert_type, rowid, t_stamp, srv_addr, srv_port, cli_addr, cli_port, severity, alert_json  
-
-  --   for i,v in pairs(tmp_alerts) do 
-
-  --     if v.alert_type       then alert_type = alertTypeLabel( v.alert_type, true )      else  alert_type      = "Sconosciuto" end
-  --     if v.rowid            then rowid  =  v.rowid                                      else  rowid           = "Sconosciuto" end
-  --     if v.alert_tstamp     then t_stamp =  os.date( "%c", tonumber(v.alert_tstamp))    else  t_stamp         = "Sconosciuto" end
-  --     if v.srv_addr         then srv_addr = v.srv_addr                                  else  srv_addr        = "Sconosciuto" end
-  --     if v.srv_port         then srv_port = v.srv_port                                  else  srv_port        = "Sconosciuto" end
-  --     if v.cli_addr         then cli_addr = v.cli_addr                                  else  cli_addr        = "Sconosciuto" end
-  --     if v.cli_port         then cli_port = v.cli_port                                  else  cli_port        = "Sconosciuto" end
-  --     if v.alert_severity   then severity = alertSeverityLabel(v.alert_severity, true)  else  severity        = "Sconosciuto" end
-  --     if v.alert_json       then alert_json = v.alert_json                              else  alert_json      = "Sconosciuto" end 
-      
-  --     local e = {
-  --       ID            = rowid,
-  --       Tipo          = alert_type,
-  --       Scattato      = t_stamp,
-  --       Pericolosita  = severity,
-  --       IP_Server     = srv_addr,
-  --       Porta_Server  = srv_port,
-  --       IP_Client     = cli_addr,
-  --       Porta_Client  = cli_port,
-  --       JSON_info     = alert_json --sono necessarie le JSON INFO? 
-  --     }
-
-  --     table.insert( alerts, e )
-  --   end
-
-  --   if #alerts > 0 then 
-  --     return alerts
-  --   else
-  --     return nil
-  --   end
-
-  -- end
-  
---##############################################################################################
 ------------------------------------------------------------------------------------------------
 --##############################################################################################
 
 return network_state
-
-
-
-
-
---TODO: includi i flow status nelle info del traffico! prima però studiali
--- questi status qui sotto si ottengono iterando sui singoli flussi (con get_stats(...)) o in maniera aggregata da interface.getFlowsStatus()
-
---inoltre chiedi a luca se sono solo per ntop edge o se posso comunque usarli
-
--- function getFlowStatusTypes()
---    local entries = {
---     [0]  = i18n("flow_details.normal"),
---     [1]  = i18n("flow_details.slow_tcp_connection"),
---     [2]  = i18n("flow_details.slow_application_header"),
---     [3]  = i18n("flow_details.slow_data_exchange"),
---     [4]  = i18n("flow_details.low_goodput"),
---     [5]  = i18n("flow_details.suspicious_tcp_syn_probing"),
---     [6]  = i18n("flow_details.tcp_connection_issues"),
---     [7]  = i18n("flow_details.suspicious_tcp_probing"),
---     [8]  = i18n("flow_details.flow_emitted"),
---     [9]  = i18n("flow_details.tcp_connection_refused"),
---     [10] = i18n("flow_details.ssl_certificate_mismatch"),
---     [11] = i18n("flow_details.dns_invalid_query"),
---     [12] = i18n("flow_details.remote_to_remote"),
---     [13] = i18n("flow_details.blacklisted_flow"),
---     [14] = i18n("flow_details.flow_blocked_by_bridge"),
---     [15] = i18n("flow_details.web_mining_detected"),
---     [16] = i18n("flow_details.suspicious_device_protocol"),
---     [17] = i18n("flow_details.elephant_flow_l2r"),
---     [18] = i18n("flow_details.elephant_flow_r2l"),
---     [19] = i18n("flow_details.longlived_flow"),
---     [20] = i18n("flow_details.not_purged"),
---     [21] = i18n("alerts_dashboard.ids_alert"),
---     [22] = i18n("flow_details.tcp_severe_connection_issues"),
---     [23] = i18n("flow_details.ssl_unsafe_ciphers"),
---     [24] = i18n("flow_details.data_exfiltration"),
---     [25] = i18n("flow_details.ssl_old_protocol_version"),
---    }
-
---    return entries
--- end
-
-
---[[
------------------------------------------------------------ -
-utile per gli alert:
-
-num_triggered_alerts table
-num_triggered_alerts.min number 0
-num_triggered_alerts.day number 0
-num_triggered_alerts.hour number 0
-num_triggered_alerts.5mins number 0
-
-pezzo di tabella proveniente dalle stats di network_state.get_stats() dell'itratore egli host_ts
-
-]]

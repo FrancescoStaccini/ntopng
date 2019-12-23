@@ -82,22 +82,34 @@ local function print_callbacks_config_table(descr, expert_view)
 	 rowspan = string.format(' rowspan="%d"', num_hooks)
       end
 
-      print("<tr><td ".. rowspan .."><b>".. title .."</b><br>")
-      print("<small>"..description..".</small></td>")
+      local url = ''
+
+      if(user_script.edition == "community") then
+	 local path = string.sub(user_script.source_path, string.len(ntop.getDirs().scriptdir)+1)
+	 url = '<A HREF="/lua/code_viewer.lua?lua_script_path='.. path ..'"><i class="fas fa-lg fa-binoculars"></i></A>'
+      end
+      print("<tr><td ".. rowspan .."><b>".. title .." "..url.."</b><br>")
+      print("<small>"..description.."</small></td>")
 
       print("<td ".. rowspan .." class='text-center'>")
 
       if(ts_utils.exists("flow_user_script:duration", {ifid=ifid, user_script=mod_k, subdir="flow"})) then
-	 print('<a href="'.. ntop.getHttpPrefix() ..'/lua/user_script_details.lua?ifid='..ifid..'&user_script='..mod_k..'&subdir=flow"><i class="fa fa-area-chart fa-lg" data-original-title="" title=""></i></a>')
+	 print('<a href="'.. ntop.getHttpPrefix() ..'/lua/user_script_details.lua?ifid='..ifid..'&user_script='..mod_k..'&subdir=flow"><i class="fas fa-chart-area fa-lg" data-original-title="" title=""></i></a>')
       end
 
       print("</td>")
 
       print("<td ".. rowspan ..">")
       if(user_script.gui and user_script.gui.input_builder) then
-	 print(user_script.gui.input_builder(user_script))
+	 local conf = user_scripts.getConfiguration(user_script)
+	 local k = user_script.key
+
+	 -- TODO remove after implementing the new gui
+	 local value = ternary(user_script.gui.post_handler == user_scripts.checkbox_post_handler, conf.enabled, conf.script_conf)
+
+	 print(user_script.gui.input_builder(user_script.gui or {}, k, value))
       else
-	 print('<a href="'.. ntop.getHttpPrefix() ..'/lua/admin/prefs.lua?tab=alerts"><i class="fa fa-flask fa-lg"></i></a>')
+	 print('<a href="'.. ntop.getHttpPrefix() ..'/lua/admin/prefs.lua?tab=alerts"><i class="fas fa-flask fa-lg"></i></a>')
       end
       print("</td>")
 
@@ -145,19 +157,12 @@ local function print_callbacks_config_table(descr, expert_view)
    -- Print total stats
    print("</tr><tr><td><b>" .. i18n("total") .. "</b></td><td class='text-center'>")
    if(ts_utils.exists("flow_user_script:total_stats", {ifid=ifid, subdir="flow"})) then
-      print('<a href="'.. ntop.getHttpPrefix() ..'/lua/user_script_details.lua?ifid='..ifid..'&subdir=flow&user_script='.. total_user_module ..'&ts_schema=custom:flow_user_script:total_stats"><i class="fa fa-area-chart fa-lg"></i></a>')
+      print('<a href="'.. ntop.getHttpPrefix() ..'/lua/user_script_details.lua?ifid='..ifid..'&subdir=flow&user_script='.. total_user_module ..'&ts_schema=custom:flow_user_script:total_stats"><i class="fas fa-chart-area fa-lg"></i></a>')
    end
    print("<td>")
    if(expert_view) then
       print("<td></td>")
    end
-   print("<td class='text-center'>")
-   print(format_utils.secondsToTime(total_stats.tot_elapsed))
-   print("</td><td class='text-center'>")
-   print(format_utils.formatValue(total_stats.tot_num_calls))
-   print("</td><td class='text-center'>")
-   --~ print(format_utils.formatValue(round(avg_speed, 0)))
-   print("</td></tr>")
 
    print("</tr>")
    print[[</table>]]
@@ -173,33 +178,20 @@ function flow_callbacks_utils.print_callbacks_config()
    end
 
    local ifid = interface.getId()
-   local descr = user_scripts.load(user_scripts.script_types.flow, ifid, "flow", nil, true --[[ also return disabled ]])
+   local descr = user_scripts.load(ifid, user_scripts.script_types.flow, "flow")
 
    print [[
 
 <br>]]
 
    if table.len(_POST) > 0 then
-      for mod_key, user_script in pairs(descr.modules) do
-         local pref_key = "enabled_" .. mod_key
-         local val = _POST[pref_key]
-
-         if(val ~= nil) then
-            if(val == "on") then
-               user_scripts.enableModule(ifid, "flow", mod_key)
-               user_script.enabled = true
-            else
-               user_scripts.disableModule(ifid, "flow", mod_key)
-               user_script.enabled = false
-            end
-         end
-      end
+      user_scripts.handlePOST("flow", descr)
    end
 
    print[[<form id="flow-callbacks-config" class="form-inline" method="post">]]
    print_callbacks_config_table(descr, show_advanced_prefs)
    print[[<input type=hidden name="show_advanced_prefs" value="]]if show_advanced_prefs then print("true") else print("false") end print[["/>]]
-   print[[<button class="btn btn-primary" style="float:right; margin-right:1em;" type="submit">]] print(i18n("save_configuration")) print[[</button>]]
+   print[[<button class="btn btn-primary" style="float:right; margin-right:1em; margin-left:auto" type="submit">]] print(i18n("save_configuration")) print[[</button>]]
    print[[</form>]]
    print[[
 
@@ -217,9 +209,9 @@ function flow_callbacks_utils.print_callbacks_config()
 
    if show_advanced_prefs then
       cls_on  = cls_on..' btn-primary active'
-      cls_off = cls_off..' btn-default'
+      cls_off = cls_off..' btn-secondary'
    else
-      cls_on = cls_on..' btn-default'
+      cls_on = cls_on..' btn-secondary'
       cls_off = cls_off..' btn-primary active'
    end
 

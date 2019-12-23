@@ -14,7 +14,7 @@ page_utils.print_header()
 
 dofile(dirs.installdir .. "/scripts/lua/inc/menu.lua")
 
-print[[<hr>]]
+-- print[[<hr>]]
 
 local ifid = interface.getId()
 local edition = _GET["edition"] or ""
@@ -23,7 +23,7 @@ local edition = _GET["edition"] or ""
 
 local function printUserScripts(title, scripts)
   print[[<h3>]] print(title) print[[</h3>
-    <table class="table table-bordered table-condensed table-striped">
+    <table class="table table-bordered table-sm table-striped">
     <tr><th class='text-center' width="30%">Script</th><th width="10%">Availability</th><th width="30%">Hooks</th><th>Filters</th></tr>]]
 
   for name, script in pairsByKeys(scripts.modules) do
@@ -57,10 +57,10 @@ local function printUserScripts(title, scripts)
     end
 
     -- Availability
-    if(string.find(script.path, "/enterprise/")) then
+    if(script.edition == "enterprise") then
       available = "Enterprise"
       if((edition ~= "") and (edition ~= "enterprise")) then goto skip end
-    elseif(string.find(script.path, "/pro/")) then
+    elseif(script.edition == "pro") then
       available = "Pro"
       if((edition ~= "") and (edition ~= "pro")) then goto skip end
     else
@@ -94,13 +94,13 @@ print[[<form class="form-inline" style="width:12em">
   });
 </script>]]
 
-printUserScripts("Interface Scripts", user_scripts.load(user_scripts.script_types.traffic_element, ifid, "interface", nil, ignore_disabled, nil, return_all))
+printUserScripts("Interface Scripts", user_scripts.load(ifid, user_scripts.script_types.traffic_element, "interface", {return_all = true}))
 print("<br>")
-printUserScripts("Host Scripts", user_scripts.load(user_scripts.script_types.traffic_element, ifid, "host", nil, ignore_disabled, nil, return_all))
+printUserScripts("Host Scripts", user_scripts.load(ifid, user_scripts.script_types.traffic_element, "host", {return_all = true}))
 print("<br>")
-printUserScripts("Network Scripts", user_scripts.load(user_scripts.script_types.traffic_element, ifid, "network", nil, ignore_disabled, nil, return_all))
+printUserScripts("Network Scripts", user_scripts.load(ifid, user_scripts.script_types.traffic_element, "network", {return_all = true}))
 print("<br>")
-printUserScripts("Flow Scripts", user_scripts.load(user_scripts.script_types.flow, ifid, "flow", nil, ignore_disabled, nil, return_all))
+printUserScripts("Flow Scripts", user_scripts.load(ifid, user_scripts.script_types.flow, "flow", {return_all = true}))
 
 dofile(dirs.installdir .. "/scripts/lua/inc/footer.lua")
 

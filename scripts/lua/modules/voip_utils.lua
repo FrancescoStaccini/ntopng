@@ -121,13 +121,13 @@ function MosPercentageBar(value)
    value = tonumber(value)
 
    if (value >= 4.0)  then
-      ret_bar = '<span class="label label-success">'..value..' '..i18n("flow_details.desirable_label")..'</span>'
+      ret_bar = '<span class="badge badge-success">'..value..' '..i18n("flow_details.desirable_label")..'</span>'
    elseif ((value >= 3.6) and (value < 4.0)) then
-      ret_bar = '<span class="label label-info">'..value..' '..i18n("flow_details.acceptable_label")..'</span>'
+      ret_bar = '<span class="badge badge-info">'..value..' '..i18n("flow_details.acceptable_label")..'</span>'
    elseif ((value >= 2.6) and (value < 3.6)) then
-      ret_bar = '<span class="label label-warning">'..value..' '..i18n("flow_details.reach_connection_label")..'</span>'
+      ret_bar = '<span class="badge badge-warning">'..value..' '..i18n("flow_details.reach_connection_label")..'</span>'
    elseif ((value > 0) and (value < 2.6)) then
-      ret_bar = '<span class="label label-danger">'..value..' '..i18n("flow_details.not_recommended_label")..'</span>'
+      ret_bar = '<span class="badge badge-danger">'..value..' '..i18n("flow_details.not_recommended_label")..'</span>'
    end
 
    return ret_bar
@@ -140,13 +140,13 @@ function RFactorPercentageBar(value)
    value = tonumber(value)
 
    if (value >= 80.0)  then
-      ret_bar = '<span class="label label-success">'..value..' '..i18n("flow_details.desirable_label")..'</span>'
+      ret_bar = '<span class="badge badge-success">'..value..' '..i18n("flow_details.desirable_label")..'</span>'
    elseif ((value >= 70.0) and (value < 80.0)) then
-      ret_bar = '<span class="label label-info">'..value..' '..i18n("flow_details.acceptable_label")..'</span>'
+      ret_bar = '<span class="badge badge-info">'..value..' '..i18n("flow_details.acceptable_label")..'</span>'
    elseif ((value >= 50.0) and (value < 70.0)) then
-      ret_bar = '<span class="label label-warning">'..value..' '..i18n("flow_details.reach_connection_label")..'</span>'
+      ret_bar = '<span class="badge badge-warning">'..value..' '..i18n("flow_details.reach_connection_label")..'</span>'
    elseif ((value >= 0) and (value < 50.0)) then
-      ret_bar = '<span class="label label-danger">'..value..' '..i18n("flow_details.not_recommended_label")..'</span>'
+      ret_bar = '<span class="badge badge-danger">'..value..' '..i18n("flow_details.not_recommended_label")..'</span>'
    end
 
    return ret_bar
@@ -156,37 +156,37 @@ end
 
 function SipCallStatePercentageBar(state)
   -- Wireshark use different state http://wiki.wireshark.org/VoIP_calls
-  label_class =  "label-default"
+  label_class =  "badge-secondary"
 
   if (state == "REGISTER") then
-    label_class = "label-info"
+    label_class = "badge-info"
   end
 
   if (state == "CALL_STARTED") then
-    label_class = "label-info"
+    label_class = "badge-info"
   end
 
   if (state == "CALL_IN_PROGRESS") then
-    label_class = "label-progress"
+    label_class = "badge-progress"
   end
 
   if (state == "CALL_COMPLETED") then
-    label_class = "label-success"
+    label_class = "badge-success"
   end
 
   if (state == "CALL_ERROR") then
-    label_class = "label-danger"
+    label_class = "badge-danger"
   end
 
   if (state == "CALL_CANCELED") then
-    label_class = "label-warning"
+    label_class = "badge-warning"
   end
 
   if (state == "UNKNOWN") then
-    label_class = "bar-warning"
+    label_class = "badge-warning"
   end
 
-  print('<span class="label '..label_class..'">'..state..'</span>')
+  print('<span class="badge '..label_class..'">'..state..'</span>')
 end
 
 -- ######################################
@@ -240,14 +240,14 @@ print [[
     $('#jitter_in').html(rsp["rtp.jitter_in"]+" ms");
     if(jitter_in_trend){
       if(rsp["rtp.jitter_in"] > jitter_in_trend){
-          $('#jitter_in_trend').html("<i class=\"fa fa-arrow-up\"></i>");
+          $('#jitter_in_trend').html("<i class=\"fas fa-arrow-up\"></i>");
       } else if(rsp["rtp.jitter_in"] < jitter_in_trend){
-          $('#jitter_in_trend').html("<i class=\"fa fa-arrow-down\"></i>");
+          $('#jitter_in_trend').html("<i class=\"fas fa-arrow-down\"></i>");
       } else {
-          $('#jitter_in_trend').html("<i class=\"fa fa-minus\"></i>");
+          $('#jitter_in_trend').html("<i class=\"fas fa-minus\"></i>");
       }
     }else{
-      $('#jitter_in_trend').html("<i class=\"fa fa-minus\"></i>");
+      $('#jitter_in_trend').html("<i class=\"fas fa-minus\"></i>");
     }
     jitter_in_trend = rsp["rtp.jitter_in"];
   } else {
@@ -259,14 +259,14 @@ print [[
     $('#jitter_out').html(rsp["rtp.jitter_out"]+" ms");
     if(jitter_out_trend){
       if(rsp["rtp.jitter_out"] > jitter_out_trend){
-          $('#jitter_out_trend').html("<i class=\"fa fa-arrow-up\"></i>");
+          $('#jitter_out_trend').html("<i class=\"fas fa-arrow-up\"></i>");
       } else if(rsp["rtp.jitter_out"] < jitter_out_trend){
-          $('#jitter_out_trend').html("<i class=\"fa fa-arrow-down\"></i>");
+          $('#jitter_out_trend').html("<i class=\"fas fa-arrow-down\"></i>");
       } else {
-          $('#jitter_out_trend').html("<i class=\"fa fa-minus\"></i>");
+          $('#jitter_out_trend').html("<i class=\"fas fa-minus\"></i>");
       }
     }else{
-      $('#jitter_out_trend').html("<i class=\"fa fa-minus\"></i>");
+      $('#jitter_out_trend').html("<i class=\"fas fa-minus\"></i>");
     }
   } else {
     $('#jitter_out').html("-");
@@ -289,12 +289,12 @@ print [[
     $('#packet_lost_in').html(formatPackets(rsp["rtp.packet_lost_in"]));
     if(packet_lost_in_trend){
       if(rsp["rtp.packet_lost_in"] > packet_lost_in_trend){
-          $('#packet_lost_in_trend').html("<i class=\"fa fa-arrow-up\"></i>");
+          $('#packet_lost_in_trend').html("<i class=\"fas fa-arrow-up\"></i>");
       } else {
-          $('#packet_lost_in_trend').html("<i class=\"fa fa-minus\"></i>");
+          $('#packet_lost_in_trend').html("<i class=\"fas fa-minus\"></i>");
       }
     }else{
-      $('#packet_lost_in_trend').html("<i class=\"fa fa-minus\"></i>");
+      $('#packet_lost_in_trend').html("<i class=\"fas fa-minus\"></i>");
     }
   } else {
     $('#packet_lost_in').html("-");
@@ -306,12 +306,12 @@ print [[
     $('#packet_lost_out').html(formatPackets(rsp["rtp.packet_lost_out"]));
     if(packet_lost_out_trend){
       if(rsp["rtp.packet_lost_out"] > packet_lost_out_trend){
-          $('#packet_lost_out_trend').html("<i class=\"fa fa-arrow-up\"></i>");
+          $('#packet_lost_out_trend').html("<i class=\"fas fa-arrow-up\"></i>");
       } else {
-          $('#packet_lost_out_trend').html("<i class=\"fa fa-minus\"></i>");
+          $('#packet_lost_out_trend').html("<i class=\"fas fa-minus\"></i>");
       }
     }else{
-      $('#packet_lost_out_trend').html("<i class=\"fa fa-minus\"></i>");
+      $('#packet_lost_out_trend').html("<i class=\"fas fa-minus\"></i>");
     }
   } else {
     $('#packet_lost_out').html("-");
@@ -334,12 +334,12 @@ print [[
     $('#packet_drop_in').html(formatPackets(rsp["rtp.packet_drop_in"]));
     if(packet_drop_in_trend){
       if(rsp["rtp.packet_drop_in"] > packet_drop_in_trend){
-          $('#packet_drop_in_trend').html("<i class=\"fa fa-arrow-up\"></i>");
+          $('#packet_drop_in_trend').html("<i class=\"fas fa-arrow-up\"></i>");
       } else {
-          $('#packet_drop_in_trend').html("<i class=\"fa fa-minus\"></i>");
+          $('#packet_drop_in_trend').html("<i class=\"fas fa-minus\"></i>");
       }
     }else{
-      $('#packet_drop_in_trend').html("<i class=\"fa fa-minus\"></i>");
+      $('#packet_drop_in_trend').html("<i class=\"fas fa-minus\"></i>");
     }
   } else {
     $('#packet_drop_in').html("-");
@@ -351,12 +351,12 @@ print [[
     $('#packet_drop_out').html(formatPackets(rsp["rtp.packet_drop_out"]));
     if(packet_drop_out_trend){
       if(rsp["rtp.packet_drop_out"] > packet_drop_out_trend){
-          $('#packet_drop_out_trend').html("<i class=\"fa fa-arrow-up\"></i>");
+          $('#packet_drop_out_trend').html("<i class=\"fas fa-arrow-up\"></i>");
       } else {
-          $('#packet_drop_out_trend').html("<i class=\"fa fa-minus\"></i>");
+          $('#packet_drop_out_trend').html("<i class=\"fas fa-minus\"></i>");
       }
     }else{
-      $('#packet_drop_out_trend').html("<i class=\"fa fa-minus\"></i>");
+      $('#packet_drop_out_trend').html("<i class=\"fas fa-minus\"></i>");
     }
   } else {
     $('#packet_drop_out').html("-");
@@ -402,14 +402,14 @@ print [[
     $('#max_delta_time_in').html(rsp["rtp.max_delta_time_in"]+" ms");
     if(max_delta_time_in_trend){
       if(rsp["rtp.max_delta_time_in"] > max_delta_time_in_trend){
-          $('#max_delta_time_in_trend').html("<i class=\"fa fa-arrow-up\"></i>");
+          $('#max_delta_time_in_trend').html("<i class=\"fas fa-arrow-up\"></i>");
       } else if(rsp["rtp.max_delta_time_in"] < max_delta_time_in_trend){
-          $('#max_delta_time_in_trend').html("<i class=\"fa fa-arrow-down\"></i>");
+          $('#max_delta_time_in_trend').html("<i class=\"fas fa-arrow-down\"></i>");
       } else {
-          $('#max_delta_time_in_trend').html("<i class=\"fa fa-minus\"></i>");
+          $('#max_delta_time_in_trend').html("<i class=\"fas fa-minus\"></i>");
       }
     }else{
-      $('#max_delta_time_in_trend').html("<i class=\"fa fa-minus\"></i>");
+      $('#max_delta_time_in_trend').html("<i class=\"fas fa-minus\"></i>");
     }
   } else {
     $('#max_delta_time_in').html("-");
@@ -421,14 +421,14 @@ print [[
     $('#max_delta_time_out').html(rsp["rtp.max_delta_time_out"]+" ms");
     if(max_delta_time_out_trend){
       if(rsp["rtp.max_delta_time_out"] > max_delta_time_out_trend){
-          $('#max_delta_time_out_trend').html("<i class=\"fa fa-arrow-up\"></i>");
+          $('#max_delta_time_out_trend').html("<i class=\"fas fa-arrow-up\"></i>");
       } else if(rsp["rtp.max_delta_time_out"] < max_delta_time_out_trend){
-          $('#max_delta_time_out_trend').html("<i class=\"fa fa-arrow-down\"></i>");
+          $('#max_delta_time_out_trend').html("<i class=\"fas fa-arrow-down\"></i>");
       } else {
-          $('#max_delta_time_out_trend').html("<i class=\"fa fa-minus\"></i>");
+          $('#max_delta_time_out_trend').html("<i class=\"fas fa-minus\"></i>");
       }
     }else{
-      $('#max_delta_time_out_trend').html("<i class=\"fa fa-minus\"></i>");
+      $('#max_delta_time_out_trend').html("<i class=\"fas fa-minus\"></i>");
     }
   } else {
     $('#max_delta_time_out').html("-");
@@ -463,16 +463,16 @@ function printQualityAverageFields ()
   if( (rsp["rtp.mos_average"] && (rsp["rtp.mos_average"] != ""))  || (rsp["rtp.r_factor_average"] && (rsp["rtp.r_factor_average"] != ""))){
     if( rsp["rtp.mos_average"] && (rsp["rtp.mos_average"] != "")) {
       if( rsp["rtp.mos_average"] < 2) {
-        $('#mos_average_signal').html("<i class='fa fa-signal' style='color:red'></i> ");
+        $('#mos_average_signal').html("<i class='fas fa-signal' style='color:red'></i> ");
       }
       if ( (rsp["rtp.mos_average"] > 2) && (rsp["rtp.mos_average"] < 3)) {
-        $('#mos_average_signal').html("<i class='fa fa-signal' style='color:orange'></i> ");
+        $('#mos_average_signal').html("<i class='fas fa-signal' style='color:orange'></i> ");
       }
       if( rsp["rtp.mos_average"] > 3) {
-        $('#mos_average_signal').html("<i class='fa fa-signal' style='color:green'></i> ");
+        $('#mos_average_signal').html("<i class='fas fa-signal' style='color:green'></i> ");
       }
     } else {
-      $('#mos_average_signal').html("<i class='fa fa-signal'></i> ");
+      $('#mos_average_signal').html("<i class='fas fa-signal'></i> ");
     }
   } else {
     $('#mos_average_signal').html("");
@@ -481,14 +481,14 @@ function printQualityAverageFields ()
     $('#mos_average').html(rsp["rtp.mos_average"]);
     if(mos_average_trend){
       if(rsp["rtp.mos_average"] > mos_average_trend){
-          $('#mos_average_trend').html("<i class=\"fa fa-arrow-up\"></i>");
+          $('#mos_average_trend').html("<i class=\"fas fa-arrow-up\"></i>");
       } else if(rsp["rtp.mos_average"] < mos_average_trend){
-          $('#mos_average_trend').html("<i class=\"fa fa-arrow-down\"></i>");
+          $('#mos_average_trend').html("<i class=\"fas fa-arrow-down\"></i>");
       } else {
-          $('#mos_average_trend').html("<i class=\"fa fa-minus\"></i>");
+          $('#mos_average_trend').html("<i class=\"fas fa-minus\"></i>");
       }
     }else{
-      $('#mos_average_trend').html("<i class=\"fa fa-minus\"></i>");
+      $('#mos_average_trend').html("<i class=\"fas fa-minus\"></i>");
     }
   } else {
     $('#mos_average').html("-");
@@ -501,14 +501,14 @@ function printQualityAverageFields ()
     $('#r_factor_average').html(rsp["rtp.r_factor_average"]);
     if(r_factor_average_trend){
       if(rsp["rtp.r_factor_average"] > r_factor_average_trend){
-          $('#r_factor_average_trend').html("<i class=\"fa fa-arrow-up\"></i>");
+          $('#r_factor_average_trend').html("<i class=\"fas fa-arrow-up\"></i>");
       } else if(rsp["rtp.r_factor_average"] < r_factor_average_trend){
-          $('#r_factor_average_trend').html("<i class=\"fa fa-arrow-down\"></i>");
+          $('#r_factor_average_trend').html("<i class=\"fas fa-arrow-down\"></i>");
       } else {
-          $('#r_factor_average_trend').html("<i class=\"fa fa-minus\"></i>");
+          $('#r_factor_average_trend').html("<i class=\"fas fa-minus\"></i>");
       }
     }else{
-      $('#r_factor_average_trend').html("<i class=\"fa fa-minus\"></i>");
+      $('#r_factor_average_trend').html("<i class=\"fas fa-minus\"></i>");
     }
   } else {
     $('#mos_average_slash').html("");
@@ -534,16 +534,16 @@ print [[
   if( (rsp["rtp.mos_in"] && (rsp["rtp.mos_in"] != ""))  || (rsp["rtp.r_factor_in"] && (rsp["rtp.r_factor_in"] != ""))){
     if( rsp["rtp.mos_in"] && (rsp["rtp.mos_in"] != "")) {
       if( rsp["rtp.mos_in"] < 2) {
-        $('#mos_in_signal').html("<i class='fa fa-signal' style='color:red'></i> ");
+        $('#mos_in_signal').html("<i class='fas fa-signal' style='color:red'></i> ");
       }
       if ( (rsp["rtp.mos_in"] > 2) && (rsp["rtp.mos_in"] < 3)) {
-        $('#mos_in_signal').html("<i class='fa fa-signal' style='color:orange'></i> ");
+        $('#mos_in_signal').html("<i class='fas fa-signal' style='color:orange'></i> ");
       }
       if( rsp["rtp.mos_in"] > 3) {
-        $('#mos_in_signal').html("<i class='fa fa-signal' style='color:green'></i> ");
+        $('#mos_in_signal').html("<i class='fas fa-signal' style='color:green'></i> ");
       }
     } else {
-      $('#mos_in_signal').html("<i class='fa fa-signal'></i> ");
+      $('#mos_in_signal').html("<i class='fas fa-signal'></i> ");
     }
   } else {
     $('#mos_in_signal').html("-");
@@ -552,14 +552,14 @@ print [[
     $('#mos_in').html(rsp["rtp.mos_in"]);
     if(mos_in_trend){
       if(rsp["rtp.mos_in"] > mos_in_trend){
-          $('#mos_in_trend').html("<i class=\"fa fa-arrow-up\"></i>");
+          $('#mos_in_trend').html("<i class=\"fas fa-arrow-up\"></i>");
       } else if(rsp["rtp.mos_in"] < mos_in_trend){
-          $('#mos_in_trend').html("<i class=\"fa fa-arrow-down\"></i>");
+          $('#mos_in_trend').html("<i class=\"fas fa-arrow-down\"></i>");
       } else {
-          $('#mos_in_trend').html("<i class=\"fa fa-minus\"></i>");
+          $('#mos_in_trend').html("<i class=\"fas fa-minus\"></i>");
       }
     }else{
-      $('#mos_in_trend').html("<i class=\"fa fa-minus\"></i>");
+      $('#mos_in_trend').html("<i class=\"fas fa-minus\"></i>");
     }
   } else {
     $('#mos_in').html("-");
@@ -572,14 +572,14 @@ print [[
     $('#r_factor_in').html(rsp["rtp.r_factor_in"]);
     if(r_factor_in_trend){
       if(rsp["rtp.r_factor_in"] > r_factor_in_trend){
-          $('#r_factor_in_trend').html("<i class=\"fa fa-arrow-up\"></i>");
+          $('#r_factor_in_trend').html("<i class=\"fas fa-arrow-up\"></i>");
       } else if(rsp["rtp.r_factor_in"] < r_factor_in_trend){
-          $('#r_factor_in_trend').html("<i class=\"fa fa-arrow-down\"></i>");
+          $('#r_factor_in_trend').html("<i class=\"fas fa-arrow-down\"></i>");
       } else {
-          $('#r_factor_in_trend').html("<i class=\"fa fa-minus\"></i>");
+          $('#r_factor_in_trend').html("<i class=\"fas fa-minus\"></i>");
       }
     }else{
-      $('#r_factor_in_trend').html("<i class=\"fa fa-minus\"></i>");
+      $('#r_factor_in_trend').html("<i class=\"fas fa-minus\"></i>");
     }
   } else {
     $('#mos_in_slash').html("");
@@ -591,16 +591,16 @@ print [[
   if( (rsp["rtp.mos_out"] && (rsp["rtp.mos_out"] != ""))  || (rsp["rtp.r_factor_out"] && (rsp["rtp.r_factor_out"] != ""))){
     if( rsp["rtp.mos_out"] && (rsp["rtp.mos_out"] != "")) {
       if( rsp["rtp.mos_out_signal"] < 2) {
-        $('#mos_out_signal').html("<i class='fa fa-signal' style='color:red'></i> ");
+        $('#mos_out_signal').html("<i class='fas fa-signal' style='color:red'></i> ");
       }
       if ( (rsp["rtp.mos_out_signal"] > 2) && (rsp["rtp.mos_out_signal"] < 3)) {
-        $('#mos_out_signal').html("<i class='fa fa-signal' style='color:orange'></i> ");
+        $('#mos_out_signal').html("<i class='fas fa-signal' style='color:orange'></i> ");
       }
       if( rsp["rtp.mos_out_signal"] > 3) {
-        $('#mos_out_signal').html("<i class='fa fa-signal' style='color:green'></i> ");
+        $('#mos_out_signal').html("<i class='fas fa-signal' style='color:green'></i> ");
       }
     } else {
-      $('#mos_out_signal').html("<i class='fa fa-signal'></i> ");
+      $('#mos_out_signal').html("<i class='fas fa-signal'></i> ");
     }
   } else {
     $('#mos_out_signal').html("-");
@@ -609,14 +609,14 @@ print [[
     $('#mos_out').html(rsp["rtp.mos_out"]);
     if(mos_out_trend){
       if(rsp["rtp.mos_out"] > mos_out_trend){
-          $('#mos_out_trend').html("<i class=\"fa fa-arrow-up\"></i>");
+          $('#mos_out_trend').html("<i class=\"fas fa-arrow-up\"></i>");
       } else if(rsp["rtp.mos_out"] < mos_out_trend){
-          $('#mos_out_trend').html("<i class=\"fa fa-arrow-down\"></i>");
+          $('#mos_out_trend').html("<i class=\"fas fa-arrow-down\"></i>");
       } else {
-          $('#mos_out_trend').html("<i class=\"fa fa-minus\"></i>");
+          $('#mos_out_trend').html("<i class=\"fas fa-minus\"></i>");
       }
     }else{
-      $('#mos_out_trend').html("<i class=\"fa fa-minus\"></i>");
+      $('#mos_out_trend').html("<i class=\"fas fa-minus\"></i>");
     }
   } else {
     $('#mos_out').html("-");
@@ -629,14 +629,14 @@ print [[
     $('#r_factor_out').html(rsp["rtp.r_factor_out"]);
     if(r_factor_out_trend){
       if(rsp["rtp.r_factor_out"] > r_factor_out_trend){
-          $('#r_factor_out_trend').html("<i class=\"fa fa-arrow-up\"></i>");
+          $('#r_factor_out_trend').html("<i class=\"fas fa-arrow-up\"></i>");
       } else if(rsp["rtp.r_factor_out"] < r_factor_out_trend){
-          $('#r_factor_out_trend').html("<i class=\"fa fa-arrow-down\"></i>");
+          $('#r_factor_out_trend').html("<i class=\"fas fa-arrow-down\"></i>");
       } else {
-          $('#r_factor_out_trend').html("<i class=\"fa fa-minus\"></i>");
+          $('#r_factor_out_trend').html("<i class=\"fas fa-minus\"></i>");
       }
     }else{
-      $('#r_factor_out_trend').html("<i class=\"fa fa-minus\"></i>");
+      $('#r_factor_out_trend').html("<i class=\"fas fa-minus\"></i>");
     }
   } else {
     $('#mos_out_slash').html("");
@@ -682,14 +682,14 @@ function printRrtFields ()
     $('#rtp_rtt').html(rsp["rtp.rtp_rtt"]+ " ms");
     if(rtp_rtt_trend){
       if(rsp["rtp.rtp_rtt"] > rtp_rtt_trend){
-          $('#rtp_rtt_trend').html("<i class=\"fa fa-arrow-up\"></i>");
+          $('#rtp_rtt_trend').html("<i class=\"fas fa-arrow-up\"></i>");
       } else if(rsp["rtp.rtp_rtt"] < rtp_rtt_trend){
-          $('#rtp_rtt_trend').html("<i class=\"fa fa-arrow-down\"></i>");
+          $('#rtp_rtt_trend').html("<i class=\"fas fa-arrow-down\"></i>");
       } else {
-          $('#rtp_rtt_trend').html("<i class=\"fa fa-minus\"></i>");
+          $('#rtp_rtt_trend').html("<i class=\"fas fa-minus\"></i>");
       }
     }else{
-      $('#rtp_rtt_trend').html("<i class=\"fa fa-minus\"></i>");
+      $('#rtp_rtt_trend').html("<i class=\"fas fa-minus\"></i>");
     }
   } else {
     $('#rtp_rtt').html("-");

@@ -20,8 +20,8 @@ function as2record(ifId, as)
    record["column_since"] = secondsToTime(now - as["seen.first"] + 1)
 
    local sent2rcvd = round((as["bytes.sent"] * 100) / (as["bytes.sent"] + as["bytes.rcvd"]), 0)
-   record["column_breakdown"] = "<div class='progress'><div class='progress-bar progress-bar-warning' style='width: "
-      .. sent2rcvd .."%;'>Sent</div><div class='progress-bar progress-bar-info' style='width: " .. (100-sent2rcvd) .. "%;'>Rcvd</div></div>"
+   record["column_breakdown"] = "<div class='progress'><div class='progress-bar bg-warning' style='width: "
+      .. sent2rcvd .."%;'>Sent</div><div class='progress-bar bg-info' style='width: " .. (100-sent2rcvd) .. "%;'>Rcvd</div></div>"
 
    if(throughput_type == "pps") then
       record["column_thpt"] = pktsToSize(as["throughput_pps"])
@@ -34,7 +34,7 @@ function as2record(ifId, as)
    record["column_chart"] = ""
 
    if ts_utils.exists("asn:traffic", {ifid=ifId, asn=as["asn"]}) then
-      record["column_chart"] = '<A HREF="'..ntop.getHttpPrefix()..'/lua/as_details.lua?asn='..as["asn"]..'&page=historical"><i class=\'fa fa-area-chart fa-lg\'></i></A>'
+      record["column_chart"] = '<A HREF="'..ntop.getHttpPrefix()..'/lua/as_details.lua?asn='..as["asn"]..'&page=historical"><i class=\'fas fa-chart-area fa-lg\'></i></A>'
    end
 
    return record

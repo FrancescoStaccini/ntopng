@@ -1,4 +1,4 @@
-// 2018 - ntop.org
+// 2019 - ntop.org
 
 var schema_2_label = {};
 var data_2_label = {};
@@ -391,7 +391,7 @@ function attachStackedChartCallback(chart, schema_name, chart_id, zoom_reset_id,
   chart.is_zoomed = ((current_zoom_level > 0) || has_initial_zoom());
 
   //var spinner = $("<img class='chart-loading-spinner' src='" + spinner_url + "'/>");
-  var spinner = $('<i class="chart-loading-spinner fa fa-spinner fa-lg fa-spin"></i>');
+  var spinner = $('<i class="chart-loading-spinner fas fa-spinner fa-lg fa-spin"></i>');
   $chart.parent().css("position", "relative");
 
   var chart_colors_full = [
@@ -527,8 +527,8 @@ function attachStackedChartCallback(chart, schema_name, chart_id, zoom_reset_id,
 
     if(cur_interval > 60) {
       var delta = cur_interval/4;
-      $("#period_begin").data("DateTimePicker").date(new Date((params.epoch_begin + delta) * 1000));
-      $("#period_end").data("DateTimePicker").date(new Date((params.epoch_end - delta) * 1000));
+      $("#period_begin").data("datetimepicker").date(new Date((params.epoch_begin + delta) * 1000));
+      $("#period_end").data("datetimepicker").date(new Date((params.epoch_end - delta) * 1000));
       updateChartFromPickers();
     }
   }
@@ -547,8 +547,8 @@ function attachStackedChartCallback(chart, schema_name, chart_id, zoom_reset_id,
     //if((params.epoch_end + delta)*1000 <= $.now())
       //delta /= 2;
 
-    $("#period_begin").data("DateTimePicker").date(new Date((params.epoch_begin - delta) * 1000));
-    $("#period_end").data("DateTimePicker").date(new Date((params.epoch_end + delta) * 1000));
+    $("#period_begin").data("datetimepicker").date(new Date((params.epoch_begin - delta) * 1000));
+    $("#period_end").data("datetimepicker").date(new Date((params.epoch_end + delta) * 1000));
     updateChartFromPickers();
     //}
   }
@@ -722,10 +722,8 @@ function attachStackedChartCallback(chart, schema_name, chart_id, zoom_reset_id,
       spinner.appendTo($chart.parent());
 
     // Update datetime selection
-    $("#period_begin").data("DateTimePicker").date(new Date(params.epoch_begin * 1000));
-    $("#period_end").data("DateTimePicker")
-      .maxDate(new Date($.now()))
-      .date(new Date(Math.min(params.epoch_end * 1000, $.now())));
+    $("#period_begin").data("datetimepicker").date(new Date(params.epoch_begin * 1000));
+     $("#period_end").data("datetimepicker").date(new Date(Math.min(params.epoch_end * 1000, $.now())));
 
     if(query_timer)
       clearInterval(query_timer);

@@ -78,8 +78,8 @@ print[[
       <!-- Modal content-->
       <div class="modal-content">
         <div class="modal-header">
-          <button type="button" class="close" data-dismiss="modal">&times;</button>
           <h3 class="modal-title">]] print(i18n("category_lists.edit_list")) print[[</h3>
+          <button type="button" class="close" data-dismiss="modal">&times;</button>
         </div>
         <div class="modal-body">
           <div class="container-fluid">
@@ -202,6 +202,15 @@ print[[],
         field: "column_category_name",
         sortable: true,
       }, {
+        title: "",
+        field: "column_update_interval",
+        sortable: false,
+        hidden: true,
+      }, {
+        title: "]] print(i18n("category_lists.update_frequency")) print[[",
+        field: "column_update_interval_label",
+        sortable: true,
+      }, {
         title: "]] print(i18n("category_lists.last_update")) print[[",
         field: "column_last_update",
         sortable: true,
@@ -232,7 +241,7 @@ print[[],
     ], rowCallback: function(row, data) {
       var list_name = data.column_name;
       var enabled = data.column_enabled;
-      var actions_td_idx = 6;
+      var actions_td_idx = 8;
 
       datatableAddActionButtonCallback.bind(row)(actions_td_idx, "prepareEditListModal('" + list_name + "'); $('#editListModal').modal('show');", "]] print(i18n('users.edit')) print[[");
 

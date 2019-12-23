@@ -212,7 +212,7 @@ function alerts_api.trigger(entity_info, type_info, when, cur_alerts)
   end
 
   if(type_info.alert_granularity == nil) then
-    alertErrorTraceback("Missing mandatory granularity")
+    alertErrorTraceback("Missing mandatory 'alert_granularity'")
     return(false)
   end
 
@@ -345,12 +345,14 @@ function alerts_api.releaseEntityAlerts(entity_info, alerts)
   end
 
   for _, alert in pairs(alerts) do
+    -- NOTE: do not pass alerts here as a parameters as deleting items while
+    -- does not work in lua
     alerts_api.release(entity_info, {
       alert_type = alert_consts.alert_types[alertTypeRaw(alert.alert_type)],
       alert_severity = alert_consts.alert_severities[alertSeverityRaw(alert.alert_severity)],
       alert_subtype = alert.alert_subtype,
       alert_granularity = alert_consts.alerts_granularities[sec2granularity(alert.alert_granularity)],
-    }, nil, alerts)
+    })
   end
 end
 
@@ -392,6 +394,15 @@ function alerts_api.snmpInterfaceEntity(snmp_device, snmp_interface)
   return {
     alert_entity = alert_consts.alert_entities.snmp_device,
     alert_entity_val = string.format("%s_ifidx%d", snmp_device, snmp_interface)
+  }
+end
+
+-- ##############################################
+
+function alerts_api.snmpDeviceEntity(snmp_device)
+  return {
+    alert_entity = alert_consts.alert_entities.snmp_device,
+    alert_entity_val = snmp_device
   }
 end
 
@@ -469,79 +480,6 @@ end
 
 -- ##############################################
 -- type_info building functions
--- ##############################################
-
-function alerts_api.thresholdCrossType(granularity, metric, value, operator, threshold)
-  return({
-    alert_type = alert_consts.alert_types.alert_threshold_cross,
-    alert_subtype = string.format("%s_%s", granularity, metric),
-    alert_granularity = alert_consts.alerts_granularities[granularity],
-    alert_severity = alert_consts.alert_severities.error,
-    alert_type_params = {
-      metric = metric, value = value,
-      operator = operator, threshold = threshold,
-    }
-  })
-end
-
--- ##############################################
-
-function alerts_api.synFloodType(granularity, metric, value, operator, threshold)
-  return({
-    alert_type = alert_consts.alert_types.alert_tcp_syn_flood,
-    alert_subtype = metric,
-    alert_granularity = alert_consts.alerts_granularities[granularity],
-    alert_severity = alert_consts.alert_severities.error,
-    alert_type_params = {
-      value = value,
-      threshold = threshold,
-    }
-  })
-end
-
--- ##############################################
-
-function alerts_api.synScanType(granularity, metric, value, operator, threshold)
-  return({
-    alert_type = alert_consts.alert_types.alert_tcp_syn_scan,
-    alert_subtype = metric,
-    alert_granularity = alert_consts.alerts_granularities[granularity],
-    alert_severity = alert_consts.alert_severities.error,
-    alert_type_params = {
-      value = value,
-      threshold = threshold,
-    }
-  })
-end
-
--- ##############################################
-
-function alerts_api.flowFloodType(granularity, metric, value, operator, threshold)
-  return({
-    alert_type = alert_consts.alert_types.alert_flows_flood,
-    alert_subtype = metric,
-    alert_granularity = alert_consts.alerts_granularities[granularity],
-    alert_severity = alert_consts.alert_severities.error,
-    alert_type_params = {
-      value = value,
-      threshold = threshold,
-    }
-  })
-end
-
--- ##############################################
-
-function alerts_api.pingIssuesType(value, threshold, ip)
-  return({
-    alert_type = alert_consts.alert_types.alert_ping_issues,
-    alert_severity = alert_consts.alert_severities.warning,
-    alert_granularity = alert_consts.alerts_granularities.min,
-    alert_type_params = {
-      value = value, threshold = threshold, ip = ip,
-    }
-  })
-end
-
 -- ##############################################
 
 function alerts_api.userActivityType(scope, name, params, remote_addr, status)
@@ -763,59 +701,6 @@ end
 
 -- ##############################################
 
-function alerts_api.snmpInterfaceStatusChangeType(device, interface, interface_name, status)
-  return({
-    alert_type = alert_consts.alert_types.alert_port_status_change,
-    alert_severity = alert_consts.alert_severities.info,
-    alert_type_params = {
-      device = device, interface = interface,
-      interface_name = interface_name, status = status,
-    },
-  })
-end
-
--- ##############################################
-
-function alerts_api.snmpInterfaceDuplexStatusChangeType(device, interface, interface_name, status)
-  return({
-    alert_type = alert_consts.alert_types.alert_port_duplexstatus_change,
-    alert_severity = alert_consts.alert_severities.warning,
-    alert_type_params = {
-      device = device, interface = interface,
-      interface_name = interface_name, status = status,
-    },
-  })
-end
-
--- ##############################################
-
-function alerts_api.snmpInterfaceErrorsType(device, interface, interface_name)
-  return({
-    alert_type = alert_consts.alert_types.alert_port_errors,
-    alert_severity = alert_consts.alert_severities.info,
-    alert_type_params = {
-      device = device, interface = interface,
-      interface_name = interface_name,
-    },
-  })
-end
-
--- ##############################################
-
-function alerts_api.snmpPortLoadThresholdExceededType(device, interface, interface_name, interface_load, in_direction)
-  return({
-    alert_type = alert_consts.alert_types.alert_port_load_threshold_exceeded,
-    alert_severity = alert_consts.alert_severities.warning,
-    alert_type_params = {
-      device = device, interface = interface,
-      interface_name = interface_name,
-      interface_load = interface_load, in_direction = in_direction,
-    },
-  })
-end
-
--- ##############################################
-
 function alerts_api.misconfiguredAppType(subtype)
   return({
     alert_type = alert_consts.alert_types.alert_misconfigured_app,
@@ -939,27 +824,29 @@ end
 
 -- ##############################################
 
--- An alert check function which performs threshold checks of a value
--- against a configured threshold and generates a threshold_cross alert
--- if the value is above the threshold.
--- A user script (see user_scripts.lua) must implement:
---   get_threshold_value(granularity, entity_info)
---   A function, which returns the current value to be compared agains the threshold
--- The user_script may implement an additional threshold_type_builder function which
--- which returns a type_info. Check alerts_api.thresholdCrossType for the threshold_type_builder signature.
-function alerts_api.threshold_check_function(params)
-  local alarmed = false
-  local value = params.user_script.get_threshold_value(params.granularity, params.entity_info)
+-- TODO document
+function alerts_api.checkThresholdAlert(params, alert_type, value)
+  local script = params.user_script
   local threshold_config = params.alert_config
+  local alarmed = false
 
-  local threshold_edge = tonumber(threshold_config.edge)
-  local threshold_builder = ternary(params.user_script.threshold_type_builder, params.user_script.threshold_type_builder, alerts_api.thresholdCrossType)
-  local threshold_type = threshold_builder(params.granularity, params.user_script.key, value, threshold_config.operator, threshold_edge)
+  local threshold_type = {
+    alert_type = alert_type,
+    alert_subtype = script.key,
+    alert_granularity = alert_consts.alerts_granularities[params.granularity],
+    alert_severity = alert_consts.alert_severities.error,
+    alert_type_params = {
+      metric = params.user_script.key,
+      value = value,
+      operator = threshold_config.operator,
+      threshold = threshold_config.threshold,
+    }
+  }
 
   if(threshold_config.operator == "lt") then
-    if(value < threshold_edge) then alarmed = true end
+    if(value < threshold_config.threshold) then alarmed = true end
   else
-    if(value > threshold_edge) then alarmed = true end
+    if(value > threshold_config.threshold) then alarmed = true end
   end
 
   if(alarmed) then

@@ -238,17 +238,14 @@ for _key, _value in pairsByKeys(vals, funct) do
    end
 
    if((value["num_alerts"] ~= nil) and (value["num_alerts"] > 0)) then
-      column_ip = column_ip .. " <i class='fa fa-warning' style='color: #B94A48;'></i>"
+      column_ip = column_ip .. " <i class='fas fa-exclamation-triangle' style='color: #B94A48;'></i>"
    end
 
-   if value["systemhost"]    then column_ip = column_ip .. "&nbsp;<i class='fa fa-flag'></i> " end
-   if value["hiddenFromTop"] then column_ip = column_ip .. "&nbsp;<i class='fa fa-eye-slash'></i> " end
+   if value["systemhost"]    then column_ip = column_ip .. "&nbsp;<i class='fas fa-flag'></i> " end
+   if value["hiddenFromTop"] then column_ip = column_ip .. "&nbsp;<i class='fas fa-eye-slash'></i> " end
    if value["childSafe"]     then column_ip = column_ip .. getSafeChildIcon() end
 
    local host = interface.getHostInfo(hosts_stats[key].ip, hosts_stats[key].vlan)
-   if((host ~= nil) and (host.has_dropbox_shares == true)) then
-      column_ip = column_ip .." <i class='fa fa-dropbox'></i> "
-   end
    
    if((host ~= nil) and (host.country ~= nil) and (host.country ~= "")) then
       column_ip = column_ip .."&nbsp;<a href='".. ntop.getHttpPrefix() .. "/lua/hosts_stats.lua?country="..host.country.."'><img src='".. ntop.getHttpPrefix() .. "/img/blank.gif' class='flag flag-".. string.lower(host.country) .."'></a> "
@@ -262,11 +259,11 @@ for _key, _value in pairsByKeys(vals, funct) do
    column_ip = column_ip .. icon
 
    if((host ~= nil) and (host.ip ~= "0.0.0.0")) then
-      if(value.dhcpHost) then column_ip = column_ip .. "&nbsp;<i class='fa fa-flash fa-lg' title='DHCP Host'></i>" end
+      if(value.dhcpHost) then column_ip = column_ip .. "&nbsp;<i class='fas fa-flash fa-lg' title='DHCP Host'></i>" end
    end
 
    if((host ~= nil) and (host["is_blacklisted"] == true)) then
-      column_ip = column_ip .. " <i class=\'fa fa-ban fa-sm\' title=\'"..i18n("hosts_stats.blacklisted").."\'></i>"
+      column_ip = column_ip .. " <i class=\'fas fa-ban fa-sm\' title=\'"..i18n("hosts_stats.blacklisted").."\'></i>"
    end
 
    record["column_ip"] = column_ip
@@ -299,7 +296,7 @@ for _key, _value in pairsByKeys(vals, funct) do
    end
 
    if value["has_blocking_quota"] or value["has_blocking_shaper"] then
-      column_name = column_name .. " <i class='fa fa-ban' title='"..i18n("hosts_stats.blocking_traffic_policy_popup_msg").."'></i>"
+      column_name = column_name .. " <i class='fas fa-ban' title='"..i18n("hosts_stats.blocking_traffic_policy_popup_msg").."'></i>"
    end
 
    if debug_score then
@@ -328,11 +325,11 @@ for _key, _value in pairsByKeys(vals, funct) do
       end
 
       if(value["throughput_trend_"..throughput_type] == 1) then
-	 column_thpt = column_thpt .. " <i class='fa fa-arrow-up'></i>"
+	 column_thpt = column_thpt .. " <i class='fas fa-arrow-up'></i>"
       elseif(value["throughput_trend_"..throughput_type] == 2) then
-	 column_thpt = column_thpt .. " <i class='fa fa-arrow-down'></i>"
+	 column_thpt = column_thpt .. " <i class='fas fa-arrow-down'></i>"
       elseif(value["throughput_trend_"..throughput_type] == 3) then
-	 column_thpt = column_thpt .. " <i class='fa fa-minus'></i>"
+	 column_thpt = column_thpt .. " <i class='fas fa-minus'></i>"
       end
       record["column_thpt"] = column_thpt
 
@@ -342,15 +339,15 @@ for _key, _value in pairsByKeys(vals, funct) do
 
    local column_info = "<a href='"
       ..ntop.getHttpPrefix().."/lua/host_details.lua?page=flows&"..hostinfo2url(value).."'>"
-      .."<span class='label label-info'>"..i18n("flows").."</span>"
+      .."<span class='badge badge-info'>"..i18n("flows").."</span>"
       .."</a>"
 
    if have_nedge and (host ~= nil) and (host.localhost or host.systemhost) then
       column_info = column_info.." <span title='"..
 	 (ternary(drop_traffic, i18n("host_config.unblock_host_traffic"), i18n("host_config.drop_all_host_traffic")))..
-	 "' class='label label-"..(ternary(drop_traffic, "danger", "default")).." block-badge' "..
+	 "' class='badge badge-"..(ternary(drop_traffic, "danger", "secondary")).." block-badge' "..
 	 (ternary(isAdministrator(), "onclick='block_host(\""..symkey.."\", \""..hostinfo2url(value)..
-		     "\");' style='cursor: pointer;'", "")).."><i class='fa fa-ban' /></span>"
+		     "\");' style='cursor: pointer;'", "")).."><i class='fas fa-ban' /></span>"
    end
 
    record["column_info"] = column_info
@@ -360,17 +357,17 @@ for _key, _value in pairsByKeys(vals, funct) do
    if(value["localhost"] ~= nil or value["systemhost"] ~= nil) then
       local column_location = ""
       if value["localhost"] == true --[[or value["systemhost"] == true --]] then
-	 column_location = "<span class='label label-success'>"..i18n("hosts_stats.label_local_host").."</span>"
+	 column_location = "<span class='badge badge-success'>"..i18n("hosts_stats.label_local_host").."</span>"
       elseif value["is_multicast"] == true then
-	 column_location = "<span class='label label-default'>Multicast</span>"
+	 column_location = "<span class='badge badge-secondary'>Multicast</span>"
       elseif value["is_broadcast"] == true then
-	 column_location = "<span class='label label-default'>Broadcast</span>"
+	 column_location = "<span class='badge badge-secondary'>Broadcast</span>"
       else
-	 column_location = "<span class='label label-default'>"..i18n("hosts_stats.label_remote_host").."</span>"
+	 column_location = "<span class='badge badge-secondary'>"..i18n("hosts_stats.label_remote_host").."</span>"
       end
 
       if value["broadcast_domain_host"] then
-	 column_location = column_location.." <span class='label label-info'><i class='fa fa-sitemap' title='"..i18n("hosts_stats.label_broadcast_domain_host").."'></i></span>"
+	 column_location = column_location.." <span class='badge badge-info'><i class='fas fa-sitemap' title='"..i18n("hosts_stats.label_broadcast_domain_host").."'></i></span>"
       end
 
       record["column_location"] = column_location
@@ -385,8 +382,8 @@ for _key, _value in pairsByKeys(vals, funct) do
 
    local sent2rcvd = round((value["bytes.sent"] * 100) / (value["bytes.sent"]+value["bytes.rcvd"]), 0)
    if(sent2rcvd == nil) then sent2rcvd = 0 end
-   record["column_breakdown"] = "<div class='progress'><div class='progress-bar progress-bar-warning' style='width: "
-	     .. sent2rcvd .."%;'>Sent</div><div class='progress-bar progress-bar-info' style='width: " .. (100-sent2rcvd) .. "%;'>Rcvd</div></div>"
+   record["column_breakdown"] = "<div class='progress'><div class='progress-bar bg-warning' style='width: "
+	     .. sent2rcvd .."%;'>Sent</div><div class='progress-bar bg-info' style='width: " .. (100-sent2rcvd) .. "%;'>Rcvd</div></div>"
 
    local _, custom_column_key = custom_column_utils.getCustomColumnName()
    record["column_"..custom_column_key] = custom_column_utils.hostStatsToColumnValue(value, custom_column_key, true)

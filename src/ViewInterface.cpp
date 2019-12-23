@@ -284,9 +284,13 @@ void ViewInterface::viewed_flows_walker(Flow *f, void *user_data) {
   periodic_ht_state_update_user_data_t *periodic_ht_state_update_user_data = (periodic_ht_state_update_user_data_t*)user_data;
   const struct timeval *tv = periodic_ht_state_update_user_data->tv;
 
-  FlowTrafficStats partials;
+  NetworkStats *network_stats;
+  PartializableFlowTrafficStats partials;
   bool first_partial; /* Whether this is the first time the view is visiting this flow */
   const IpAddress *cli_ip = f->get_cli_ip_addr(), *srv_ip = f->get_srv_ip_addr();
+
+  if(f->get_last_seen() > getTimeLastPktRcvd())
+    setTimeLastPktRcvd(f->get_last_seen());
 
   if(f->get_partial_traffic_stats_view(&partials, &first_partial)) {
     if(!cli_ip || !srv_ip)
@@ -299,31 +303,25 @@ void ViewInterface::viewed_flows_walker(Flow *f, void *user_data) {
 		    NULL /* no src mac yet */, (IpAddress*)cli_ip, &cli_host,
 		    NULL /* no dst mac yet */, (IpAddress*)srv_ip, &srv_host);
 
-      if(cli_host) {
-	cli_host->incStats(tv->tv_sec, f->get_protocol(),
-			   f->getStatsProtocol(), f->get_protocol_category(),
-			   f->getCustomApp(),
-			   partials.cli2srv_packets, partials.cli2srv_bytes, partials.cli2srv_goodput_bytes,
-			   partials.srv2cli_packets, partials.srv2cli_bytes, partials.srv2cli_goodput_bytes,
-			   cli_ip->isNonEmptyUnicastAddress());
+      f->hosts_periodic_stats_update(this, cli_host, srv_host, &partials, first_partial, tv);
 
-	if(first_partial)
+      if(cli_host) {
+	if(first_partial) {
 	  cli_host->incNumFlows(f->get_last_seen(), true, srv_host), cli_host->incUses();
+	  network_stats = cli_host->getNetworkStats(cli_host->get_local_network_id());
+	  if(network_stats) network_stats->incNumFlows(f->get_last_seen(), true);
+	}
 
 	if(f->idle())
 	  cli_host->decNumFlows(f->get_last_seen(), true, srv_host), cli_host->decUses();
       }
 
       if(srv_host) {
-	srv_host->incStats(tv->tv_sec, f->get_protocol(),
-			   f->getStatsProtocol(), f->get_protocol_category(),
-			   f->getCustomApp(),
-			   partials.srv2cli_packets, partials.srv2cli_bytes, partials.srv2cli_goodput_bytes,
-			   partials.cli2srv_packets, partials.cli2srv_bytes, partials.cli2srv_goodput_bytes,
-			   srv_ip->isNonEmptyUnicastAddress());
-
-	if(first_partial)
+	if(first_partial) {
 	  srv_host->incUses(), srv_host->incNumFlows(f->get_last_seen(), false, cli_host);
+	  network_stats = srv_host->getNetworkStats(srv_host->get_local_network_id());
+	  if(network_stats) network_stats->incNumFlows(f->get_last_seen(), false);
+	}
 
 	if(f->idle())
 	  srv_host->decUses(), srv_host->decNumFlows(f->get_last_seen(), false, cli_host);
@@ -333,17 +331,9 @@ void ViewInterface::viewed_flows_walker(Flow *f, void *user_data) {
 	       tv->tv_sec, cli_ip && cli_ip->isIPv4() ? ETHERTYPE_IP : ETHERTYPE_IPV6,
 	       f->getStatsProtocol(), f->get_protocol_category(),
 	       f->get_protocol(),
-	       partials.srv2cli_bytes + partials.cli2srv_bytes,
-	       partials.srv2cli_packets + partials.cli2srv_packets,
+	       partials.get_srv2cli_bytes() + partials.get_cli2srv_bytes(),
+	       partials.get_srv2cli_packets() + partials.get_cli2srv_packets(),
 	       24 /* 8 Preamble + 4 CRC + 12 IFG */ + 14 /* Ethernet header */);
-
-      Flow::incTcpBadStats(true /* src2dst */, NULL, cli_host, srv_host,
-			   partials.tcp_stats_s2d.pktOOO, partials.tcp_stats_s2d.pktRetr,
-			   partials.tcp_stats_s2d.pktLost, partials.tcp_stats_s2d.pktKeepAlive);
-
-      Flow::incTcpBadStats(false /* dst2src */, NULL, cli_host, srv_host,
-			   partials.tcp_stats_d2s.pktOOO, partials.tcp_stats_d2s.pktRetr,
-			   partials.tcp_stats_d2s.pktLost, partials.tcp_stats_d2s.pktKeepAlive);
     }
   }
 }
@@ -354,7 +344,7 @@ void ViewInterface::flowPollLoop() {
   while(!ntop->getGlobals()->isShutdownRequested()) {
     while(idle()) sleep(1);
     /* Nothing to do, everything is done in ViewInterface::generic_periodic_hash_entry_state_update */
-    usleep(1000000);
+    _usleep(1000000);
   }
 }
 

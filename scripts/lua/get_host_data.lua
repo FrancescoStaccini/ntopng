@@ -96,11 +96,11 @@ if host then
 
       -- See ValueTrend in ntop_typedefs.h for values
       if host["throughput_trend_"..throughput_type] == 1 then
-	 res_thpt = res_thpt .. " <i class='fa fa-arrow-up'></i>"
+	 res_thpt = res_thpt .. " <i class='fas fa-arrow-up'></i>"
       elseif host["throughput_trend_"..throughput_type] == 2 then
-	 res_thpt = res_thpt .. " <i class='fa fa-arrow-down'></i>"
+	 res_thpt = res_thpt .. " <i class='fas fa-arrow-down'></i>"
       elseif host["throughput_trend_"..throughput_type] == 3 then
-	 res_thpt = res_thpt .. " <i class='fa fa-minus'></i>"
+	 res_thpt = res_thpt .. " <i class='fas fa-minus'></i>"
       end
 
       res["column_thpt"] = res_thpt
@@ -122,8 +122,8 @@ if host then
    
    sent2rcvd = round((host["bytes.sent"] * 100) / (host["bytes.sent"]+host["bytes.rcvd"]), 0)
    if(sent2rcvd == nil) then sent2rcvd = 0 end
-   res["column_breakdown"] = "<div class='progress'><div class='progress-bar progress-bar-warning' style='width: "
-	  .. sent2rcvd .."%;'>Sent</div><div class='progress-bar progress-bar-info' style='width: " .. (100-sent2rcvd) .. "%;'>Rcvd</div></div>"
+   res["column_breakdown"] = "<div class='progress'><div class='progress-bar bg-warning' style='width: "
+	  .. sent2rcvd .."%;'>Sent</div><div class='progress-bar bg-info' style='width: " .. (100-sent2rcvd) .. "%;'>Rcvd</div></div>"
 
 end
 

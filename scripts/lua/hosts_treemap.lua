@@ -39,12 +39,11 @@ print [[
 </style>
 <script src="http://d3js.org/d3.v3.min.js"></script>
 
-<hr>
 <h2>]] print(i18n("tree_map.hosts_treemap")) print[[</H2>
 <div id='chart'></div>
 
 <span class="row-fluid marketing">
-<div class="span11">&nbsp;</div><div><small><A HREF="http://bl.ocks.org/mbostock/4063582"><i class="fa fa-question-sign fa-lg"></i></A></small></div>
+<div class="span11">&nbsp;</div><div><small><A HREF="http://bl.ocks.org/mbostock/4063582"><i class="fas fa-question-sign fa-lg"></i></A></small></div>
 </span>
 <script>
 

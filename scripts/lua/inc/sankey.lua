@@ -33,7 +33,16 @@ print [[
 
 </style>
 
-<div id="chart" style="margin-left: auto; margin-right: auto;"></div>
+
+
+<div class="container">
+    <div class="row">
+	<div class="col-12">
+          <div id="chart" style="margin-left: auto; margin-right: auto;"></div>
+	</div>
+     </div>
+</div>
+
 <script src="]] print(ntop.getHttpPrefix()) print[[/js/sankey.js"></script>
 
 <script>
@@ -46,11 +55,10 @@ print [[
 var sankey_has_chart = false;
 
 function sankey() {
-
   var w = $("#chart").width();
   var h = window.innerHeight / 2;
 
-  var margin = {top: 1, right: 10, bottom: 1, left: 10},
+  var margin = {top: 10, right: 10, bottom: 10, left: 10},
       width = w - margin.left - margin.right,
       height = h - margin.top - margin.bottom;
 
@@ -65,12 +73,6 @@ local debug = false
 
 if(_GET["host"] ~= nil) then
    print('d3.json("'..ntop.getHttpPrefix()..'/lua/iface_flows_sankey.lua?ifid='..(_ifstats.id)..'&' ..hostinfo2url(hostkey2hostinfo(_GET["host"])).. '"')
-elseif((_GET["hosts"] ~= nil) and (_GET["aggregation"] ~= nil)) then
-   print('d3.json("'..ntop.getHttpPrefix()..'/lua/hosts_comparison_sankey.lua?ifid='..(_ifstats.id)..'&'..'hosts='.._GET["hosts"] .. '&aggregation='.._GET["aggregation"] ..'"')
-   active_sankey = "comparison"
-elseif(_GET["hosts"] ~= nil) then
-   print('d3.json("'..ntop.getHttpPrefix()..'/lua/hosts_comparison_sankey.lua?ifid='..(_ifstats.id)..'&'..'hosts='.._GET["hosts"] ..'"')
-   active_sankey = "comparison"
 else
    print('d3.json("'..ntop.getHttpPrefix()..'/lua/iface_flows_sankey.lua"')
 end
@@ -91,9 +93,12 @@ print [[
   d3.select("#chart").select("svg").remove();
   sankey_has_chart = true;
 
+  var sankey_width = width + margin.left + margin.right;
+  var sankey_height = height + margin.top + margin.bottom;
+
   var svg_sankey = d3.select("#chart").append("svg")
-    .attr("width", width + margin.left + margin.right)
-    .attr("height", height + margin.top + margin.bottom)
+    .attr("width", sankey_width)
+    .attr("height", sankey_height)
     .append("g")
     .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
 
@@ -129,21 +134,6 @@ print [[
 	  .style("stroke-width", function(d) { return Math.max(1, d.dy); })
 	  .style("stroke", function(d){ return d.color = colorlink(d); })
 	  .sort(function(a, b) { return b.dy - a.dy; })
-    .on("dblclick", function(d) {
-        url_ref = "]]
-print (ntop.getHttpPrefix())
-print [[/lua/hosts_comparison.lua?hosts="+escape(d.source.host);
-
-        if(iface_vlan )
-          url_ref  += "@"+escape(d.source.vlan);
-
-        url_ref += ","+escape(d.target.host);
-
-        if(iface_vlan )
-          url_ref  += "@"+escape(d.target.vlan);
-
-          window.location.href = url_ref;
-      });
 
 	link.append("title")
 	  .text(function(d) { return d.source.name + " - " + d.target.name + "\n" + format(d.sent, d.rcvd) + "\n Double click to show more information about the flows between this two host." ; });
@@ -230,7 +220,7 @@ print(url.."hosts=".._GET["hosts"])
 
   link.append("title")
     .text(function(d) { return d.source.name + " - " + d.target.name + "\n" + bytesToVolume(d.value)+ "\n Double click to show more information about this flows." ; });
-
+debugger;
   var node = svg_sankey.append("g").selectAll(".node")
     .data(hosts.nodes)
     .enter().append("g")

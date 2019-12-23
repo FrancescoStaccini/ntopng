@@ -1,5 +1,5 @@
 --
--- (C) 2017-18 - ntop.org
+-- (C) 2017-19 - ntop.org
 --
 dirs = ntop.getDirs()
 
@@ -548,8 +548,8 @@ function host_pools_utils.hostpool2record(ifid, pool_id, pool)
    record["column_num_dropped_flows"] = (pool["flows.dropped"] or 0)..""
 
    local sent2rcvd = round((pool["bytes.sent"] * 100) / (pool["bytes.sent"] + pool["bytes.rcvd"]), 0)
-   record["column_breakdown"] = "<div class='progress'><div class='progress-bar progress-bar-warning' style='width: "
-      .. sent2rcvd .."%;'>Sent</div><div class='progress-bar progress-bar-info' style='width: " .. (100-sent2rcvd) .. "%;'>Rcvd</div></div>"
+   record["column_breakdown"] = "<div class='progress'><div class='progress-bar bg-warning' style='width: "
+      .. sent2rcvd .."%;'>Sent</div><div class='progress-bar bg-info' style='width: " .. (100-sent2rcvd) .. "%;'>Rcvd</div></div>"
 
    if(throughput_type == "pps") then
       record["column_thpt"] = pktsToSize(pool["throughput_pps"])
@@ -562,7 +562,7 @@ function host_pools_utils.hostpool2record(ifid, pool_id, pool)
    record["column_chart"] = ""
 
    if ntop.getCache("ntopng.prefs.host_pools_rrd_creation") == "1" then
-      record["column_chart"] = '<A HREF="'..ntop.getHttpPrefix()..'/lua/pool_details.lua?pool='..pool_id..'&page=historical"><i class=\'fa fa-area-chart fa-lg\'></i></A>'
+      record["column_chart"] = '<A HREF="'..ntop.getHttpPrefix()..'/lua/pool_details.lua?pool='..pool_id..'&page=historical"><i class=\'fas fa-chart-area fa-lg\'></i></A>'
    end
 
    return record

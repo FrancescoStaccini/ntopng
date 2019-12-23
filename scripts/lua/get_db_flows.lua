@@ -1,8 +1,8 @@
 --
--- (C) 2013-18 - ntop.org
+-- (C) 2013-19 - ntop.org
 --
 
-dirs = ntop.getDirs()
+local dirs = ntop.getDirs()
 package.path = dirs.installdir .. "/scripts/lua/modules/?.lua;" .. package.path
 
 require "lua_utils"
@@ -11,8 +11,7 @@ require "db_utils"
 require "flow_aggregation_utils"
 require "template"
 
-interface.select(ifname)
-ifstats = interface.getStats()
+local ifstats = interface.getStats()
 
 local ifId = _GET["ifid"]
 local host = _GET["peer1"]
@@ -179,10 +178,10 @@ else
 
 	       flow["PROTOCOL"] = base.."&protocol=&port=&host=&l4proto="..flow["PROTOCOL"].."'>"..pname.."</A>"
 	       flow["L7_PROTO"] = base.."&port=&host=&l4proto=&protocol="..flow["L7_PROTO"].."'>"..getApplicationLabel(interface.getnDPIProtoName(tonumber(flow["L7_PROTO"]))).."</A>"
-	       flow["FLOW_URL"] = base.."&row_id="..flow["idx"].."&version="..ip_version.."'><span class='label label-info'>Info</span></A>"
+	       flow["FLOW_URL"] = base.."&row_id="..flow["idx"].."&version="..ip_version.."'><span class='badge badge-info'>Info</span></A>"
 
 	       if flow["PROFILE"] ~= nil and flow["PROFILE"] ~="" then
-		  flow["INFO"] = "<span class='label label-primary'>"..flow["PROFILE"].."</span>&nbsp;"..flow["INFO"]
+		  flow["INFO"] = "<span class='badge badge-primary'>"..flow["PROFILE"].."</span>&nbsp;"..flow["INFO"]
 	       end
 
 	    else

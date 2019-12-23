@@ -18,8 +18,8 @@ function vlan2record(ifId, vlan)
    record["column_since"] = secondsToTime(now - vlan["seen.first"] + 1)
 
    local sent2rcvd = round((vlan["bytes.sent"] * 100) / (vlan["bytes.sent"] + vlan["bytes.rcvd"]), 0)
-   record["column_breakdown"] = "<div class='progress'><div class='progress-bar progress-bar-warning' style='width: "
-      .. sent2rcvd .."%;'>Sent</div><div class='progress-bar progress-bar-info' style='width: " .. (100-sent2rcvd) .. "%;'>Rcvd</div></div>"
+   record["column_breakdown"] = "<div class='progress'><div class='progress-bar bg-warning' style='width: "
+      .. sent2rcvd .."%;'>Sent</div><div class='progress-bar bg-info' style='width: " .. (100-sent2rcvd) .. "%;'>Rcvd</div></div>"
 
    if(throughput_type == "pps") then
       record["column_thpt"] = pktsToSize(vlan["throughput_pps"])
@@ -32,7 +32,7 @@ function vlan2record(ifId, vlan)
    record["column_chart"] = ""
 
    if ts_utils.exists("vlan:traffic", {ifid=ifId, vlan=vlan["vlan_id"]}) then
-      record["column_chart"] = '<A HREF="'..ntop.getHttpPrefix()..'/lua/vlan_details.lua?vlan='..vlan["vlan_id"]..'&page=historical"><i class=\'fa fa-area-chart fa-lg\'></i></A>'
+      record["column_chart"] = '<A HREF="'..ntop.getHttpPrefix()..'/lua/vlan_details.lua?vlan='..vlan["vlan_id"]..'&page=historical"><i class=\'fas fa-chart-area fa-lg\'></i></A>'
    end
 
    return record

@@ -35,34 +35,6 @@ void sighup(int sig) {
 
 /* ******************************** */
 
-#ifdef __linux__
-static void nohup_after_shutdown_command(const char * const after_shutdown_command) {
-  char command_buf[256];
-  int res;
-
-  if(!after_shutdown_command || after_shutdown_command[0] == '\0')
-    return;
-
-  /* Self-restarting service does not restart with systemd:
-     This is a hard limitation imposed by systemd.
-     The best suggestions so far are to use at, cron, or systemd timer units.
-
-     https://unix.stackexchange.com/questions/202048/self-restarting-service-does-not-restart-with-systemd
-   */
-  if((res = snprintf(command_buf, sizeof(command_buf),
-		     "echo \"sleep 1 && %s\" | at now",
-		     after_shutdown_command)) < 0
-     || res >= (int)sizeof(command_buf))
-    return;
-
-  printf("%s\n", command_buf);
-  fflush(stdout);
-  system(command_buf);
-}
-#endif
-
-/* ******************************** */
-
 #ifdef WIN32
 BOOL WINAPI sigproc(DWORD sig)
 #else
@@ -347,7 +319,7 @@ int main(int argc, char *argv[])
   ntop->loadGeolocation(prefs->get_docs_dir());
   ntop->loadMacManufacturers(prefs->get_docs_dir());
   ntop->loadTrackers();
-  ntop->registerHTTPserver(new HTTPserver(prefs->get_docs_dir(), prefs->get_scripts_dir()));
+  ntop->registerHTTPserver(new HTTPserver(prefs->get_docs_dir(), prefs->get_scripts_dir(), ntop->get_runtime_dir()));
 
   /* initInterface writes DB data on disk, keep it after changing user
    * Note: privileges can be dropped by mongoose (creating HTTPserver) */
@@ -428,16 +400,16 @@ int main(int argc, char *argv[])
 #ifdef __linux__
   switch(afterShutdownAction) {
   case after_shutdown_reboot:
-    nohup_after_shutdown_command("systemctl start systemd-reboot");
+    Utils::deferredExec("systemctl start systemd-reboot");
     break;
   case after_shutdown_poweroff:
-    nohup_after_shutdown_command("systemctl start systemd-poweroff");
+    Utils::deferredExec("systemctl start systemd-poweroff");
     break;
   case after_shutdown_restart_self:
-    /* Necessary to check if the service has been activated via systemd before actually
-       restarting it using systemd. When the service hasn't been started with systemd (e.g., during the development)
-       it is desirable to skip the use of systemd */
-    nohup_after_shutdown_command("systemctl restart ntopng");
+    /* Returning 1 to force systemd to restart the service due 
+     * to 'Unclean exit code'. A systemctl restart does not work here.
+     * Note: this requires 'Restart=on-failure' to work */
+    return(1);
     break;
   case after_shutdown_nop:
   default:

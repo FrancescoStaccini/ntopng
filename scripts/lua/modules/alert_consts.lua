@@ -6,6 +6,7 @@
 local alert_consts = {}
 local format_utils  = require "format_utils"
 local os_utils = require("os_utils")
+local plugins_utils = require("plugins_utils")
 require("ntop_utils")
 
 if(ntop.isPro()) then
@@ -22,17 +23,17 @@ alert_consts.MAX_NUM_QUEUED_ALERTS_PER_MODULE = 1024 -- should match ALERTS_MANA
 alert_consts.alert_severities = {
   info = {
     severity_id = 0,
-    label = "label-info",
+    label = "badge-info",
     i18n_title = "alerts_dashboard.info",
     syslog_severity = 6,
   }, warning = {
     severity_id = 1,
-    label = "label-warning",
+    label = "badge-warning",
     i18n_title = "alerts_dashboard.warning",
     syslog_severity = 4,
   }, error = {
     severity_id = 2,
-    label = "label-danger",
+    label = "badge-danger",
     i18n_title = "alerts_dashboard.error",
     syslog_severity = 3,
   }
@@ -126,7 +127,7 @@ end
 -- ##############################################
 
 function alert_consts.getDefinititionsDir()
-   return(os_utils.fixPath(dirs.installdir .. "/scripts/callbacks/alert_defs"))
+   return(os_utils.fixPath(plugins_utils.PLUGINS_RUNTIME_PATH .. "/alert_definitions"))
 end
 
 -- ##############################################
@@ -156,6 +157,7 @@ end
 -- ##############################################
 
 -- NOTE: flow alerts are formatted based on their status. See flow_consts.status_types.
+-- See alert_consts.resetDefinitions()
 alert_consts.alert_types = {}
 local alerts_by_id = {}
 
@@ -167,37 +169,71 @@ local function loadAlertsDefs()
    end
 
    local dirs = ntop.getDirs()
-   local defs_dir = alert_consts.getDefinititionsDir()
-   package.path = defs_dir .. "/?.lua;" .. package.path
+   local defs_dirs = {alert_consts.getDefinititionsDir()}
+
+   if ntop.isPro() then
+      defs_dirs[#defs_dirs + 1] = alert_consts.getDefinititionsDir() .. "/pro"
+   end
+
+   alert_consts.resetDefinitions()
+
+   for _, defs_dir in pairs(defs_dirs) do
+      for fname in pairs(ntop.readdir(defs_dir)) do
+         if string.ends(fname, ".lua") then
+            local mod_fname = string.sub(fname, 1, string.len(fname) - 4)
+            local full_path = os_utils.fixPath(defs_dir .. "/" .. fname)
+            local def_script = dofile(full_path)
+
+            if(def_script == nil) then
+                traceError(TRACE_ERROR, TRACE_CONSOLE, string.format("Error loading alert definition from %s", full_path))
+                goto next_script
+            end
+
+            alert_consts.loadDefinition(def_script, mod_fname, full_path)
+         end
+
+         ::next_script::
+      end
+   end
+end
+
+-- ##############################################
+
+function alert_consts.resetDefinitions()
+   alert_consts.alert_types = {}
+   alerts_by_id = {}
+end
+
+-- ##############################################
+
+function alert_consts.loadDefinition(def_script, mod_fname, script_path)
    local required_fields = {"alert_id", "i18n_title", "icon"}
 
-   for fname in pairs(ntop.readdir(defs_dir)) do
-      if string.ends(fname, ".lua") then
-         local mod_fname = string.sub(fname, 1, string.len(fname) - 4)
-         local def_script = require(mod_fname)
-
-         -- Check the required fields
-         for _, k in pairs(required_fields) do
-            if(def_script[k] == nil) then
-               traceError(TRACE_ERROR, TRACE_CONSOLE, string.format("Missing required field '%s' in alert_defs/%s", k, fname))
-               goto next_script
-            end
-         end
-
-         local def_id = tonumber(def_script.alert_id)
-
-         if(alerts_by_id[def_id] ~= nil) then
-            traceError(TRACE_ERROR, TRACE_CONSOLE, string.format("alert_defs/%s: alert ID %d redefined, skipping", fname, def_id))
-            goto next_script
-         end
-
-         -- Success
-         alert_consts.alert_types[mod_fname] = def_script
-         alerts_by_id[def_id] = mod_fname
+   -- Check the required fields
+   for _, k in pairs(required_fields) do
+      if(def_script[k] == nil) then
+         traceError(TRACE_ERROR, TRACE_CONSOLE, string.format("Missing required field '%s' in", k, script_path))
+         return(false)
       end
-
-      ::next_script::
    end
+
+   local def_id = tonumber(def_script.alert_id)
+
+   if(def_id == nil) then
+       traceError(TRACE_ERROR, TRACE_CONSOLE, string.format("%s: missing alert ID %d", script_path, def_id))
+       return(false)
+   end
+
+   if(alerts_by_id[def_id] ~= nil) then
+      traceError(TRACE_ERROR, TRACE_CONSOLE, string.format("%s: alert ID %d redefined, skipping", script_path, def_id))
+      return(false)
+   end
+
+   alert_consts.alert_types[mod_fname] = def_script
+   alerts_by_id[def_id] = mod_fname
+
+   -- Success
+   return(true)
 end
 
 -- ##############################################

@@ -15,10 +15,10 @@ local do_benchmark = true          -- Compute benchmarks and store their results
 local do_print_benchmark = false   -- Print benchmarks results to standard output
 local do_trace = false             -- Trace lua calls
 
-local config_alerts = nil
 local available_modules = nil
 local ifid = nil
 local network_entity = alert_consts.alert_entities.network.entity_id
+local configsets = nil
 
 -- The function below ia called once (#pragma once)
 function setup(str_granularity)
@@ -27,9 +27,12 @@ function setup(str_granularity)
    local ifname = interface.setActiveInterfaceId(ifid)
 
    -- Load the threshold checking functions
-   available_modules = user_scripts.load(user_scripts.script_types.traffic_element, ifid, "network", str_granularity, nil, do_benchmark)
+   available_modules = user_scripts.load(ifid, user_scripts.script_types.traffic_element, "network", {
+      hook_filter = str_granularity,
+      do_benchmark = do_benchmark,
+   })
 
-   config_alerts = getNetworksConfiguredAlertThresholds(ifname, str_granularity, available_modules.modules)
+   configsets = user_scripts.getConfigsets("network")
 end
 
 -- #################################################################
@@ -44,9 +47,9 @@ end
 -- #################################################################
 
 -- The function below is called once per local network
-function checkAlerts(granularity)
+function runScripts(granularity)
    if table.empty(available_modules.hooks[granularity]) then
-      if(do_trace) then print("network:checkAlerts("..granularity.."): no modules, skipping\n") end
+      if(do_trace) then print("network:runScripts("..granularity.."): no modules, skipping\n") end
       return
    end
 
@@ -62,36 +65,25 @@ function checkAlerts(granularity)
    end
 
    local cur_alerts = network.getAlerts(granularity_id)
-
-   local network_config = config_alerts[network_key] or {}
-   local global_config = config_alerts["local_networks"] or {}
-   local has_configuration = (table.len(network_config) or table.len(global_config))
    local entity_info = alerts_api.networkAlertEntity(network_key)
+   local subnet_conf = user_scripts.getTargetConfiset(configsets, network_key).config
+   -- TODO use subnet_conf
 
-   if(has_configuration) then
-      for mod_key, hook_fn in pairs(available_modules.hooks[granularity]) do
-        local check = available_modules.modules[mod_key]
-        local config = network_config[check.key] or global_config[check.key]
-        local do_call
+   for mod_key, hook_fn in pairs(available_modules.hooks[granularity]) do
+      local user_script = available_modules.modules[mod_key]
+      local conf = user_scripts.getConfiguration(user_script, granularity, network_key)
 
-        if(check.is_alert) then
-          -- Alert modules are only called if there is a configuration defined or always_enabled is set
-          do_call = ((not suppressed_alerts) and (config or check.always_enabled))
-        else
-          -- always call non alert scripts. available_modules does not contain scripts disabled by the user
-          do_call = true
-        end
-
-        if(do_call) then
-           hook_fn({
-              granularity = granularity,
-              alert_entity = entity_info,
-              entity_info = info,
+      if(conf.enabled) then
+	 if((not user_script.is_alert) or (not suppressed_alerts)) then
+	    hook_fn({
+	      granularity = granularity,
+	      alert_entity = entity_info,
+	      entity_info = info,
 	      cur_alerts = cur_alerts,
-              alert_config = config,
-              user_script = check,
-           })
-        end
+	      alert_config = conf.script_conf,
+	      user_script = user_script,
+	   })
+	 end
       end
    end
 

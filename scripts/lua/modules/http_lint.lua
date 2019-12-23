@@ -143,6 +143,12 @@ local function validateUnquoted(p)
 end
 http_lint.validateUnquoted = validateUnquoted
 
+local function validateLuaScriptPath(p)
+   if (string.find(p, "'") ~= nil) then return false end   
+   return(starts(p, "/plugins"))   
+end
+http_lint.validateLuaScriptPath = validateLuaScriptPath
+
 local function validateUnchecked(p)
    -- This function does not perform any validation, so only the C side validation takes place.
    -- In particular, single quotes are allowed so they must be handled explicitly by the programmer in
@@ -530,6 +536,8 @@ local function validateNotificationSeverity(tz)
    return validateChoiceInline({"error","warning","info"})
 end
 
+http_lint.validateNotificationSeverity = validateNotificationSeverity
+
 local function validateIPV4(p)
    return isIPv4(p)
 end
@@ -579,6 +587,17 @@ local function validateDate(p)
    end
 end
 
+local function validateMemberRelaxed(m)
+   -- This does not actually check the semantic with isValidPoolMember
+   -- as this is used in pool deletion to handle bad pool member values 
+   -- inserted by mistake)
+   if validateUnquoted(m) then
+      return true
+   else
+      return false
+   end
+end
+
 local function validateMember(m)
    if isValidPoolMember(m) then
       return true
@@ -622,6 +641,7 @@ local function validateBool(p)
       end
    end
 end
+http_lint.validateBool = validateBool
 
 local function validateSortOrder(p)
    local defaults = {"asc", "desc"}
@@ -692,20 +712,23 @@ local function validateNetwork(i)
    if not string.find(i, "/") then
       return validateIpAddress(i)
    else
-      local parts = split(i, "/")
-      if #parts ~= 2 then
+      -- Mask
+      local ip_mask = split(i, "/")
+      if #ip_mask ~= 2 then
+         return false
+      end
+      local ip = ip_mask[1]
+      local mask = ip_mask[2]
+
+      if not validateNumber(mask) then
          return false
       end
 
-      if not validateNumber(parts[2]) then
-         return false
-      end
-
-      local prefix = tonumber(parts[2])
-
+      local prefix = tonumber(mask)
       if prefix >= 0 then
-         local is_ipv6 = isIPv6(parts[1])
-         local is_ipv4 = isIPv4(parts[1])
+         -- IP
+         local is_ipv6 = isIPv6(ip)
+         local is_ipv4 = isIPv4(ip)
 
          if is_ipv6 and prefix <= 128 then
             return true
@@ -718,8 +741,6 @@ local function validateNetwork(i)
    end
 end
 
--- #################################################################
-
 local function validateHost(p)
    local host = hostkey2hostinfo(p)
 
@@ -728,6 +749,29 @@ local function validateHost(p)
       return true
    else
       return validateNetwork(p)
+   end
+end
+
+local function validateNetworkWithVLAN(i)
+   if not string.find(i, "/") then
+      return validateHost(i)
+   else
+      -- VLAN
+      local net_vlan = split(i, "@")
+      local net = net_vlan[1]
+
+      if #net_vlan < 1 then
+         return false
+      end
+
+      if #net_vlan == 2 then
+         local vlan = net_vlan[2]
+         if not validateNumber(vlan) then
+            return false
+         end
+      end
+
+      return validateNetwork(net)
    end
 end
 
@@ -783,6 +827,10 @@ end
 
 local function validateNetworksList(l)
    return validateListOfType(l, validateNetwork)
+end
+
+local function validateNetworksWithVLANList(l)
+   return validateListOfType(l, validateNetworkWithVLAN)
 end
 
 local function validateACLNetworksList(l)
@@ -949,6 +997,33 @@ local function validateOperatingMode(m)
 end
 
 -- #################################################################
+
+function http_lint.parseConfsetTargets(subdir, param)
+   local values = string.split(param, ",") or {param}
+   local validator = nil
+
+   if((subdir == "host") or (subdir == "snmp_device") or (subdir == "network")) then
+      -- IP addresses/CIDR
+      validator = validateNetwork
+   elseif((subdir == "interface") or (subdir == "flow") or (subdir == "syslog")) then
+      -- interface name
+      validator = validateSingleWord
+   else
+      traceError(TRACE_ERROR, TRACE_CONSOLE, "Unsupported subdir: " .. subdir)
+      return nil, "Unsupported subdir"
+   end
+
+   for _, v in pairs(values) do
+      if(not validator(v)) then
+         return nil, i18n("configsets.bad_target", {target = v})
+      end
+   end
+
+   return(values)
+end
+
+-- #################################################################
+
 -- NOTE: Put here all the parameters to validate
 
 local known_parameters = {
@@ -1081,14 +1156,19 @@ local known_parameters = {
 -- NAVIGATION
    ["page"]                    = validateSingleWord,            -- Currently active subpage tab
    ["tab"]                     = validateSingleWord,            -- Currently active tab, handled by javascript
-   
+
+-- CONFIGSETS
+   ["confset_id"]              = validateNumber,
+   ["confset_name"]            = validateUnquoted,
+   ["confset_targets"]         = validateEmptyOr(validateListOfTypeInline(validateUnquoted)),
+
 -- OTHER
    ["_"]                       = validateEmptyOr(validateNumber), -- jQuery nonce in ajax requests used to prevent browser caching
    ["__"]                      = validateUnquoted,              -- see LDAP prefs page
    ["ifid"]                    = validateInterface,             -- An ntopng interface ID
    ["iffilter"]                = validateIfFilter,              -- An interface ID or 'all'
    ["mode"]                    = validateMode,                  -- Remote or Local users
-   ["err_counters_since"]      = validateCounterSince,          -- Select actual or absolute counters
+   ["counters_since"]          = validateCounterSince,          -- Select actual or absolute counters
    ["err_counters_filter"]     = validateErrorsFilter,          -- Filter by errrrs, discards, both
    ["country"]                 = validateCountry,               -- Country code
    ["flow_key"]                = validateNumber,                -- The key of the flow
@@ -1149,6 +1229,13 @@ local known_parameters = {
    ["ewma_alpha_percent"]      = validateNumber,
    ["senders_receivers"]       = validateSendersReceivers,      -- Used in top scripts
    ["fingerprint_type"]        = validateFingerprintType,
+   ["granularity"]             = validateSingleWord,
+   ["script_type"]             = validateSingleWord,
+   ["script_subdir"]           = validateSingleWord,
+   ["script_key"]              = validateSingleWord,
+
+-- Script editor
+   ["lua_script_path"]         = validateLuaScriptPath,
 
 -- PREFERENCES - see prefs.lua for details
    -- Toggle Buttons
@@ -1186,6 +1273,7 @@ local known_parameters = {
    ["toggle_captive_portal"]                       = validateBool,
    ["toggle_informative_captive_portal"]           = validateBool,
    ["toggle_autologout"]                           = validateBool,
+   ["toggle_autoupdates"]                          = validateBool,
    ["toggle_ldap_anonymous_bind"]                  = validateBool,
    ["toggle_local"]                                = validateBool,
    ["toggle_local_host_cache_enabled"]             = validateBool,
@@ -1228,6 +1316,7 @@ local known_parameters = {
    ["toggle_webhook_notification"]                 = validateBool,
    ["toggle_auth_session_midnight_expiration"]     = validateBool,
    ["toggle_client_x509_auth"]                     = validateBool,
+   ["toggle_snmp_debug"]                           = validateBool,
    ["toggle_snmp_alerts_port_duplexstatus_change"] = validateBool,
    ["toggle_snmp_alerts_port_status_change"]       = validateBool,
    ["toggle_snmp_alerts_port_errors"]              = validateBool,
@@ -1288,6 +1377,7 @@ local known_parameters = {
    ["influx_dbname"]                               = validateSingleWord,
    ["influx_username"]                             = validateEmptyOr(validateSingleWord),
    ["influx_password"]                             = validateEmptyOr(validateSingleWord),
+   ["influx_query_timeout"]                        = validateNumber,
 
    -- Multiple Choice
    ["disaggregation_criterion"]                    = validateChoiceInline({"none", "vlan", "probe_ip", "iface_idx", "ingress_iface_idx", "ingress_vrf_id"}),
@@ -1299,6 +1389,7 @@ local known_parameters = {
    ["nagios_notification_severity_preference"]     = validateNotificationSeverity,
    ["email_notification_severity_preference"]      = validateNotificationSeverity,
    ["webhook_notification_severity_preference"]    = validateNotificationSeverity,
+   ["notification_severity_preference"]            = validateNotificationSeverity,
    ["multiple_ldap_authentication"]                = validateChoiceInline({"local","ldap","ldap_local"}),
    ["multiple_ldap_account_type"]                  = validateChoiceInline({"posix","samaccount"}),
    ["toggle_logging_level"]                        = validateChoiceInline({"trace", "debug", "info", "normal", "warning", "error"}),
@@ -1380,7 +1471,7 @@ local known_parameters = {
    ["empty_pool"]              = validateNumber,                -- host_pools.lua, action to empty a pool by ID
    ["pool_to_delete"]          = validateNumber,                -- host_pools.lua, pool ID to delete
    ["edit_pools"]              = validateEmpty,                 -- host_pools.lua, set if pools are being edited
-   ["member_to_delete"]        = validateMember,                -- host_pools.lua, member to delete from pool
+   ["member_to_delete"]        = validateMemberRelaxed,         -- host_pools.lua, member to delete from pool
    ["sampling_rate"]           = validateEmptyOr(validateNumber),            -- if_stats.lua
    ["resetstats_mode"]         = validateResetStatsMode,        -- reset_stats.lua
    ["snmp_action"]             = validateSnmpAction,            -- snmp specific
@@ -1471,7 +1562,7 @@ local known_parameters = {
    ["per_ip_slow_rate"]        = validateNumber,
    ["per_ip_slower_rate"]      = validateNumber,
    ["user_policy"]             = validateNumber,
-   ["hide_from_top"]           = validateNetworksList,
+   ["hide_from_top"]           = validateNetworksWithVLANList,
    ["top_hidden"]              = validateBool,
    ["packets_drops_perc"]      = validateEmptyOr(validateNumber),
    ["operating_system"]        = validateNumber,
@@ -1509,6 +1600,8 @@ local known_parameters = {
    ["rtt_max"]                 = validateEmptyOr(validateNumber),
    ["disabled_status"]         = validateListOfTypeInline(validateNumber),
    ["redis_command"]           = validateSingleWord,
+   ["flow_calls_drops"]        = validateOnOff,
+   ["global_flow_calls_drops"] = validateOnOff,
 
    -- Containers
    ["pod"]                     = validateSingleWord,
@@ -1642,6 +1735,7 @@ end
 -- #################################################################
 
 local function lintParams()
+   local plugins_utils = require("plugins_utils")
    local params_to_validate = { _GET, _POST }
    local id, _, k, v
 
@@ -1650,6 +1744,9 @@ local function lintParams()
    local relaxGetValidation  = true                --[[ To consider empty fields as valid in _GET parameters ]]
    local relaxPostValidation = false               --[[ To consider empty fields as valid in _POST parameters ]]
    local debug = false                             --[[ To enable validation debug messages ]]
+
+   -- Extend the parameters with validators from the plugins
+   local additional_params = plugins_utils.extendLintParams(http_lint, known_parameters)
 
    for _,id in pairs(params_to_validate) do
       for k,v in pairs(id) do

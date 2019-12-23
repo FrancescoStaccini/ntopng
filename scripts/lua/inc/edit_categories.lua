@@ -83,8 +83,8 @@ if not isEmptyString(category_filter) then
   print[[<td>
     <form>
       <input type="hidden" name="tab" value="categories" />
-      <button type="button" class="btn btn-default btn-sm" onclick="$(this).closest('form').submit();">
-        <i class="fa fa-close fa-lg" aria-hidden="true" data-original-title="" title=""></i> ]] print(cat_name) print[[
+      <button type="button" class="btn btn-secondary btn-sm" onclick="$(this).closest('form').submit();">
+        <i class="fas fa-times fa-lg" aria-hidden="true" data-original-title="" title=""></i> ]] print(cat_name) print[[
       </button>
     </form>
   </td>]]
@@ -120,7 +120,7 @@ print[[
 <form id="custom-cat-form" lass="form-inline" style="margin-bottom: 0px;" method="post">
   <input type="hidden" name="csrf" value="]] print(ntop.getRandomCSRFValue()) print[[">
   <div id="table-custom-cat-form"></div>
-  <button class="btn btn-primary" style="float:right; margin-right:1em;" disabled="disabled" type="submit">]] print(i18n("save_settings")) print[[</button>
+  <button class="btn btn-primary" style="float:right; margin-right:1em; margin-left: auto" disabled="disabled" type="submit">]] print(i18n("save_settings")) print[[</button>
 </form>
 
 <script>
@@ -168,7 +168,7 @@ print[[
 
   $("#table-custom-cat-form").datatable({
     url: "]] print (ntop.getHttpPrefix()) print [[/lua/admin/get_custom_categories_hosts.lua?l7proto=]] print(category_filter or "") print[[",
-    class: "table table-striped table-bordered table-condensed",
+    class: "table table-striped table-bordered table-sm",
     ]]
 
 -- Set the preference table

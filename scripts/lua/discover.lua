@@ -10,7 +10,7 @@ require "lua_utils"
 local discover = require "discover_utils"
 local page_utils = require("page_utils")
 local ifId = getInterfaceId(ifname)
-local refresh_button = '<small><a href="'..ntop.getHttpPrefix()..'/lua/discover.lua?request_discovery=true" title="Refresh"><i class="fa fa-refresh fa-sm" aria-hidden="true"></i></a></small>'
+local refresh_button = '<small><a href="'..ntop.getHttpPrefix()..'/lua/discover.lua?request_discovery=true" title="Refresh"><i class="fas fa-sync fa-sm" aria-hidden="true"></i></a></small>'
 
 active_page = "dashboard"
 
@@ -52,7 +52,7 @@ page_utils.print_header(i18n("discover.network_discovery"))
 dofile(dirs.installdir .. "/scripts/lua/inc/menu.lua")
 
 -- print('<hr><H2>'..i18n("discover.network_discovery")..'&nbsp;</H2><br>')
-print('<hr><H2>'..i18n("discover.discovered_devices", {sys = title.operating_system, manuf = title.manufacturer, dev = title.device_type})..'&nbsp;'..refresh_button..'</H2><br>')
+print('<H2>'..i18n("discover.discovered_devices", {sys = title.operating_system, manuf = title.manufacturer, dev = title.device_type})..'&nbsp;'..refresh_button..'</H2><br>')
 
 local discovered = discover.discover2table(ifname)
 local manufactures = {}
@@ -81,7 +81,7 @@ end
 
 if discovery_requested then
 
-   print('<div class=\"alert alert-info alert-dismissable\">'..'<img src="'..ntop.getHttpPrefix()..'/img/loading.gif"> '..i18n('discover.network_discovery_not_enabled', {url=ntop.getHttpPrefix().."/lua/admin/prefs.lua?tab=discovery", flask_icon="<i class=\"fa fa-flask\"></i>"})..'<span id="discovery-progress"></span>.</div>')
+   print('<div class=\"alert alert-info alert-dismissable\">'..'<img src="'..ntop.getHttpPrefix()..'/img/loading.gif"> '..i18n('discover.network_discovery_not_enabled', {url=ntop.getHttpPrefix().."/lua/admin/prefs.lua?tab=discovery", flask_icon="<i class=\"fas fa-flask\"></i>"})..'<span id="discovery-progress"></span>.</div>')
 
    print[[
 
@@ -116,11 +116,11 @@ print[[
 
 elseif discovered["status"]["code"] == "NOCACHE" then
    -- nothing to show and nothing has been requested
-   print('<div class=\"alert alert-info alert-dismissable\"><i class="fa fa-info-circle fa-lg"></i>&nbsp;'..discovered["status"]["message"]..'</div>')
+   print('<div class=\"alert alert-info alert-dismissable\"><i class="fas fa-info-circle fa-lg"></i>&nbsp;'..discovered["status"]["message"]..'</div>')
 end
 
 if discovered["status"]["code"] == "ERROR" then
-   print('<div class=\"alert alert-danger\"><i class="fa fa-warning fa-lg"></i>&nbsp;'..discovered["status"]["message"]..'</div>')
+   print('<div class=\"alert alert-danger\"><i class="fas fa-exclamation-triangle fa-lg"></i>&nbsp;'..discovered["status"]["message"]..'</div>')
 elseif discovered["status"]["code"] == "OK" then -- everything is ok
    print[[<div id="discover-table"></div>]]
 
@@ -129,22 +129,22 @@ elseif discovered["status"]["code"] == "OK" then -- everything is ok
          url: "]] print(getPageUrl(ntop.getHttpPrefix() .. "/lua/get_discover_data.lua", page_params)) print[[",
          title: "",
          showPagination: true,
-         class: "table table-striped table-bordered table-condensed",
+         class: "table table-striped table-bordered",
          buttons: []]
 
    -- Manufacturer filter
-   print('\'<div class="btn-group pull-right"><div class="btn btn-link dropdown-toggle" data-toggle="dropdown">'..
-      i18n("mac_stats.manufacturer") .. ternary(not isEmptyString(manuf_filter), '<span class="glyphicon glyphicon-filter"></span>', '') ..
+   print('\'<div class="btn-group float-right"><div class="btn btn-link dropdown-toggle" data-toggle="dropdown">'..
+      i18n("mac_stats.manufacturer") .. ternary(not isEmptyString(manuf_filter), '<span class="fas fa-filter"></span>', '') ..
       '<span class="caret"></span></div> <ul class="dropdown-menu" role="menu" style="min-width: 90px;">')
 
    local manuf_params = table.clone(page_params)
    manuf_params.manufacturer = nil
-   print('<li><a href="' .. getPageUrl(base_url, manuf_params) .. '">' .. i18n("mac_stats.all_manufacturers") .. '</a></li>')
+   print('<li><a class="dropdown-item" href="' .. getPageUrl(base_url, manuf_params) .. '">' .. i18n("mac_stats.all_manufacturers") .. '</a></li>')
 
    for manuf, count in pairsByKeys(manufactures) do
       local _manuf = string.gsub(string.gsub(manuf, "'", "&#39;"), "\"", "&quot;")
       manuf_params.manufacturer = manuf
-      print('<li' .. ternary(manuf_filter == manuf, ' class="active"', '') .. '><a href="' ..
+      print('<li' .. ternary(manuf_filter == manuf, ' class="active"', '') .. '><a class="dropdown-item" href="' ..
          getPageUrl(base_url, manuf_params) .. '">' ..
          _manuf .." (" ..count.. ')</a></li>')
    end
@@ -153,16 +153,16 @@ elseif discovered["status"]["code"] == "OK" then -- everything is ok
    -- Device Type filter
    local type_params = table.clone(page_params)
    print('\'<div class="btn-group"><div class="btn btn-link dropdown-toggle" data-toggle="dropdown">'..
-      i18n("details.device_type") .. ternary(not isEmptyString(devtype_filter), '<span class="glyphicon glyphicon-filter"></span>', '') ..
+      i18n("details.device_type") .. ternary(not isEmptyString(devtype_filter), '<span class="fas fa-filter"></span>', '') ..
       '<span class="caret"></span></div> <ul class="dropdown-menu" role="menu" style="min-width: 90px;">')
 
    type_params.device_type = nil
-   print('<li><a href="' .. getPageUrl(base_url, type_params) .. '">' .. i18n("mac_stats.all_devices") .. '</a></li>')
+   print('<li><a class="dropdown-item" href="' .. getPageUrl(base_url, type_params) .. '">' .. i18n("mac_stats.all_devices") .. '</a></li>')
 
    for devtype, count in pairsByKeys(device_types) do
       type_params.device_type = devtype
 
-      print('<li' .. ternary(devtype_filter == tostring(devtype), ' class="active"', '') .. '><a href="' ..
+      print('<li' .. ternary(devtype_filter == tostring(devtype), ' class="active"', '') .. '><a class="dropdown-item" href="' ..
          getPageUrl(base_url, type_params) .. '">' ..
          discover.devtype2string(devtype)  .." (" ..count.. ')</a></li>')
    end
@@ -171,18 +171,18 @@ elseif discovered["status"]["code"] == "OK" then -- everything is ok
    -- OS filter
    local os_params = table.clone(page_params)
    print('\'<div class="btn-group"><div class="btn btn-link dropdown-toggle" data-toggle="dropdown">'..
-      i18n("os") .. ternary(not isEmptyString(os_filter), '<span class="glyphicon glyphicon-filter"></span>', '') ..
+      i18n("os") .. ternary(not isEmptyString(os_filter), '<span class="fas fa-filter"></span>', '') ..
       '<span class="caret"></span></div> <ul class="dropdown-menu" role="menu" style="min-width: 90px;">')
 
    os_params.operating_system = nil
-   print('<li><a href="' .. getPageUrl(base_url, os_params) .. '">' .. i18n("mac_stats.all_devices") .. '</a></li>')
+   print('<li><a class="dropdown-item" href="' .. getPageUrl(base_url, os_params) .. '">' .. i18n("mac_stats.all_devices") .. '</a></li>')
 
    for osid, count in pairsByKeys(operating_systems) do
       local os_name = discover.getOsName(osid)
       if isEmptyString(os_name) then os_name = i18n("unknown") end
       os_params.operating_system = osid
 
-      print('<li' .. ternary(os_filter == tostring(osid), ' class="active"', '') .. '><a href="' ..
+      print('<li' .. ternary(os_filter == tostring(osid), ' class="active"', '') .. '><a class="dropdown-item" href="' ..
          getPageUrl(base_url, os_params) .. '">' .. --(discover.getOsIcon(osid):gsub("'",'"') or "") ..
          os_name  .." (" ..count.. ')</a></li>')
    end

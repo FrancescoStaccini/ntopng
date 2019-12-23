@@ -59,7 +59,7 @@ function mac2record(mac)
    record["column_mac"] = mac2link(mac)
 
    if(mac.fingerprint ~= "") then
-      record["column_mac"] = record["column_mac"]..' <i class="fa fa-hand-o-up fa-lg" aria-hidden="true" title="DHCP Fingerprinted"></i>'
+      record["column_mac"] = record["column_mac"]..' <i class="fas fa-hand-o-up fa-lg" aria-hidden="true" title="DHCP Fingerprinted"></i>'
       -- io.write(mac.fingerprint.."\n")
    end
    
@@ -84,8 +84,8 @@ function mac2record(mac)
    record["column_since"] = secondsToTime(now - mac["seen.first"]+1)
 
    local sent2rcvd = round((mac["bytes.sent"] * 100) / (mac["bytes.sent"] + mac["bytes.rcvd"]), 0)
-   record["column_breakdown"] = "<div class='progress'><div class='progress-bar progress-bar-warning' style='width: "
-      .. sent2rcvd .."%;'>Sent</div><div class='progress-bar progress-bar-info' style='width: " .. (100-sent2rcvd) .. "%;'>Rcvd</div></div>"
+   record["column_breakdown"] = "<div class='progress'><div class='progress-bar bg-warning' style='width: "
+      .. sent2rcvd .."%;'>Sent</div><div class='progress-bar bg-info' style='width: " .. (100-sent2rcvd) .. "%;'>Rcvd</div></div>"
 
    if(throughput_type == "pps") then
       record["column_thpt"] = pktsToSize(mac["throughput_pps"])

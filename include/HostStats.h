@@ -62,8 +62,8 @@ class HostStats: public TimeseriesStats {
 
   virtual void computeAnomalyIndex(time_t when) {};
 
-  inline void incSentStats(u_int pkt_len)           { sent_stats.incStats(pkt_len);       };
-  inline void incRecvStats(u_int pkt_len)           { recv_stats.incStats(pkt_len);       };
+  inline void incSentStats(u_int num_pkts, u_int pkt_len) { sent_stats.incStats(num_pkts, pkt_len); };
+  inline void incRecvStats(u_int num_pkts, u_int pkt_len) { recv_stats.incStats(num_pkts, pkt_len); };
   inline void incnDPIFlows(u_int16_t l7_protocol)   { if(ndpiStats) ndpiStats->incFlowsStats(l7_protocol); };
   inline u_int32_t getTotalNumFlowsAsClient() const { return(total_num_flows_as_client);  };
   inline u_int32_t getTotalNumFlowsAsServer() const { return(total_num_flows_as_server);  };
@@ -95,17 +95,14 @@ class HostStats: public TimeseriesStats {
   inline HostPoolStats* getQuotaEnforcementStats() { return(quota_enforcement_stats); }
 #endif
 
-  virtual void incICMP(u_int8_t icmp_type, u_int8_t icmp_code, bool sent, Host *peer) {}
-  virtual void incNumDNSQueriesSent(u_int16_t query_type) {}
-  virtual void incNumDNSQueriesRcvd(u_int16_t query_type) {}
-  virtual void incNumDNSResponsesSent(u_int32_t ret_code) {}
-  virtual void incNumDNSResponsesRcvd(u_int32_t ret_code) {}
   virtual void luaHTTP(lua_State *vm) const {}
   virtual void luaDNS(lua_State *vm, bool verbose) const  {}
   virtual void luaICMP(lua_State *vm, bool isV4, bool verbose) const  {}
   virtual void incrVisitedWebSite(char *hostname) {}
   virtual void tsLua(lua_State* vm) {}
-  virtual HTTPstats* getHTTPstats() const { return(NULL); }
+  virtual HTTPstats* getHTTPstats()  const { return(NULL); }
+  virtual DnsStats*  getDNSstats()   const { return(NULL); }
+  virtual ICMPstats* getICMPstats()  const { return(NULL); }
 };
 
 #endif

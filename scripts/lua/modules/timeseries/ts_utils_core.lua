@@ -111,7 +111,7 @@ function ts_utils.getSchema(name)
 end
 
 function ts_utils.loadSchemas()
-  local system_scripts = require("system_scripts_utils")
+  local plugins_utils = require("plugins_utils")
 
   -- This should include all the available schemas
   require("ts_second")
@@ -121,16 +121,7 @@ function ts_utils.loadSchemas()
   require("ts_hour")
 
   -- Possibly load more timeseries schemas
-  local menu_entries = system_scripts.getAdditionalTimeseries()
-
-  -- Possibly load custom schemas
-  -- It is necessary to load them here in order for custom schemas to
-  -- be available in rest/ts.lua
-  for _, entry in pairs(menu_entries) do
-    if((entry.schema ~= nil) and (entry.custom_schema ~= nil)) then
-      ts_utils.custom_schemas[entry.schema] = entry.custom_schema
-    end
-  end
+  plugins_utils.loadSchemas()
 
   --WIP
   if ntop.getPref("ntopng.prefs.is_arp_matrix_generation_enabled") then
@@ -857,7 +848,6 @@ function ts_utils.getPossiblyChangedSchemas()
     "influxdb:dropped_points",
     "influxdb:exports",
     "influxdb:rtt",
-    "monitored_host:rtt",
     "system:cpu_load",
     "process:resident_memory",
     "redis:keys",

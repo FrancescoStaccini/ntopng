@@ -21,7 +21,7 @@ sendHTTPContentTypeHeader('application/json')
 
 local function getListStatusLabel(list)
   if not list.enabled then
-    return '<span class="label label-default">'.. i18n("nedge.status_disabled") ..'</span>'
+    return '<span class="badge badge-secondary">'.. i18n("nedge.status_disabled") ..'</span>'
   end
 
   if list.status.last_error then
@@ -29,14 +29,14 @@ local function getListStatusLabel(list)
     local info_msg = ""
 
     if type(list.status.last_error) == "string" then
-      info = ' <i class="fa fa-info-circle"></i>'
+      info = ' <i class="fas fa-info-circle"></i>'
       info_msg = list.status.last_error
     end
 
-    return '<span title="'.. info_msg ..'" class="label label-danger">'.. i18n("error") .. info ..'</span>'
+    return '<span title="'.. info_msg ..'" class="badge badge-danger">'.. i18n("error") .. info ..'</span>'
   end
 
-  return '<span class="label label-success">'.. i18n("category_lists.enabled") ..'</span>'
+  return '<span class="badge badge-success">'.. i18n("category_lists.enabled") ..'</span>'
 end
 
 -- ################################################
@@ -110,6 +110,8 @@ for list_name, list in pairs(lists) do
     sort_to_key[list_name] = list.status.num_hosts
   elseif sortColumn == "column_status" then
     sort_to_key[list_name] = list.status_label
+  elseif sortColumn == "column_update_interval_label" then
+    sort_to_key[list_name] = list.update_interval
   else
     -- default
     sort_to_key[list_name] = list_name
@@ -130,14 +132,21 @@ for key in pairsByValues(sort_to_key, sOrder) do
 
   if (i >= to_skip) then
     local list = lists[key]
+    local update_interval_label = ''
+    if list.update_interval == 86400 then
+       update_interval_label = i18n("alerts_thresholds_config.daily")
+    elseif list.update_interval == 3600 then
+       update_interval_label = i18n("alerts_thresholds_config.hourly")
+    end
 
     res[#res + 1] = {
       column_name = list.name,
-      column_label = list.name .. ' <a href="'.. list.url ..'" target="_blank"><i class="fa fa-external-link"></i></a>',
+      column_label = list.name .. ' <a href="'.. list.url ..'" target="_blank"><i class="fas fa-external-link-alt"></i></a>',
       column_status = list.status_label,
       column_url = list.url,
       column_enabled = list.enabled,
       column_update_interval = list.update_interval,
+      column_update_interval_label = update_interval_label,
       column_category = "cat_" .. list.category,
       column_category_name = list.category_name,
       column_num_hosts = list.status.num_hosts,

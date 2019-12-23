@@ -35,11 +35,11 @@ else
     end
 
     if(flow["throughput_trend_"..throughput_type] == 1) then 
-       print("<i class='fa fa-arrow-up'></i>")
+       print("<i class='fas fa-arrow-up'></i>")
        elseif(flow["throughput_trend_"..throughput_type] == 2) then
-       print("<i class='fa fa-arrow-down'></i>")
+       print("<i class='fas fa-arrow-down'></i>")
        elseif(flow["throughput_trend_"..throughput_type] == 3) then
-       print("<i class='fa fa-minus'></i>")
+       print("<i class='fas fa-minus'></i>")
     end
 
       print("\"")
@@ -48,7 +48,7 @@ else
    end
 
    cli2srv = round((flow["cli2srv.bytes"] * 100) / flow["bytes"], 0)
-   print (", \"column_breakdown\" : \"<div class='progress'><div class='progress-bar progress-bar-warning' style='width: " .. cli2srv .."%;'>Client</div><div class='progress-bar progress-bar-info' style='width: " .. (100-cli2srv) .. "%;'>Server</div></div>")
+   print (", \"column_breakdown\" : \"<div class='progress'><div class='progress-bar bg-warning' style='width: " .. cli2srv .."%;'>Client</div><div class='progress-bar bg-info' style='width: " .. (100-cli2srv) .. "%;'>Server</div></div>")
 
    print ("\" }")
 

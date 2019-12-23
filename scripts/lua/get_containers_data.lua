@@ -95,12 +95,12 @@ for key in pairsByValues(sort_to_key, sOrder) do
 
    local column_info = "<a href='"
       ..ntop.getHttpPrefix().."/lua/flows_stats.lua?container="..key.."'>"
-      .."<span class='label label-info'>"..i18n("flows").."</span>"
+      .."<span class='badge badge-info'>"..i18n("flows").."</span>"
       .."</a>"
    local chart = "-"
 
    if ts_utils.exists("container:num_flows", {ifid=ifId, container=key}) then
-      chart = '<a href="'.. ntop.getHttpPrefix() ..'/lua/container_details.lua?container='.. key ..'&page=historical"><i class="fa fa-area-chart fa-lg"></i></a>'
+      chart = '<a href="'.. ntop.getHttpPrefix() ..'/lua/container_details.lua?container='.. key ..'&page=historical"><i class="fas fa-chart-area fa-lg"></i></a>'
    end
  
     res[#res + 1] = {

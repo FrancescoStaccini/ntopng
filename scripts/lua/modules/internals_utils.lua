@@ -25,7 +25,7 @@ local function printHashTablesDropdown(base_url, page_params)
    local hash_table = _GET["hash_table"]
    local hash_table_filter
    if not isEmptyString(hash_table) then
-      hash_table_filter = '<span class="glyphicon glyphicon-filter"></span>'
+      hash_table_filter = '<span class="fas fa-filter"></span>'
    else
       hash_table_filter = ''
    end
@@ -36,10 +36,10 @@ local function printHashTablesDropdown(base_url, page_params)
       <button class="btn btn-link dropdown-toggle" data-toggle="dropdown">]] print(i18n("internals.hash_table")) print[[]] print(hash_table_filter) print[[<span class="caret"></span></button>\
       <ul class="dropdown-menu" role="menu" id="flow_dropdown">\]]
 
-   print[[<li><a href="]] print(getPageUrl(base_url, hash_table_params)) print[[">]] print(i18n("internals.all_hash_tables")) print[[</a></li>\]]
+   print[[<li><a class="dropdown-item" href="]] print(getPageUrl(base_url, hash_table_params)) print[[">]] print(i18n("internals.all_hash_tables")) print[[</a></li>\]]
 
    for ht, stats in pairsByKeys(interface.getHashTablesStats(), asc) do
-      print[[ <li]] if hash_table == ht then print(' class="active"') end print[[><a href="]] hash_table_params["hash_table"] = ht; print(getPageUrl(base_url, hash_table_params)); print[[">]] print(i18n("hash_table."..ht)) print[[</a></li>\]]
+      print[[ <li]] if hash_table == ht then print(' class="active"') end print[[><a class="dropdown-item" href="]] hash_table_params["hash_table"] = ht; print(getPageUrl(base_url, hash_table_params)); print[[">]] print(i18n("hash_table."..ht)) print[[</a></li>\]]
    end
 end
 
@@ -63,7 +63,7 @@ $("#table-system-interfaces-stats").datatable({
    buttons: [ ]]
 
    -- Ip version selector
-   print[['<div class="btn-group pull-right">]]
+   print[['<div class="btn-group float-right">]]
    printHashTablesDropdown(base_url, page_params)
    print[[</div>']]
 
@@ -144,7 +144,7 @@ local function printPeriodicactivityDropdown(base_url, page_params)
    local periodic_activity = _GET["periodic_script"]
    local periodic_activity_filter
    if not isEmptyString(periodic_activity) then
-      periodic_activity_filter = '<span class="glyphicon glyphicon-filter"></span>'
+      periodic_activity_filter = '<span class="fas fa-filter"></span>'
    else
       periodic_activity_filter = ''
    end
@@ -155,10 +155,10 @@ local function printPeriodicactivityDropdown(base_url, page_params)
       <button class="btn btn-link dropdown-toggle" data-toggle="dropdown">]] print(i18n("internals.periodic_activity")) print[[]] print(periodic_activity_filter) print[[<span class="caret"></span></button>\
       <ul class="dropdown-menu" role="menu" id="flow_dropdown">\]]
 
-   print[[<li><a href="]] print(getPageUrl(base_url, periodic_activity_params)) print[[">]] print(i18n("internals.all_periodic_activities")) print[[</a></li>\]]
+   print[[<li><a class="dropdown-item" href="]] print(getPageUrl(base_url, periodic_activity_params)) print[[">]] print(i18n("internals.all_periodic_activities")) print[[</a></li>\]]
 
    for script, stats in pairsByKeys(interface.getPeriodicActivitiesStats(), asc) do
-      print[[ <li]] if periodic_activity == script then print(' class="active"') end print[[><a href="]] periodic_activity_params["periodic_script"] = script; print(getPageUrl(base_url, periodic_activity_params)); print[[">]] print(script) print[[</a></li>\]]
+      print[[ <li]] if periodic_activity == script then print(' class="active"') end print[[><a class="dropdown-item" href="]] periodic_activity_params["periodic_script"] = script; print(getPageUrl(base_url, periodic_activity_params)); print[[">]] print(script) print[[</a></li>\]]
    end
 end
 
@@ -182,7 +182,7 @@ $("#table-internals-periodic-activities").datatable({
    buttons: [ ]]
 
    -- Ip version selector
-   print[['<div class="btn-group pull-right">]]
+   print[['<div class="btn-group float-right">]]
    printPeriodicactivityDropdown(base_url, page_params)
    print[[</div>']]
 
@@ -226,8 +226,8 @@ $("#table-internals-periodic-activities").datatable({
        field: "column_time_perc",
        sortable: true,
        css: {
-	 textAlign: 'right',
-	 width: '10%',
+	 textAlign: 'center',
+	 width: '5%',
        }
      }, {
        title: "]] print(i18n("internals.last_duration_ms")) print[[",
@@ -243,7 +243,6 @@ $("#table-internals-periodic-activities").datatable({
 			       "column_key", 5000,
 			       {
                   "column_last_duration": fmillis,
-                  "column_time_perc": function(v) {return(Math.round(v) + "%")},
                });
    },
 });
@@ -270,10 +269,10 @@ function internals_utils.printInternals(ifid)
 
    print[[
 <ul class="nav nav-tabs" role="tablist">
-  <li ]] if tab == "hash_tables" then print[[class="active"]] end print[[>
-    <a href="?page=internals&tab=hash_tables]] print[[">]] print(i18n("internals.hash_tables")) print[[</a></li>
-  <li ]] if tab == "periodic_activities" then print[[class="active"]] end print[[>
-    <a href="?page=internals&tab=periodic_activities"]] print[[">]] print(i18n("internals.periodic_activities")) print[[</a>
+  <li class="nav-item ]] if tab == "hash_tables" then print[[active]] end print[[">
+    <a class="nav-link ]] if tab == "hash_tables" then print[[active]] end print[[" href="?page=internals&tab=hash_tables]] print[[">]] print(i18n("internals.hash_tables")) print[[</a></li>
+  <li class="nav-item ]] if tab == "periodic_activities" then print[[active]] end print[[">
+    <a class="nav-link ]] if tab == "periodic_activities" then print[[active]] end print[[" href="?page=internals&tab=periodic_activities"]] print[[">]] print(i18n("internals.periodic_activities")) print[[</a>
   </li>
 </ul>
 
@@ -290,29 +289,7 @@ end
 
 -- ###########################################
 
-function internals_utils.getFillBar(fill_pct, warn_pct, danger_pct)
-   local bg
-
-   if fill_pct >= (danger_pct or 90) then
-      bg = "progress-bar-danger"
-   elseif fill_pct >= (warn_pct or 75) then
-      bg = "progress-bar-warning"
-   else
-      bg = "progress-bar-success"
-   end
-
-   local code = [[
-<div class="progress">
-  <div class="progress-bar ]]..bg..[[" role="progressbar" style="width: ]]..fill_pct..[[%;" aria-valuenow="]]..fill_pct..[[" aria-valuemin="0" aria-valuemax="100">]]..fill_pct..[[%</div>
-</div>
-]]
-
-   return code
-end
-
--- ###########################################
-
-function internals_utils.getDoubleFillBar(first_fill_pct, second_fill_pct, third_fill_pct)
+function internals_utils.getHashTablesFillBar(first_fill_pct, second_fill_pct, third_fill_pct)
    local code = [[<div class="progress">]]
 
    if first_fill_pct > 0 then
@@ -320,11 +297,30 @@ function internals_utils.getDoubleFillBar(first_fill_pct, second_fill_pct, third
    end
 
    if second_fill_pct > 0 then
-      code = code..[[<div class="progress-bar progress-bar-info" role="progressbar" title="]] ..i18n("flow_callbacks.idle").. [[" style="width: ]]..second_fill_pct..[[%" aria-valuenow="]]..second_fill_pct..[[" aria-valuemin="0" aria-valuemax="100">]]..i18n("flow_callbacks.idle")..[[</div>]]
+      code = code..[[<div class="progress-bar bg-info" role="progressbar" title="]] ..i18n("flow_callbacks.idle").. [[" style="width: ]]..second_fill_pct..[[%" aria-valuenow="]]..second_fill_pct..[[" aria-valuemin="0" aria-valuemax="100">]]..i18n("flow_callbacks.idle")..[[</div>]]
    end
 
    if third_fill_pct > 0 then
-      code = code..[[<div class="progress-bar progress-bar-success" role="progressbar" title="]] ..i18n("free").. [[" style="width: ]]..third_fill_pct..[[%" aria-valuenow="]]..second_fill_pct..[[" aria-valuemin="0" aria-valuemax="100">]]..i18n("free")..[[</div>]]
+      code = code..[[<div class="progress-bar bg-success" role="progressbar" title="]] ..i18n("available").. [[" style="width: ]]..third_fill_pct..[[%" aria-valuenow="]]..third_fill_pct..[[" aria-valuemin="0" aria-valuemax="100">]]..i18n("available")..[[</div>]]
+   end
+
+   code = code..[[</div>]]
+
+   return code
+end
+
+
+-- ###########################################
+
+function internals_utils.getPeriodicActivitiesFillBar(busy_pct, available_pct)
+   local code = [[<div class="progress">]]
+
+   if busy_pct > 0 then
+      code = code..[[<div class="progress-bar" role="progressbar" title="]] ..i18n("busy").. [[" style="width: ]]..busy_pct..[[%" aria-valuenow="]]..busy_pct..[[" aria-valuemin="0" aria-valuemax="100">]]..i18n("busy")..[[</div>]]
+   end
+
+   if available_pct > 0 then
+      code = code..[[<div class="progress-bar bg-success" role="progressbar" title="]] ..i18n("available").. [[" style="width: ]]..available_pct..[[%" aria-valuenow="]]..available_pct..[[" aria-valuemin="0" aria-valuemax="100">]]..i18n("available")..[[</div>]]
    end
 
    code = code..[[</div>]]

@@ -62,11 +62,9 @@ class HTTPstats {
 
   Mutex m;
   HostHash *h;
+  Host *host;
   bool warning_shown;
   VirtualHostHash *virtualHosts;
-
-  void incRequest(struct http_query_stats *q, const char *method);
-  void incResponse(struct http_response_stats *r, const char *method);
 
   void getRequests(const struct http_query_stats *q,
 		   u_int32_t *num_get, u_int32_t *num_post, u_int32_t *num_head,
@@ -99,16 +97,12 @@ class HTTPstats {
   inline u_int16_t makeRate(u_int16_t v, float tdiff) { return((u_int16_t)((((float)v* 1000)/tdiff) + .5f)); }
 
  public:
-  HTTPstats(NetworkInterface *_iface);
+  HTTPstats(Host *host);
   ~HTTPstats();
 
   inline u_int32_t get_num_virtual_hosts() { return(virtualHosts ? virtualHosts->getNumEntries() : 0); }
 
-  inline void incRequestAsReceiver(const char *method)       { incRequest(&query[AS_RECEIVER], method);        };
-  inline void incRequestAsSender(const char *method)         { incRequest(&query[AS_SENDER], method);          };
-  inline void incResponseAsSender(const char *return_code)   { incResponse(&response[AS_SENDER], return_code); };
-  inline void incResponseAsReceiver(const char *return_code) { incResponse(&response[AS_RECEIVER], return_code);};
-
+  void incStats(bool as_client, const FlowHTTPStats *fts);
   char* serialize();
   void deserialize(json_object *o);
   json_object* getJSONObject();

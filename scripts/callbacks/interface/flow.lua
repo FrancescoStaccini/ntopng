@@ -26,6 +26,7 @@ local do_benchmark = true          -- Compute benchmarks and store their results
 local do_print_benchmark = false   -- Print benchmarks results to standard output
 local do_trace = false             -- Trace lua calls
 local calculate_stats = false
+local flows_config = nil
 
 local available_modules = nil
 local benchmarks = {}
@@ -64,6 +65,12 @@ local function addL4Callaback(l4_proto, hook_name, script_key, callback)
    l4_scripts[hook_name][script_key] = callback
 end
 
+local function skip_disabled_flow_scripts(user_script)
+   -- NOTE: this filter can only be applied here because there is no
+   -- concept of entity_value for a flow.
+   return(user_scripts.getConfiguration(user_script).enabled)
+end
+
 -- The function below is called once (#pragma once)
 function setup()
    if do_trace then print("flow.lua:setup() called\n") end
@@ -73,7 +80,10 @@ function setup()
    -- Load the disabled hosts status
    hosts_disabled_status = alerts_api.getAllHostsDisabledStatusBitmaps(ifid)
 
-   available_modules = user_scripts.load(user_scripts.script_types.flow, ifid, "flow", nil, nil, do_benchmark)
+   available_modules = user_scripts.load(ifid, user_scripts.script_types.flow, "flow", {
+      do_benchmark = true,
+      scripts_filter = skip_disabled_flow_scripts,
+   })
 
    -- Reorganize the modules to optimize lookup by L4 protocol
    -- E.g. l4_hooks = {tcp -> {periodicUpdate -> {check_tcp_retr}}, other -> {protocolDetected -> {mud, score}}}
@@ -105,6 +115,9 @@ function setup()
          end
       end
    end
+
+   local configsets = user_scripts.getConfigsets("flow")
+   flows_config = user_scripts.getTargetConfiset(configsets, getInterfaceName(ifid)).config
 end
 
 -- #################################################################
@@ -285,7 +298,9 @@ local function call_modules(l4_proto, master_id, app_id, mod_fn, update_ctr)
 	 print(string.format("%s() [check: %s]: %s\n", mod_fn, mod_key, shortFlowLabel(info)))
       end
 
-      hook_fn(now)
+      local conf = user_scripts.getConfiguration(script)
+
+      hook_fn(now, conf.script_conf)
       rv = true
 
       ::continue::

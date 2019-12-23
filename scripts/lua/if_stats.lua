@@ -1,5 +1,5 @@
 --
--- (C) 2013-18 - ntop.org
+-- (C) 2013-19 - ntop.org
 --
 
 local dirs = ntop.getDirs()
@@ -73,26 +73,6 @@ function inline_select_form(name, keys, values, curval)
    print[[</select>]]
 end
 
-if(_POST["switch_interface"] ~= nil) then
--- First switch interfaces so the new cookie will have effect
-ifname = interface.setActiveInterfaceId(tonumber(ifid))
-
---print("@"..ifname.."="..id.."@")
-if((ifname ~= nil) and (_SESSION["session"] ~= nil)) then
-   key = getRedisPrefix("ntopng.prefs") .. ".ifname"
-   ntop.setCache(key, ifname)
-
-   msg = "<div class=\"alert alert-success\">" .. i18n("if_stats_overview.iface_switch_active_msg", {interface=getHumanReadableInterfaceName(ifname), ifid=ifid}) .. "</div>"
-
-   ntop.setCache(getRedisPrefix("ntopng.prefs")..'.iface', ifid)
-else
-   msg = "<div class=\"alert alert-danger\"><img src=".. ntop.getHttpPrefix() .. "/img/warning.png> " .. i18n("if_stats_overview.iface_switch_error_msg") .. "</div>"
-if(_SESSION["session"] == nil) then
-   msg = msg .."<div class=\"alert alert-danger\"><img src=".. ntop.getHttpPrefix() .. "/img/warning.png> " .. i18n("if_stats_overview.iface_switch_empty_session_msg") .. "</div>"
-end
-end
-end
-
 -- parse interface names and possibly fall back to the selected interface:
 -- priority goes to the interface id
 if ifid ~= nil and ifid ~= "" then
@@ -162,7 +142,7 @@ if (isAdministrator()) then
          net = trimSpace(net)
 
          if not isEmptyString(net) then
-            local address, prefix = splitNetworkPrefix(net)
+            local address, prefix, vlan = splitNetworkWithVLANPrefix(net)
 
             if isIPv6(address) and prefix == "128" then
                net = address
@@ -193,82 +173,6 @@ dofile(dirs.installdir .. "/scripts/lua/inc/menu.lua")
 
 print(msg)
 
-url = ntop.getHttpPrefix()..'/lua/if_stats.lua?ifid=' .. ifid
-
---  Added global javascript variable, in order to disable the refresh of pie chart in case
---  of historical interface
-print('\n<script>var refresh = '..getInterfaceRefreshRate(ifstats.id)..' * 1000; /* ms */;</script>\n')
-
-print [[
-  <nav class="navbar navbar-default" role="navigation">
-  <div class="navbar-collapse collapse">
-    <ul class="nav navbar-nav">
-]]
-
-local short_name = getHumanReadableInterfaceName(ifname)
-
-print("<li><a href=\"#\">" .. i18n("interface") .. ": " .. short_name .."</a></li>\n")
-
-if((page == "overview") or (page == nil)) then
-   print("<li class=\"active\"><a href=\"#\"><i class=\"fa fa-home fa-lg\"></i></a></li>\n")
-else
-   print("<li><a href=\""..url.."&page=overview\"><i class=\"fa fa-home fa-lg\"></i></a></li>")
-end
-
-if interface.isPacketInterface() then
-   if(page == "networks") then
-      print("<li class=\"active\"><a href=\"#\">" .. i18n("networks") .. "</a></li>\n")
-   else
-      print("<li><a href=\""..url.."&page=networks\">" .. i18n("networks") .. "</a></li>")
-   end
-end
-
--- Disable Packets and Protocols tab in case of the number of packets is equal to 0
-if((ifstats ~= nil) and (ifstats.stats.packets > 0)) then
-   if(page == "packets") then
-      print("<li class=\"active\"><a href=\"#\">" .. i18n("packets") .. "</a></li>\n")
-   else
-      print("<li><a href=\""..url.."&page=packets\">" .. i18n("packets") .. "</a></li>")
-   end
-
-   if(page == "ndpi") then
-      print("<li class=\"active\"><a href=\"#\">" .. i18n("applications") .. "</a></li>\n")
-   else
-      print("<li><a href=\""..url.."&page=ndpi\">" .. i18n("applications") .. "</a></li>")
-   end
-end
-
-if(page == "ICMP") then
-  print("<li class=\"active\"><a href=\"#\">" .. i18n("icmp") .. "</a></li>\n")
-elseif not have_nedge then
-  print("<li><a href=\""..url.."&page=ICMP\">" .. i18n("icmp") .. "</a></li>")
-end
-
--- only show if the interface has seen mac addresses
-if ifstats["has_macs"] then
-   if(page == "ARP") then
-     print("<li class=\"active\"><a href=\"#\">" .. i18n("arp") .. "</a></li>\n")
-   elseif not have_nedge then
-     print("<li><a href=\""..url.."&page=ARP\">" .. i18n("arp") .. "</a></li>")
-   end
-end
-
-if(ts_utils.exists("iface:traffic", {ifid=ifid}) and not is_historical) then
-   if(page == "historical") then
-      print("<li class=\"active\"><a href=\""..url.."&page=historical\"><i class='fa fa-area-chart fa-lg'></i></a></li>")
-   else
-      print("<li><a href=\""..url.."&page=historical\"><i class='fa fa-area-chart fa-lg'></i></a></li>")
-   end
-end
-
-
-if not have_nedge and (table.len(ifstats.profiles) > 0) then
-  if(page == "trafficprofiles") then
-    print("<li class=\"active\"><a href=\""..url.."&page=trafficprofiles\"><i class=\"fa fa-user-md fa-lg\"></i></a></li>")
-  else
-    print("<li><a href=\""..url.."&page=trafficprofiles\"><i class=\"fa fa-user-md fa-lg\"></i></a></li>")
-  end
-end
 if _SERVER["REQUEST_METHOD"] == "POST" and _POST["companion_interface"] ~= nil then
    companion_interface_utils.setCompanion(ifstats.id, _POST["companion_interface"])
 end
@@ -301,125 +205,129 @@ local has_traffic_recording_page =  (recording_utils.isAvailable()
 
 local dismiss_recording_providers_reminder = recording_utils.isExternalProvidersReminderDismissed(ifstats.id)
 
-if has_traffic_recording_page then
-   if(page == "traffic_recording") then
-      print("<li class=\"active\"><a href=\""..url.."&page=traffic_recording\"><i class=\"fa fa-hdd-o fa-lg\"></i>")
-   else
-      print("<li><a href=\""..url.."&page=traffic_recording\"><i class=\"fa fa-hdd-o fa-lg\"></i>")
-   end
-
-   if not dismiss_recording_providers_reminder then
-      print("<span class='badge badge-top-right'><i class=\"fa fa-cog fa-sm\"></i></span>")
-   end
-
-   print("</a></li>")
+local num_pool_hosts = ifstats.num_members.num_hosts
+if ifstats.num_members_per_pool[host_pools_utils.DEFAULT_POOL_ID] then
+   -- don't show unassigned hosts in the counter
+   num_pool_hosts = num_pool_hosts - ifstats.num_members_per_pool[host_pools_utils.DEFAULT_POOL_ID].num_hosts
 end
 
-if isAdministrator() and areAlertsEnabled() then
-   if(page == "alerts") then
-      print("\n<li class=\"active\"><a href=\"#\">")
-   elseif not is_pcap_dump then
-      print("\n<li><a href=\""..url.."&page=alerts\">")
-   end
 
-   if not is_pcap_dump then
-      print("<i class=\"fa fa-warning fa-lg\"></i></a>")
-      print("</li>")
-   end
-end
+local url = ntop.getHttpPrefix()..'/lua/if_stats.lua?ifid=' .. ifid
 
-if not is_pcap_dump and ts_utils.getDriverName() == "rrd" then
-   if ntop.isEnterprise() or ntop.isnEdge() then
-      if(page == "traffic_report") then
-         print("\n<li class=\"active\"><a href=\"#\"><i class='fa fa-file-text report-icon'></i></a></li>\n")
-      else
-         print("\n<li><a href=\""..url.."&page=traffic_report\"><i class='fa fa-file-text report-icon'></i></a></li>")
-      end
-   else
-      print("\n<li><a href=\"#\" title=\""..i18n('enterpriseOnly').."\"><i class='fa fa-file-text report-icon'></i></A></li>\n")
-   end
-end
+--  Added global javascript variable, in order to disable the refresh of pie chart in case
+--  of historical interface
+print('\n<script>var refresh = '..getInterfaceRefreshRate(ifstats.id)..' * 1000; /* ms */;</script>\n')
 
-if(isAdministrator()) then
-   if(page == "config") then
-      print("\n<li class=\"active\"><a href=\"#\"><i class=\"fa fa-cog fa-lg\"></i></a></li>\n")
-   elseif not is_pcap_dump then
-      print("\n<li><a href=\""..url.."&page=config\"><i class=\"fa fa-cog fa-lg\"></i></a></li>")
-   end
-   if(page == "callbacks") then
-      print("\n<li class=\"active\"><a href=\"#\"><i class=\"fa fa-superpowers fa-lg\"></i></a></li>\n")
-   else
-      print("\n<li><a href=\""..url.."&page=callbacks\"><i class=\"fa fa-superpowers fa-lg\"></i></a></li>")
-   end
-end
-
-if(page == "internals") then
-   print("\n<li class=\"active\"><a href=\"#\"><i class=\"fa fa-wrench fa-lg\"></i></a></li>\n")
-else
-   print("\n<li><a href=\""..url.."&page=internals\"><i class=\"fa fa-wrench fa-lg\"></i></a></li>")
-end
-
-if(isAdministrator() and ntop.isEnterprise() and not ifstats.isDynamic) and isEmptyString(ntop.getCache(disaggregation_criterion_key)) then
-   if(page == "sub_interfaces") then
-      print("\n<li class=\"active\"><a href=\"#\"><i class=\"fa fa-code-fork fa-lg\"></i></a></li>\n")
-   else
-      print("\n<li><a href=\""..url.."&page=sub_interfaces\"><i class=\"fa fa-code-fork fa-lg\"></i></a></li>")
-   end
-end
-
-if isAdministrator() then
-   local num_pool_hosts = ifstats.num_members.num_hosts
-   local label
-
-   if(ifstats.num_members_per_pool[host_pools_utils.DEFAULT_POOL_ID]) then
-      -- don't show unassigned hosts in the counter
-      num_pool_hosts = num_pool_hosts - ifstats.num_members_per_pool[host_pools_utils.DEFAULT_POOL_ID].num_hosts
-   end
-
-   if(num_pool_hosts > 0) then
-      label = "<span class='badge badge-top-right' title='".. i18n("host_pools.active_pool_members") .."'>".. num_pool_hosts .."</span>"
-   else
-      label = ""
-   end
-
-   if not have_nedge then
-      if(page == "pools") then
-         print("\n<li class=\"active\"><a href=\"#\"><i class=\"fa fa-users fa-lg\"></i> "..label.."</a></li>\n")
-      else
-         print("\n<li><a href=\""..url.."&page=pools\"><i class=\"fa fa-users fa-lg\"></i> "..label.."</a></li>")
-      end
-   end
-end
-
-if isAdministrator() and (not is_pcap_dump) then
-   if(page == "dhcp") then
-      print("\n<li class=\"active\"><a href=\"#\"><i class=\"fa fa-bolt fa-lg\"></i></a></li>\n")
-   else
-      print("\n<li><a href=\""..url.."&page=dhcp\"><i class=\"fa fa-bolt fa-lg\"></i></a></li>")
-   end
-end
-
-if(hasSnmpDevices(ifstats.id) and is_packet_interface and false --[[disabled: no functionality provided right now]]) then
-   if(page == "snmp_bind") then
-      print("\n<li class=\"active\"><a href=\"#\">" .. i18n("if_stats_overview.snmp") .. "</li>")
-   else
-      print("\n<li><a href=\""..url.."&page=snmp_bind\">" .. i18n("if_stats_overview.snmp") .. "</a></li>")
-   end
-end
-
-local ifname_clean = "iface_"..tostring(ifid)
-
-print [[
-<li><a href="javascript:history.go(-1)"><i class='fa fa-reply'></i></a></li>
-</ul>
-</div>
-</nav>
-
-   ]]
+local short_name = getHumanReadableInterfaceName(ifname)
+local title = i18n("interface") .. ": " .. short_name
+   page_utils.print_navbar(title, url,
+			   {
+			      {
+				 hidden = only_historical,
+				 active = page == "overview" or page == nil,
+				 page_name = "overview",
+				 label = "<i class=\"fas fa-lg fa-home\"></i>",
+			      },
+			      {
+				 hidden = not interface.isPacketInterface() or ntop.isnEdge() or interface.isView(),
+				 active = page == "networks",
+				 page_name = "networks",
+				 label = i18n("networks"),
+			      },
+			      {
+				 hidden = not ifstats or ifstats.stats.packets == 0 or ntop.isnEdge(),
+				 active = page == "packets",
+				 page_name = "packets",
+				 label = i18n("packets"),
+			      },
+			      {
+				 active = page == "ndpi",
+				 page_name = "ndpi",
+				 label = i18n("applications"),
+			      },
+			      {
+				 hidden = ntop.isnEdge(),
+				 active = page == "ICMP",
+				 page_name = "ICMP",
+				 label = i18n("icmp"),
+			      },
+			      {
+				 hidden = not ifstats or not ifstats["has_macs"] or ntop.isnEdge(),
+				 active = page == "ARP",
+				 page_name = "ARP",
+				 label = i18n("arp"),
+			      },
+			      {
+				 hidden = not ts_utils.exists("iface:traffic", {ifid=ifid}),
+				 active = page == "historical",
+				 page_name = "historical",
+				 label = "<i class='fas fa-lg fa-chart-area'></i>",
+			      },
+			      {
+				 hidden = have_nedge or not ifstats or not ifstats.profiles,
+				 active = page == "trafficprofiles",
+				 page_name = "trafficprofiles",
+				 label = "<i class=\"fas fa-lg fa-user-md\"></i>",
+			      },
+			      {
+				 hidden = not has_traffic_recording_page,
+				 active = page == "traffic_recording",
+				 page_name = "traffic_recording",
+				 label = "<i class=\"fas fa-lg fa-hdd\"></i>",
+			      },
+			      {
+				 hidden = not isAdministrator() or not areAlertsEnabled(),
+				 active = page == "alerts",
+				 page_name = "alerts",
+				 label = "<i class=\"fas fa-lg fa-exclamation-triangle\"></i>",
+			      },
+			      {
+				 hidden = is_pcap_dump or not ts_utils.getDriverName() == "rrd",
+				 active = page == "traffic_report",
+				 page_name = "traffic_report",
+				 label = "<i class='fas fa-lg fa-file-alt report-icon'></i>",
+			      },
+			      {
+				 hidden = not isAdministrator() or is_pcap_dump,
+				 active = page == "config",
+				 page_name = "config",
+				 label = "<i class=\"fas fa-lg fa-cog\"></i></a></li>",
+			      },
+			      {
+				 hidden = not isAdministrator() or is_pcap_dump,
+				 active = page == "callbacks",
+				 page_name = "callbacks",
+				 label = "<i class=\"fab fa-lg fa-superpowers\"></i>",
+			      },
+			      {
+				 active = page == "internals",
+				 page_name = "internals",
+				 label = "<i class=\"fas fa-lg fa-wrench\"></i>",
+			      },
+			      {
+				 hidden = not isAdministrator() or not ntop.isEnterprise() or ifstats.isDynamic or ifstats.isView,
+				 active = page == "sub_interfaces",
+				 page_name = "sub_interfaces",
+				 label = "<i class=\"fas fa-lg fa-code-branch\"></i>",
+			      },
+			      {
+				 hidden = not isAdministrator() or have_nedge,
+				 active = page == "pools",
+				 page_name = "pools",
+				 label = "<i class=\"fas fa-lg fa-users\"></i>",
+				 badge_num = num_pool_hosts,
+			      },
+			      {
+				 hidden = not isAdministrator() or is_pcap_dump,
+				 active = page == "dhcp",
+				 page_name = "dhcp",
+				 label = "<i class=\"fas fa-lg fa-bolt\"></i>",
+			      },
+			   }
+   )
 
 if((page == "overview") or (page == nil)) then
    local tags = {ifid = ifstats.id}
-
    print("<table class=\"table table-striped table-bordered\">\n")
    print("<tr><th width=15%>"..i18n("if_stats_overview.id").."</th><td colspan=6>" .. ifstats.id .. " ")
    if(ifstats.description ~= ifstats.name) then print(" ("..ifstats.description..")") end
@@ -454,7 +362,7 @@ if((page == "overview") or (page == nil)) then
       end
 
       if not isEmptyString(ifstats["probe.public_ip"]) then
-	 remote_probe_public_ip = "<b>"..i18n("if_stats_overview.public_probe_ip").."</b>: <A HREF=\"http://"..ifstats["probe.public_ip"].."\">"..ifstats["probe.public_ip"].."</A> <i class='fa fa-external-link'></i></td>\n"
+	 remote_probe_public_ip = "<b>"..i18n("if_stats_overview.public_probe_ip").."</b>: <A HREF=\"http://"..ifstats["probe.public_ip"].."\">"..ifstats["probe.public_ip"].."</A> <i class='fas fa-external-link-alt'></i></td>\n"
       end
 
       if not isEmptyString(ifstats["zmq.num_flow_exports"]) then
@@ -511,27 +419,27 @@ if((page == "overview") or (page == nil)) then
 	    local num_full = tonumber(ifstats["zmq.drops.export_queue_full"])
 	    local span_class = ' '
 	    if num_full > 0 then
-	       span_class = 'class="label label-danger"'
+	       span_class = 'class="badge badge-danger"'
 	    end
-	    export_queue_full = "<b>"..i18n("if_stats_overview.probe_zmq_drops_export_queue_full").." <sup><i class='fa fa-info-circle' title='"..i18n("if_stats_overview.note_probe_zmq_drops_export_queue_full").."'></i></sup></b>: <span "..span_class.." id=if_zmq_drops_export_queue_full>"..formatValue(ifstats["zmq.drops.export_queue_full"]).."</span>"
+	    export_queue_full = "<b>"..i18n("if_stats_overview.probe_zmq_drops_export_queue_full").." <sup><i class='fas fa-info-circle' title='"..i18n("if_stats_overview.note_probe_zmq_drops_export_queue_full").."'></i></sup></b>: <span "..span_class.." id=if_zmq_drops_export_queue_full>"..formatValue(ifstats["zmq.drops.export_queue_full"]).."</span>"
 	 end
 
 	 if has_drops_flow_collection_drops then
 	    local num_full = tonumber(ifstats["zmq.drops.flow_collection_drops"])
 	    local span_class = ' '
 	    if num_full > 0 then
-	       span_class = 'class="label label-danger"'
+	       span_class = 'class="badge badge-danger"'
 	    end
-	    flow_collection_drops = "<b>"..i18n("if_stats_overview.probe_zmq_drops_flow_collection_drops").." <sup><i class='fa fa-info-circle' title='"..i18n("if_stats_overview.note_probe_zmq_drops_flow_collection_drops").."'></i></sup></b>: <span "..span_class.." id=if_zmq_drops_flow_collection_drops>"..formatValue(ifstats["zmq.drops.flow_collection_drops"]).."</span>"
+	    flow_collection_drops = "<b>"..i18n("if_stats_overview.probe_zmq_drops_flow_collection_drops").." <sup><i class='fas fa-info-circle' title='"..i18n("if_stats_overview.note_probe_zmq_drops_flow_collection_drops").."'></i></sup></b>: <span "..span_class.." id=if_zmq_drops_flow_collection_drops>"..formatValue(ifstats["zmq.drops.flow_collection_drops"]).."</span>"
 	 end
 
 	 if has_drops_flow_collection_udp_socket_drops then
 	    local num_full = tonumber(ifstats["zmq.drops.flow_collection_udp_socket_drops"])
 	    local span_class = ' '
 	    if num_full > 0 then
-	       span_class = 'class="label label-danger"'
+	       span_class = 'class="badge badge-danger"'
 	    end
-	    flow_collection_udp_socket_drops = "<b>"..i18n("if_stats_overview.probe_zmq_drops_flow_collection_udp_socket_drops").." <sup><i class='fa fa-info-circle' title='"..i18n("if_stats_overview.note_probe_zmq_drops_flow_collection_udp_socket_drops").."'></i></sup></b>: <span "..span_class.." id=if_zmq_drops_flow_collection_udp_socket_drops>"..formatValue(ifstats["zmq.drops.flow_collection_udp_socket_drops"]).."</span>"
+	    flow_collection_udp_socket_drops = "<b>"..i18n("if_stats_overview.probe_zmq_drops_flow_collection_udp_socket_drops").." <sup><i class='fas fa-info-circle' title='"..i18n("if_stats_overview.note_probe_zmq_drops_flow_collection_udp_socket_drops").."'></i></sup></b>: <span "..span_class.." id=if_zmq_drops_flow_collection_udp_socket_drops>"..formatValue(ifstats["zmq.drops.flow_collection_udp_socket_drops"]).."</span>"
 	 end
 
 	 if export_queue_full then
@@ -565,7 +473,7 @@ if((page == "overview") or (page == nil)) then
    end
 
    if((isAdministrator()) and (not is_pcap_dump)) then
-      s = s .. " <a href=\""..url.."&page=config\"><i class=\"fa fa-cog fa-sm\" title=\"Configure Interface Name\"></i></a>"
+      s = s .. " <a href=\""..url.."&page=config\"><i class=\"fas fa-cog fa-sm\" title=\"Configure Interface Name\"></i></a>"
    end
 
    print('<tr><th width="250">'..i18n("name")..'</th><td colspan="2">' .. s ..' </td>\n')
@@ -603,11 +511,11 @@ if((page == "overview") or (page == nil)) then
 
    if((ifstats.num_alerts_engaged > 0) or (ifstats.num_dropped_alerts > 0)) then
       print("<tr>")
-      local warning = "<i class='fa fa-warning fa-lg' style='color: #B94A48;'></i> "
+      local warning = "<i class='fas fa-exclamation-triangle fa-lg' style='color: #B94A48;'></i> "
       local engaged_alerts_chart_available = ts_utils.exists("iface:engaged_alerts", tags)
 
       print("<th>".. ternary(ifstats.num_alerts_engaged > 0, warning, "") ..i18n("show_alerts.engaged_alerts")..
-	       ternary(engaged_alerts_chart_available, " <A HREF='"..url.."&page=historical&ts_schema=iface:engaged_alerts'><i class='fa fa-area-chart fa-sm'></i></A>", "").."</th><td colspan=2  nowrap><a href='".. ntop.getHttpPrefix() .."/lua/show_alerts.lua?ifid="..ifstats.id.."'>".. formatValue(ifstats.num_alerts_engaged) .."</a> <span id=engaged_alerts_trend></span></td>\n")
+	       ternary(engaged_alerts_chart_available, " <A HREF='"..url.."&page=historical&ts_schema=iface:engaged_alerts'><i class='fas fa-chart-area fa-sm'></i></A>", "").."</th><td colspan=2  nowrap><a href='".. ntop.getHttpPrefix() .."/lua/show_alerts.lua?ifid="..ifstats.id.."'>".. formatValue(ifstats.num_alerts_engaged) .."</a> <span id=engaged_alerts_trend></span></td>\n")
       print("<th width=250>".. ternary(ifstats.num_dropped_alerts > 0, warning, "")..i18n("show_alerts.dropped_alerts")..
 	       "</th><td colspan=2>" .. formatValue(ifstats.num_dropped_alerts) .. " <span id=dropped_alerts_trend></span></td>\n</td>")
    end
@@ -643,36 +551,36 @@ if((page == "overview") or (page == nil)) then
       print("<tr><th colspan=7 nowrap>"..i18n("if_stats_overview.zmq_rx_statistics").."</th></tr>\n")
 
       local collected_flows_chart_available = ts_utils.exists("iface:zmq_recv_flows", tags)
-      print("<tr><th nowrap>"..i18n("if_stats_overview.collected_flows")..ternary(collected_flows_chart_available, " <A HREF='"..url.."&page=historical&ts_schema=iface:zmq_recv_flows'><i class='fa fa-area-chart fa-sm'></i></A>", "").."</th><td width=20%><span id=if_zmq_flows>"..formatValue(ifstats.zmqRecvStats.flows).."</span></td>")
+      print("<tr><th nowrap>"..i18n("if_stats_overview.collected_flows")..ternary(collected_flows_chart_available, " <A HREF='"..url.."&page=historical&ts_schema=iface:zmq_recv_flows'><i class='fas fa-chart-area fa-sm'></i></A>", "").."</th><td width=20%><span id=if_zmq_flows>"..formatValue(ifstats.zmqRecvStats.flows).."</span></td>")
 
       print("<th nowrap>"..i18n("if_stats_overview.interface_rx_updates").."</th><td width=20%><span id=if_zmq_events>"..formatValue(ifstats.zmqRecvStats.events).."</span></td>")
 
       print("<th nowrap>"..i18n("if_stats_overview.sflow_counter_updates").."</th><td width=20%><span id=if_zmq_counters>"..formatValue(ifstats.zmqRecvStats.counters).."</span></td></tr>")
 
       local collected_msgs_chart_available = ts_utils.exists("iface:zmq_rcvd_msgs", tags)
-      print("<tr><th nowrap>"..i18n("if_stats_overview.zmq_message_rcvd")..ternary(collected_msgs_chart_available, " <A HREF='"..url.."&page=historical&ts_schema=custom:zmq_msg_rcvd_vs_drops'><i class='fa fa-area-chart fa-sm'></i></A>", "").."</th><td width=20%><span id=if_zmq_msg_rcvd>"..formatValue(ifstats.zmqRecvStats.zmq_msg_rcvd).."</span></td>")
+      print("<tr><th nowrap>"..i18n("if_stats_overview.zmq_message_rcvd")..ternary(collected_msgs_chart_available, " <A HREF='"..url.."&page=historical&ts_schema=custom:zmq_msg_rcvd_vs_drops'><i class='fas fa-chart-area fa-sm'></i></A>", "").."</th><td width=20%><span id=if_zmq_msg_rcvd>"..formatValue(ifstats.zmqRecvStats.zmq_msg_rcvd).."</span></td>")
 
-      print("<th nowrap> <i class='fa fa-tint' aria-hidden='true'></i> "..i18n("if_stats_overview.zmq_message_drops")..ternary(collected_msgs_chart_available, " <A HREF='"..url.."&page=historical&ts_schema=custom:zmq_msg_rcvd_vs_drops'><i class='fa fa-area-chart fa-sm'></i></A>", "").."</th><td width=20%><span id=if_zmq_msg_drops>"..formatValue(ifstats.zmqRecvStats.zmq_msg_drops).."</span></td>")
+      print("<th nowrap> <i class='fas fa-tint' aria-hidden='true'></i> "..i18n("if_stats_overview.zmq_message_drops")..ternary(collected_msgs_chart_available, " <A HREF='"..url.."&page=historical&ts_schema=custom:zmq_msg_rcvd_vs_drops'><i class='fas fa-chart-area fa-sm'></i></A>", "").."</th><td width=20%><span id=if_zmq_msg_drops>"..formatValue(ifstats.zmqRecvStats.zmq_msg_drops).."</span></td>")
       print("<th nowrap> "..i18n("if_stats_overview.zmq_avg_msg_flows").."</th><td width=20%><span id=if_zmq_avg_msg_flows></span></td></tr>")
    end
 
    print("<tr><th colspan=7 nowrap>"..i18n("if_stats_overview.traffic_statistics").."</th></tr>\n")
 
    local traffic_chart_available = ts_utils.exists("iface:traffic", tags)
-   print("<tr><th nowrap>"..i18n("report.total_traffic")..ternary(traffic_chart_available, " <A HREF='"..url.."&page=historical&ts_schema=iface:traffic'><i class='fa fa-area-chart fa-sm'></i></A>", "").."</th><td width=20%><span id=if_bytes>"..bytesToSize(ifstats.stats.bytes).."</span> [<span id=if_pkts>".. formatValue(ifstats.stats.packets) .. " ".. label .."</span>] ")
+   print("<tr><th nowrap>"..i18n("report.total_traffic")..ternary(traffic_chart_available, " <A HREF='"..url.."&page=historical&ts_schema=iface:traffic'><i class='fas fa-chart-area fa-sm'></i></A>", "").."</th><td width=20%><span id=if_bytes>"..bytesToSize(ifstats.stats.bytes).."</span> [<span id=if_pkts>".. formatValue(ifstats.stats.packets) .. " ".. label .."</span>] ")
 
    print("<span id=pkts_trend></span></td>")
 
    if not ifstats.isDynamic then
-      print("<th width=20%><span id='if_packet_drops_drop'><i class='fa fa-tint' aria-hidden='true'></i></span> ")
+      print("<th width=20%><span id='if_packet_drops_drop'><i class='fas fa-tint' aria-hidden='true'></i></span> ")
 
       local drops_chart_available = ts_utils.exists("iface:drops", tags)
-      print(i18n("if_stats_overview.dropped_packets")..ternary(drops_chart_available, " <A HREF='"..url.."&page=historical&ts_schema=iface:drops'><i class='fa fa-area-chart fa-sm'></i></A>", "").."</th>")
+      print(i18n("if_stats_overview.dropped_packets")..ternary(drops_chart_available, " <A HREF='"..url.."&page=historical&ts_schema=iface:drops'><i class='fas fa-chart-area fa-sm'></i></A>", "").."</th>")
 
       print("<td width=20% colspan=3><span id=if_drops>")
 
       if(ifstats.stats.drops > 0) then
-	 print('<span class="label label-danger">')
+	 print('<span class="badge badge-danger">')
       end
 
       print(formatValue(ifstats.stats.drops).. " " .. label)
@@ -701,8 +609,8 @@ if((page == "overview") or (page == nil)) then
    if(ifstats.has_traffic_directions) then
       local txrx_chart_available = ts_utils.exists("iface:traffic_rxtx", tags)
 
-      print("<tr><th nowrap>"..i18n("http_page.traffic_sent")..ternary(txrx_chart_available, " <A HREF='"..url.."&page=historical&ts_schema=iface:traffic_rxtx'><i class='fa fa-area-chart fa-sm'></i></A>", "").."</th><td width=20%><span id=if_out_bytes>"..bytesToSize(ifstats.eth.egress.bytes).."</span> [<span id=if_out_pkts>".. formatValue(ifstats.eth.egress.packets) .. " ".. label .."</span>] <span id=pkts_out_trend></span></td>")
-      print("<th nowrap>"..i18n("http_page.traffic_received")..ternary(txrx_chart_available, " <A HREF='"..url.."&page=historical&ts_schema=iface:traffic_rxtx'><i class='fa fa-area-chart fa-sm'></i></A>", "").."</th><td width=20%><span id=if_in_bytes>"..bytesToSize(ifstats.eth.ingress.bytes).."</span> [<span id=if_in_pkts>".. formatValue(ifstats.eth.ingress.packets) .. " ".. label .."</span>] <span id=pkts_in_trend></span><td></td></tr>")
+      print("<tr><th nowrap>"..i18n("http_page.traffic_sent")..ternary(txrx_chart_available, " <A HREF='"..url.."&page=historical&ts_schema=iface:traffic_rxtx'><i class='fas fa-chart-area fa-sm'></i></A>", "").."</th><td width=20%><span id=if_out_bytes>"..bytesToSize(ifstats.eth.egress.bytes).."</span> [<span id=if_out_pkts>".. formatValue(ifstats.eth.egress.packets) .. " ".. label .."</span>] <span id=pkts_out_trend></span></td>")
+      print("<th nowrap>"..i18n("http_page.traffic_received")..ternary(txrx_chart_available, " <A HREF='"..url.."&page=historical&ts_schema=iface:traffic_rxtx'><i class='fas fa-chart-area fa-sm'></i></A>", "").."</th><td width=20%><span id=if_in_bytes>"..bytesToSize(ifstats.eth.ingress.bytes).."</span> [<span id=if_in_pkts>".. formatValue(ifstats.eth.ingress.packets) .. " ".. label .."</span>] <span id=pkts_in_trend></span><td></td></tr>")
    end
   
    if not interface.isPacketInterface() then 
@@ -760,7 +668,7 @@ if((page == "overview") or (page == nil)) then
       end
       print("&nbsp;[<span id=exported_flows_rate>"..formatValue(round(export_rate, 2)).."</span> Flows/s]</td>")
 
-      print("<th><span id='if_flow_drops_drop'<i class='fa fa-tint' aria-hidden='true'></i></span> ")
+      print("<th><span id='if_flow_drops_drop'<i class='fas fa-tint' aria-hidden='true'></i></span> ")
       print(i18n("if_stats_overview.dropped_flows").."</th>")
 
       local span_danger = ""
@@ -768,7 +676,7 @@ if((page == "overview") or (page == nil)) then
 
 
       elseif(export_drops > 0) then
-	 span_danger = ' class="label label-danger"'
+	 span_danger = ' class="badge badge-danger"'
       end
       print("<td><span id=exported_flows_drops "..span_danger..">"..formatValue(export_drops).."</span>&nbsp;")
       print("<span id=exported_flows_drops_pct "..span_danger..">["
@@ -821,14 +729,16 @@ if((page == "overview") or (page == nil)) then
       end
    end
 
-   if isAdministrator() then
-      print("<tr><th>"..i18n("download").."&nbsp;<i class=\"fa fa-download fa-lg\"></i></th><td colspan=5>")
+   if (isAdministrator() and ifstats.isView == false and ifstats.isDynamic == false and interface.isPacketInterface()) then
+      print("<tr><th>"..i18n("download").."&nbsp;<i class=\"fas fa-download fa-lg\"></i></th><td colspan=5>")
 
       local live_traffic_utils = require("live_traffic_utils")
       live_traffic_utils.printLiveTrafficForm(ifId)
 
       print("</td></tr>\n")
+   end
 
+   if isAdministrator() then
       print("<tr><th width=250>"..i18n("if_stats_overview.reset_counters").."</th>")
       print("<td colspan=5>")
 
@@ -837,9 +747,9 @@ if((page == "overview") or (page == nil)) then
 	 tot = tot + ifstats.stats.flow_export_count + ifstats.stats.flow_export_drops
       end
 
-      print('<button id="btn_reset_all" type="button" class="btn btn-default" onclick="resetInterfaceCounters(false);">'..i18n("if_stats_overview.all_counters")..'</button>&nbsp;')
+      print('<button id="btn_reset_all" type="button" class="btn btn-secondary" onclick="resetInterfaceCounters(false);">'..i18n("if_stats_overview.all_counters")..'</button>&nbsp;')
 
-      print('<button id="btn_reset_drops" type="button" class="btn btn-default" onclick="resetInterfaceCounters(true);">'..i18n("if_stats_overview.drops_only")..'</button>')
+      print('<button id="btn_reset_drops" type="button" class="btn btn-secondary" onclick="resetInterfaceCounters(true);">'..i18n("if_stats_overview.drops_only")..'</button>')
       print("</td>")
 
       print("</tr>\n")
@@ -851,7 +761,7 @@ if((page == "overview") or (page == nil)) then
       print("<tr><th nowrap>"..i18n("if_stats_overview.nf_queue_total").."</th>")
       local span_class = ''
       if st.nfq.queue_pct > 80 then
-	 span_class = "class='label label-danger'"
+	 span_class = "class='badge badge-danger'"
       end
       print("<td width=20%><span id=nfq_queue_total "..span_class..">"..string.format("%s [%s %%]", formatValue(st.nfq.queue_total), formatValue(st.nfq.queue_pct)).." </span> <span id=nfq_queue_total_trend></span></td>")
       print("<th nowrap>"..i18n("if_stats_overview.nf_handle_packet_failed").."</th>")
@@ -899,7 +809,7 @@ elseif page == "networks" and interface.isPacketInterface() then
    end
 
    local has_ghost_networks = false
-   local ghost_icon = '<font color=red><i class="fa fa-snapchat-ghost" aria-hidden="true"></i></font>'
+   local ghost_icon = '<font color=red><i class="fas fa-ghost" aria-hidden="true"></i></font>'
    if ifstats.bcast_domains and table.len(ifstats.bcast_domains) > 0 then
       print("<tr><th width=250>"..i18n("broadcast_domain").."</th><td colspan=5>")
 
@@ -949,8 +859,8 @@ elseif((page == "packets")) then
     end
 
     print[[
-  	 <tr ]] print(nedge_hidden) print[[><th class="text-left">]] print(i18n("packets_page.tcp_flags_distribution")) print[[</th><td colspan=5><div class="pie-chart" id="flagsDistro"></div></td></tr>
-    <tr><th class="text-left">]] print(i18n("packets_page.ip_version_distribution")) print[[</th><td colspan=5><div class="pie-chart" id="ipverDistro"></div></td></tr>
+  	 <tr ]] print(nedge_hidden) print[[><th class="text-left">]] print(i18n("packets_page.version_vs_flags_distribution")) print[[</th>
+<td colspan=1><div class="pie-chart" id="ipverDistro"></div></td><td colspan=1><div class="pie-chart" id="flagsDistro"></div></td></tr>
       </table>
 
 	<script type='text/javascript'>
@@ -980,11 +890,11 @@ elseif((page == "packets")) then
 elseif(page == "ndpi") then
 print[[
   <ul id="ndpiNav" class="nav nav-tabs" role="tablist">
-    <li class="active"><a data-toggle="tab" role="tab" href="#applications" active>]] print(i18n("applications")) print[[</a></li>
-    <li><a data-toggle="tab" role="tab" href="#categories">]] print(i18n("categories")) print[[</a></li>
+    <li class="nav-item active"><a class="nav-link active" data-toggle="tab" role="tab" href="#applications" active>]] print(i18n("applications")) print[[</a></li>
+    <li class="nav-item"><a class="nav-link" data-toggle="tab" role="tab" href="#categories">]] print(i18n("categories")) print[[</a></li>
   </ul>
   <div class="tab-content">
-    <div id="applications" class="tab-pane fade in active">
+    <div id="applications" class="tab-pane in active">
       <br>
       <table class="table table-bordered table-striped">
 ]]
@@ -1119,33 +1029,56 @@ setInterval(update_ndpi_categories_table, 5000);
 ]]
 
 elseif(page == "ICMP") then
-
-  print [[
-     <table id="icmp_table" class="table table-bordered table-striped tablesorter">
-     <thead><tr><th>]] print(i18n("icmp_page.icmp_message")) print [[</th><th style='text-align:right;'>]] print(i18n("packets")) print[[</th></tr></thead>
-     <tbody id="iface_details_icmp_tbody">
-     </tbody>
-     </table>
+print[[
+  <ul id="icmp_nav" class="nav nav-tabs" role="tablist">
+    <li class="nav-item active"><a class="nav-link active" data-toggle="tab" role="tab" href="#icmp" active>]] print(i18n("icmp")) print[[</a></li>
+    <li class="nav-item"><a class="nav-link" data-toggle="tab" role="tab" href="#icmpv6">]] print(i18n("icmp")) print[[V6</a></li>
+  </ul>
+  <div class="tab-content">
+    <div id="icmp" class="tab-pane in active">
+      <br>
+       <table id="icmp_table_4" class="table table-bordered table-striped tablesorter">
+         <thead><tr><th>]] print(i18n("icmp_page.icmp_message")) print [[</th><th>]] print(i18n("icmp_page.icmp_type")) print [[</th><th>]] print(i18n("icmp_page.icmp_code")) print [[</th><th style='text-align:right;'>]] print(i18n("packets")) print[[</th></tr></thead>
+         <tbody id="iface_details_icmp_tbody_4">
+         </tbody>
+       </table>
+    </div>
+    <div id="icmpv6" class="tab-pane">
+      <br>
+       <table id="icmp_table_6" class="table table-bordered table-striped tablesorter">
+         <thead><tr><th>]] print(i18n("icmp_page.icmp_message")) print [[</th><th>]] print(i18n("icmp_page.icmp_type")) print [[</th><th>]] print(i18n("icmp_page.icmp_code")) print [[</th><th style='text-align:right;'>]] print(i18n("packets")) print[[</th></tr></thead>
+         <tbody id="iface_details_icmp_tbody_6">
+         </tbody>
+       </table>
+    </div>
 
 <script>
-function update_icmp_table() {
+function update_icmp_table(ip_version) {
+  var icmp_table_id = '#icmp_table_' + ip_version;
+  var icmp_table_body_id = '#iface_details_icmp_tbody_' + ip_version;
+
   $.ajax({
     type: 'GET',
     url: ']]
   print(ntop.getHttpPrefix())
   print [[/lua/get_icmp_data.lua',
-    data: { ifid: "]] print(ifId.."")  print [[" },
+    data: { ifid: "]] print(ifId.."")  print [[", version: ip_version },
     success: function(content) {
       if(content) {
-         $('#iface_details_icmp_tbody').html(content);
-         $('#icmp_table').trigger("update");
+         $(icmp_table_body_id).html(content);
+         $(icmp_table_id).trigger("update");
       }
     }
   });
 }
 
-update_icmp_table();
-setInterval(update_icmp_table, 5000);
+function update_icmp_tables() {
+  update_icmp_table(4);
+  update_icmp_table(6);
+}
+
+update_icmp_tables();
+setInterval(update_icmp_tables, 5000);
 </script>
 
 ]]
@@ -1232,6 +1165,7 @@ elseif(page == "historical") then
          {schema="iface:tcp_out_of_order",      label=i18n("graphs.tcp_packets_ooo"), nedge_exclude=1},
          --{schema="tcp_retr_ooo_lost",   label=i18n("graphs.tcp_retr_ooo_lost"), nedge_exclude=1},
          {schema="iface:tcp_retransmissions",   label=i18n("graphs.tcp_packets_retr"), nedge_exclude=1},
+	 {schema="iface:tcp_keep_alive",        label=i18n("graphs.tcp_packets_keep_alive"), nedge_exclude=1},
          {separator=1, label=i18n("tcp_flags")},
          {schema="iface:tcp_syn",               label=i18n("graphs.tcp_syn_packets"), nedge_exclude=1, pro_skip=1},
          {schema="iface:tcp_synack",            label=i18n("graphs.tcp_synack_packets"), nedge_exclude=1, pro_skip=1},
@@ -1248,7 +1182,7 @@ elseif(page == "trafficprofiles") then
      local statschart_icon = ''
 
      if ts_utils.exists("profile:traffic", {ifid=ifid}) then
-	 statschart_icon = '<A HREF=\"'..ntop.getHttpPrefix()..'/lua/profile_details.lua?profile='..pname..'\"><i class=\'fa fa-area-chart fa-lg\'></i></A>'
+	 statschart_icon = '<A HREF=\"'..ntop.getHttpPrefix()..'/lua/profile_details.lua?profile='..pname..'\"><i class=\'fas fa-chart-area fa-lg\'></i></A>'
      end
 
      print("<tr><th>"..pname.."</th><td align=center>"..statschart_icon.."</td><td><span id=profile_"..trimmed..">"..bytesToSize(pbytes).."</span> <span id=profile_"..trimmed.."_trend></span></td></tr>\n")
@@ -1333,16 +1267,16 @@ elseif(page == "traffic_recording" and has_traffic_recording_page) then
    print('<ul id="traffic-recording-nav" class="nav nav-tabs" role="tablist">')
 
    if config_enabled then
-      print('<li class="'.. ternary(tab == "config", "active", "") ..'"><a href="?ifid='.. ifstats.id
-	       ..'&page=traffic_recording"><i class="fa fa-cog"></i> '.. i18n("traffic_recording.settings") ..'</a></li>')
+      print('<li class="nav-item '.. ternary(tab == "config", "active", "") ..'"><a class="nav-link '.. ternary(tab == "config", "active", "") ..'" href="?ifid='.. ifstats.id
+	       ..'&page=traffic_recording"><i class="fas fa-cog"></i> '.. i18n("traffic_recording.settings") ..'</a></li>')
    end
 
    if recording_enabled then
-      print('<li class="'.. ternary(tab == "status", "active", "") ..'"><a href="?ifid='.. ifstats.id
+      print('<li class="nav-item '.. ternary(tab == "status", "active", "") ..'"><a class="nav-link '.. ternary(tab == "status", "active", "") ..'" href="?ifid='.. ifstats.id
 	 ..'&page=traffic_recording&tab=status">'.. i18n("status") ..'</a></li>')
 
       if ntop.isEnterprise() then
-	 print('<li class="'.. ternary(tab == "jobs", "active", "") ..'"><a href="?ifid='.. ifstats.id
+	 print('<li class="nav-item '.. ternary(tab == "jobs", "active", "") ..'"><a class="nav-link '.. ternary(tab == "jobs", "active", "") ..'" href="?ifid='.. ifstats.id
 	    ..'&page=traffic_recording&tab=jobs">'.. i18n("traffic_recording.jobs") ..'</a></li>')
       end
    end
@@ -1484,7 +1418,7 @@ elseif(page == "config") then
    -- LBD identifier
      print[[
 	<tr>
-	   <th width="30%">]] print(i18n("prefs.toggle_host_tskey_title")) print[[ <i class="fa fa-info-circle" title="]] print(i18n("prefs.toggle_host_tskey_description")) print[["></i></th>
+	   <th width="30%">]] print(i18n("prefs.toggle_host_tskey_title")) print[[ <i class="fas fa-info-circle" title="]] print(i18n("prefs.toggle_host_tskey_description")) print[["></i></th>
 	   <td>]]
       inline_select_form("lbd_hosts_as_macs", {i18n("ip_address"), i18n("mac_address")}, {"0", "1"}, serialize_by_mac)
 	print[[
@@ -1831,7 +1765,7 @@ elseif(page == "config") then
 
       print[[
    </table>
-   <button class="btn btn-primary" style="float:right; margin-right:1em;" disabled="disabled" type="submit">]] print(i18n("save_settings")) print[[</button><br><br>
+   <button class="btn btn-primary" style="float:right; margin-right:1em; margin-left: auto" disabled="disabled" type="submit">]] print(i18n("save_settings")) print[[</button><br><br>
    </form>
    <script>
       aysHandleForm("#iface_config");
@@ -1847,7 +1781,6 @@ elseif(page == "callbacks") then
    drawAlertSourceSettings("interface", ifname_clean,
       i18n("show_alerts.iface_delete_config_btn", {iface=alias}), "show_alerts.iface_delete_config_confirm",
       "if_stats.lua", {ifid=ifid}, alias, "interface")
-
 elseif(page == "internals") then
    internals_utils.printInternals(ifid)
 print [[
@@ -1926,7 +1859,7 @@ elseif(page == "snmp_bind") then
    </table>
 
    <input type="hidden" name="csrf" value="]] print(ntop.getRandomCSRFValue()) print[[" />
-   <button id="snmp_bind_submit" class="btn btn-primary" style="float:right; margin-right:1em;" disabled="disabled" type="submit">]] print(i18n("save_settings")) print[[</button>
+   <button id="snmp_bind_submit" class="btn btn-primary" style="float:right; margin-right:1em; margin-left: auto" disabled="disabled" type="submit">]] print(i18n("save_settings")) print[[</button>
 </form>
 
 <b>]] print(i18n("snmp.note") .. ":") print[[</b><br>
@@ -2131,9 +2064,9 @@ if have_nedge and ifstats.type == "netfilter" and ifstats.netfilter then
    
    print[[
         if(rsp.netfilter.nfq.queue_pct > 80) {
-          $('#nfq_queue_total').addClass("label label-danger");
+          $('#nfq_queue_total').addClass("badge badge-danger");
         } else {
-          $('#nfq_queue_total').removeClass("label label-danger");
+          $('#nfq_queue_total').removeClass("badge badge-danger");
         }
 	$('#nfq_queue_total').html(fint(rsp.netfilter.nfq.queue_total) + " [" + fint(rsp.netfilter.nfq.queue_pct) + " %]");
         $('#nfq_queue_total_trend').html(get_trend(last_nfq_queue_total, rsp.netfilter.nfq.queue_total));
@@ -2174,7 +2107,7 @@ print [[
         }
 
 	if(rsp.drops > 0) {
-          drops = '<span class="label label-danger">';
+          drops = '<span class="badge badge-danger">';
         }
 	drops = drops + addCommas(rsp.drops)+" ]]
 
@@ -2189,14 +2122,14 @@ print [[";
         $('#exported_flows_rate').html(Math.round(rsp.flow_export_rate * 100) / 100);
         if(rsp.flow_export_drops > 0) {
           $('#exported_flows_drops')
-            .addClass("label label-danger")
+            .addClass("badge badge-danger")
             .html(fint(rsp.flow_export_drops));
           if(rsp.flow_export_count > 0) {
             $('#exported_flows_drops_pct')
-              .addClass("label label-danger")
+              .addClass("badge badge-danger")
               .html("[" + Math.round(rsp.flow_export_drops / (rsp.flow_export_count + rsp.flow_export_count) * 100 * 1000) / 1000 + "%]");
           } else {
-            $('#exported_flows_drops_pct').addClass("label label-danger").html("[100%]");
+            $('#exported_flows_drops_pct').addClass("badge badge-danger").html("[100%]");
           }
         } else {
           $('#exported_flows_drops').removeClass().html("0");
@@ -2218,7 +2151,8 @@ print [[
 <script>
 $(document).ready(function()
     {
-	$("#icmp_table").tablesorter();
+	$("#icmp_table_4").tablesorter();
+	$("#icmp_table_6").tablesorter();
 	$("#arp_table").tablesorter();
 	$("#if_stats_ndpi").tablesorter();
 	$("#if_stats_ndpi_categories").tablesorter();

@@ -1,5 +1,5 @@
 --
--- (C) 2013-18 - ntop.org
+-- (C) 2013-19 - ntop.org
 --
 
 local dirs = ntop.getDirs()
@@ -10,12 +10,12 @@ active_page = "system_stats"
 require "lua_utils"
 local page_utils = require("page_utils")
 local ts_utils = require("ts_utils")
-local system_scripts = require("system_scripts_utils")
+local plugins_utils = require("plugins_utils")
 local alert_consts = require("alert_consts")
 require("graph_utils")
 require("alert_utils")
 
-local ts_creation = system_scripts.timeseriesCreationEnabled()
+local ts_creation = plugins_utils.timeseriesCreationEnabled()
 
 if not isAllowedSystemInterface() then
    return
@@ -28,54 +28,31 @@ page_utils.print_header()
 dofile(dirs.installdir .. "/scripts/lua/inc/menu.lua")
 
 local page = _GET["page"] or "overview"
-local url = ntop.getHttpPrefix() .. "/lua/system_stats.lua?ifid=" .. getInterfaceId(ifname)
+local url = ntop.getHttpPrefix() .. "/lua/system_stats.lua?ifid="..interface.getId()
+local title = i18n("system")
 local info = ntop.getInfo()
-system_schemas = system_scripts.getAdditionalTimeseries("system")
 
-print [[
-  <nav class="navbar navbar-default" role="navigation">
-  <div class="navbar-collapse collapse">
-    <ul class="nav navbar-nav">
-]]
-
-print("<li><a href=\"#\">" .. i18n("system") .. "</a></li>\n")
-
-if((page == "overview") or (page == nil)) then
-   print("<li class=\"active\"><a href=\"#\"><i class=\"fa fa-home fa-lg\"></i></a></li>\n")
-else
-   print("<li><a href=\""..url.."&page=overview\"><i class=\"fa fa-home fa-lg\"></i></a></li>")
-end
-
-if ts_creation then
-   if(ts_utils.exists("process:resident_memory", {ifid=getSystemInterfaceId()})) then
-      if(page == "historical") then
-	 print("<li class=\"active\"><a href=\""..url.."&page=historical\"><i class='fa fa-area-chart fa-lg'></i></a></li>")
-      else
-	 print("<li><a href=\""..url.."&page=historical\"><i class='fa fa-area-chart fa-lg'></i></a></li>")
-      end
-   end
-end
-
-if(isAdministrator() and areAlertsEnabled()) then
-   if(page == "alerts") then
-      print("\n<li class=\"active\"><a href=\"#\">")
-   elseif not is_pcap_dump then
-      print("\n<li><a href=\""..url.."&page=alerts\">")
-   end
-
-   if not is_pcap_dump then
-      print("<i class=\"fa fa-warning fa-lg\"></i></a>")
-      print("</li>")
-   end
-end
-
-print [[
-<li><a href="javascript:history.go(-1)"><i class='fa fa-reply'></i></a></li>
-</ul>
-</div>
-</nav>
-
-   ]]
+page_utils.print_navbar(title, url,
+			{
+			   {
+			      active = page == "overview" or not page,
+			      page_name = "overview",
+			      label = "<i class=\"fas fa-home fa-lg\"></i>",
+			   },
+			   {
+			      hidden = not ts_creation or not ts_utils.exists("process:resident_memory", {ifid=getSystemInterfaceId()}),
+			      active = page == "historical",
+			      page_name = "historical",
+			      label = "<i class='fas fa-lg fa-chart-area'></i>",
+			   },
+			   {
+			      hidden = interface.isPcapDumpInterface() or not isAdministrator() or not areAlertsEnabled(),
+			      active = page == "alerts",
+			      page_name = "alerts",
+			      label = "<i class=\"fas fa-exclamation-triangle fa-lg\"></i>",
+			   },
+			}
+)
 
 -- #######################################################
 
@@ -115,34 +92,34 @@ if(page == "overview") then
 
       local storage_items = {}
 
-      local classes = { "primary", "info", "warning", "success", "default" }
+      local classes = { "primary", "info", "warning", "success", "secondary" }
       local colors = { "blue", "salmon", "seagreen", "cyan", "green", "magenta", "orange", "red", "violet" }
 
       -- interfaces
       local col = 1
       local num_items = 0
       for if_id, if_info in pairs(storage_info.interfaces) do
-         local item = {
-            title = getInterfaceName(if_id),
-            value = if_info.total,
-            link = ntop.getHttpPrefix() .. "/lua/if_stats.lua?ifid=" .. if_id
-         }
-         if num_items < #classes then
-            item.class = classes[num_items+1]
-         else
-            item.style = "background-image: linear-gradient(to bottom, "..colors[col].." 0%, dark"..colors[col].." 100%)"
-            col = col + 1
-            if col > #colors then col = 1 end
-         end
-         table.insert(storage_items, item)
-         num_items = num_items + 1
+	 local item = {
+	    title = getInterfaceName(if_id),
+	    value = if_info.total,
+	    link = ntop.getHttpPrefix() .. "/lua/if_stats.lua?ifid=" .. if_id
+	 }
+	 if num_items < #classes then
+	    item.class = classes[num_items+1]
+	 else
+	    item.style = "background-image: linear-gradient(to bottom, "..colors[col].." 0%, dark"..colors[col].." 100%)"
+	    col = col + 1
+	    if col > #colors then col = 1 end
+	 end
+	 table.insert(storage_items, item)
+	 num_items = num_items + 1
       end
 
       -- system
       local item = {
-         title = i18n("system"),
-         value = storage_info.other,
-         link = ""
+	 title = i18n("system"),
+	 value = storage_info.other,
+	 link = ""
       }
       item.style = "background-image: linear-gradient(to bottom, grey 0%, darkgrey 100%)"
       table.insert(storage_items, item)
@@ -153,41 +130,41 @@ if(page == "overview") then
       print("</td></tr>\n")
 
       if storage_info.pcap_volume_dev ~= nil then
-         storage_items = {}
+	 storage_items = {}
 
-         -- interfaces
-         col = 1
-         num_items = 0
-         for if_id, if_info in pairs(storage_info.interfaces) do
-            local item = {
-               title = getInterfaceName(if_id),
-               value = if_info.pcap,
-               link = ntop.getHttpPrefix() .. "/lua/if_stats.lua?ifid=" .. if_id
-            }
-            if num_items < #classes then
-               item.class = classes[num_items+1]
-            else
-               item.style = "background-image: linear-gradient(to bottom, "..colors[col].." 0%, dark"..colors[col].." 100%)"
-               col = col + 1
-               if col > #colors then col = 1 end
-            end
-            table.insert(storage_items, item)
-            num_items = num_items + 1
-         end
+	 -- interfaces
+	 col = 1
+	 num_items = 0
+	 for if_id, if_info in pairs(storage_info.interfaces) do
+	    local item = {
+	       title = getInterfaceName(if_id),
+	       value = if_info.pcap,
+	       link = ntop.getHttpPrefix() .. "/lua/if_stats.lua?ifid=" .. if_id
+	    }
+	    if num_items < #classes then
+	       item.class = classes[num_items+1]
+	    else
+	       item.style = "background-image: linear-gradient(to bottom, "..colors[col].." 0%, dark"..colors[col].." 100%)"
+	       col = col + 1
+	       if col > #colors then col = 1 end
+	    end
+	    table.insert(storage_items, item)
+	    num_items = num_items + 1
+	 end
 
-         -- system
-         local item = {
-            title = i18n("system"),
-            value = storage_info.pcap_other,
-            link = ""
-         }
-         item.style = "background-image: linear-gradient(to bottom, grey 0%, darkgrey 100%)"
-         table.insert(storage_items, item)
+	 -- system
+	 local item = {
+	    title = i18n("system"),
+	    value = storage_info.pcap_other,
+	    link = ""
+	 }
+	 item.style = "background-image: linear-gradient(to bottom, grey 0%, darkgrey 100%)"
+	 table.insert(storage_items, item)
 
-         print("<tr><th>"..i18n("traffic_recording.storage_utilization_pcap").."</th><td>")
-         print("<span>"..i18n("volume")..": "..dirs.workingdir.." ("..storage_info.pcap_volume_dev..")</span><br />")
-         print(stackedProgressBars(storage_info.pcap_volume_size, storage_items, i18n("available"), bytesToSize))
-         print("</td></tr>\n")     
+	 print("<tr><th>"..i18n("traffic_recording.storage_utilization_pcap").."</th><td>")
+	 print("<span>"..i18n("volume")..": "..dirs.workingdir.." ("..storage_info.pcap_volume_dev..")</span><br />")
+	 print(stackedProgressBars(storage_info.pcap_volume_size, storage_items, i18n("available"), bytesToSize))
+	 print("</td></tr>\n")
       end
    end
 
@@ -195,7 +172,7 @@ if(page == "overview") then
    for i=0,32 do
        msg = ntop.listIndexCache("ntopng.trace", i)
        if(msg ~= nil) then
-          print(noHtml(msg).."<br>\n")
+	  print(noHtml(msg).."<br>\n")
        end
    end
    print("</code></td></tr>\n")
@@ -208,13 +185,13 @@ elseif(page == "historical" and ts_creation) then
    url = url.."&page=historical"
 
    drawGraphs(getSystemInterfaceId(), schema, tags, _GET["zoom"], url, selected_epoch, {
-      timeseries = table.merge({
+      timeseries = {
 	    {schema="system:cpu_load",            label=i18n("about.cpu_load"), metrics_labels = {i18n("about.cpu_load")}, value_formatter = {"ffloat"}},
 	    {schema="process:resident_memory",    label=i18n("graphs.process_memory")},
-      }, system_schemas)
+      }
    })
 elseif((page == "alerts") and isAdministrator()) then
-   local old_ifname = ifname
+   local cur_id = interface.getId()
    interface.select(getSystemInterfaceId())
 
    _GET["ifid"] = getSystemInterfaceId()
@@ -224,7 +201,7 @@ elseif((page == "alerts") and isAdministrator()) then
 
    drawAlerts()
 
-   interface.select(old_ifname)
+   interface.select(tostring(cur_id))
 end
 
 -- #######################################################

@@ -1076,7 +1076,7 @@ bool NetworkInterface::processPacket(u_int32_t bridge_iface_idx,
 				     Flow **hostFlow) {
   u_int16_t trusted_ip_len = max_val(0, (int)h->caplen - ip_offset);
   u_int16_t trusted_payload_len = 0;
-  bool src2dst_direction, is_sent_packet = false; /* FIX */
+  bool src2dst_direction;
   u_int8_t l4_proto;
   Flow *flow;
   Mac *srcMac = NULL, *dstMac = NULL;
@@ -1368,23 +1368,7 @@ bool NetworkInterface::processPacket(u_int32_t bridge_iface_idx,
 	u_int8_t icmp_type = l4[0];
 	u_int8_t icmp_code = l4[1];
 
-	if((flow->get_cli_host() && flow->get_cli_host()->isLocalHost())
-	   && (flow->get_srv_host() && flow->get_srv_host()->isLocalHost())) {
-	  /* Set correct direction in localhost ping */
-	  if((icmp_type == ICMP_ECHO /* ICMP Echo [RFC792] */)
-	     || (icmp_type == 128 /* 128 - ICMPV6 Echo Request [RFC4443] */))
-	    src2dst_direction = true;
-	  else if((icmp_type == ICMP_ECHOREPLY /* ICMP Echo Reply [RFC792] */)
-		  || (icmp_type == 129 /* 129 - ICMPV6 Echo Reply [RFC4443] */))
-	    src2dst_direction = false;
-	}
-
         flow->setICMP(src2dst_direction, icmp_type, icmp_code, l4);
-	if(l4_proto == IPPROTO_ICMP)
-	  icmp_v4.incStats(icmp_type, icmp_code, is_sent_packet, NULL);
-	else
-	  icmp_v6.incStats(icmp_type, icmp_code, is_sent_packet, NULL);
-
 	flow->setICMPPayloadSize(trusted_l4_packet_len);
       }
       break;
@@ -1434,11 +1418,10 @@ bool NetworkInterface::processPacket(u_int32_t bridge_iface_idx,
   }
 
   if(flow->isDetectionCompleted()
-     && (!isSampledTraffic())
-     && flow->get_cli_host() && flow->get_srv_host()) {
+     && (!isSampledTraffic())) {
     switch(ndpi_get_lower_proto(flow->get_detected_protocol())) {
     case NDPI_PROTOCOL_DHCP:
-      {
+      if(*srcHost) {
 	Mac *mac = (*srcHost)->getMac(), *payload_cli_mac;
 
 	if(mac && (trusted_payload_len > 240)) {
@@ -1507,7 +1490,7 @@ bool NetworkInterface::processPacket(u_int32_t bridge_iface_idx,
       break;
 
     case NDPI_PROTOCOL_DHCPV6:
-      {
+      if(*srcHost && *dstHost){
 	Mac *src_mac = (*srcHost)->getMac();
 	Mac *dst_mac = (*dstHost)->getMac();
 
@@ -1519,41 +1502,7 @@ bool NetworkInterface::processPacket(u_int32_t bridge_iface_idx,
       break;
 
     case NDPI_PROTOCOL_NETBIOS:
-      if(*srcHost) {
-	if(! (*srcHost)->is_label_set()) {
-	  char name[64];
-
-	  if(((payload[2] & 0x80) /* NetBIOS Response */ || ((payload[2] & 0x78) == 0x28 /* NetBIOS Registration */))
-	     && (ndpi_netbios_name_interpret((char*)&payload[12], name, sizeof(name)) > 0)
-	     && (!strstr(name, "__MSBROWSE__"))
-	     ) {
-
-	    if(name[0] == '*') {
-	      int limit = min_val(trusted_payload_len-57, (int)sizeof(name)-1);
-	      int i = 0;
-
-	      while((i<limit) && (payload[57+i] != 0x20) && isprint(payload[57+i])) {
-	        name[i] = payload[57+i];
-	        i++;
-	      }
-
-	      if((i<limit) && (payload[57+i] != 0x00 /* Not a Workstation/Redirector */))
-	        name[0] = '\0'; /* ignore */
-	      else
-	        name[i] = '\0';
-	    }
-#if 0
-	    char buf[32];
-
-	    ntop->getTrace()->traceEvent(TRACE_NORMAL, "Setting hostname from NetBios [raw=0x%x opcode=0x%x response=0x%x]: ip=%s -> '%s'",
-					 payload[2], (payload[2] & 0x78) >> 3, (payload[2] & 0x80) >> 7,
-					 (*srcHost)->get_ip()->print(buf, sizeof(buf)), name);
-#endif
-	    if(name[0])
-	      (*srcHost)->set_host_label(name, true);
-	  }
-	}
-      }
+      flow->dissectNetBIOS(payload, trusted_payload_len);
       break;
 
     case NDPI_PROTOCOL_BITTORRENT:
@@ -1580,28 +1529,11 @@ bool NetworkInterface::processPacket(u_int32_t bridge_iface_idx,
 	Make sure only non-zero-payload segments are processed.
       */
       if((trusted_payload_len > 0) && payload) {
+	flow->dissectDNS(src2dst_direction, (char*)payload, trusted_payload_len);
 	/*
 	  DNS-over-TCP has a 2-bytes field with DNS payload length
 	  at the beginning. See RFC1035 section 4.2.2. TCP usage.
 	*/
-	if(flow->get_cli_host() && flow->get_srv_host()) {
-	  Host *client = src2dst_direction ? flow->get_cli_host() : flow->get_srv_host();
-	  Host *server = src2dst_direction ? flow->get_srv_host() : flow->get_cli_host();
-
-	  /*
-	    Inside the DNS packet it is possible to have multiple queries
-	    and mix query types. In general this is not a practice followed
-	    by applications.
-	  */
-
-	  if(flow->isDNSQuery()) {
-	    u_int16_t query_type = flow->getLastQueryType();
-	    client->incNumDNSQueriesSent(query_type), server->incNumDNSQueriesRcvd(query_type);
-	  } else {
-	    u_int8_t ret_code = flow->getDNSRetCode();
-	    client->incNumDNSResponsesSent(ret_code), server->incNumDNSResponsesRcvd(ret_code);
-	  }
-	}
       }
 
       break;
@@ -1618,11 +1550,6 @@ bool NetworkInterface::processPacket(u_int32_t bridge_iface_idx,
 
       if(discovery && iph)
 	discovery->queueMDNSRespomse(iph->saddr, payload, trusted_payload_len);
-      break;
-
-    case NDPI_PROTOCOL_DROPBOX:
-      if((src_port == dst_port) && (dst_port == htons(17500)))
-	flow->get_cli_host()->dissectDropbox((const char *)payload, trusted_payload_len);
       break;
 
     case NDPI_PROTOCOL_TLS:
@@ -1915,7 +1842,13 @@ decode_packet_eth:
 	    /* Unknown encapsulation */
 	  }
 	}
-
+      } else if(ntop->getGlobals()->decode_tunnels()
+		&& iph->protocol == IPPROTO_IPV6
+		&& h->caplen >= ip_offset + ip_len + sizeof(struct ndpi_ipv6hdr)) {
+	/* Detunnel 6in4 tunnel */
+	ip_offset += ip_len;
+	eth_type = ETHERTYPE_IPV6;
+	goto decode_packet_eth;
       } else if(ntop->getGlobals()->decode_tunnels() && (iph->protocol == IPPROTO_UDP)
 		&& ((frag_off & 0x3FFF /* IP_MF | IP_OFFSET */ ) == 0)) {
 	struct ndpi_udphdr *udp = (struct ndpi_udphdr *)&packet[ip_offset+ip_len];
@@ -2605,7 +2538,8 @@ bool NetworkInterface::checkPeriodicStatsUpdateTime(const struct timeval *tv) {
   float diff = Utils::msTimevalDiff(tv, &last_periodic_stats_update) / 1000;
 
   if(diff < 0 /* Need a reset */
-     || diff >= periodicStatsUpdateFrequency()) {
+     || diff >= periodicStatsUpdateFrequency()
+     || read_from_pcap_dump_done()) {
     memcpy(&last_periodic_stats_update, tv, sizeof(last_periodic_stats_update));
     return true;
   }
@@ -2622,7 +2556,7 @@ u_int32_t NetworkInterface::periodicStatsUpdateFrequency() const {
 /* **************************************************** */
 
 void NetworkInterface::periodicUpdateInitTime(struct timeval *tv) const {
-  if(!read_from_pcap_dump() || reproducePcapOriginalSpeed())
+  if(getIfType() != interface_type_PCAP_DUMP)
     gettimeofday(tv, NULL);
   else
     tv->tv_sec = last_pkt_rcvd, tv->tv_usec = 0;
@@ -3561,8 +3495,7 @@ static bool flow_matches(Flow *f, struct flowHostRetriever *retriever) {
     if(retriever->pag
        && retriever->pag->icmpValue(&icmp_type, &icmp_code)) {
       u_int8_t cur_type, cur_code;
-      u_int16_t cur_echo_id;
-      f->getICMP(&cur_code, &cur_type, &cur_echo_id);
+      f->getICMP(&cur_code, &cur_type);
 
       if((!f->isICMP()) || (cur_type != icmp_type) || (cur_code != icmp_code))
         return(false);
@@ -3636,10 +3569,14 @@ static bool flow_matches(Flow *f, struct flowHostRetriever *retriever) {
     /* Unicast: at least one between client and server is unicast address */
     if(retriever->pag
        && retriever->pag->unicastTraffic(&unicast)
-       && ((unicast && ((f->get_cli_ip_addr() && (f->get_cli_ip_addr()->isMulticastAddress() || f->get_cli_ip_addr()->isBroadcastAddress()))
-			|| (f->get_srv_ip_addr() && (f->get_srv_ip_addr()->isMulticastAddress() || f->get_srv_ip_addr()->isBroadcastAddress()))))
-	   || (!unicast && ((f->get_cli_ip_addr() && (!f->get_cli_ip_addr()->isMulticastAddress() && !f->get_cli_ip_addr()->isBroadcastAddress()))
-			    && (f->get_srv_ip_addr() && (!f->get_srv_ip_addr()->isMulticastAddress() && !f->get_srv_ip_addr()->isBroadcastAddress()))))))
+       && ((unicast && ((f->get_cli_ip_addr()->isMulticastAddress()
+			 || f->get_cli_ip_addr()->isBroadcastAddress()
+			 || f->get_srv_ip_addr()->isMulticastAddress()
+			 || f->get_srv_ip_addr()->isBroadcastAddress())))
+	   || (!unicast && (!f->get_cli_ip_addr()->isMulticastAddress()
+			    && !f->get_cli_ip_addr()->isBroadcastAddress()
+			    && !f->get_srv_ip_addr()->isMulticastAddress()
+			    && !f->get_srv_ip_addr()->isBroadcastAddress()))))
       return(false);
 
     /* Pool filter */
@@ -5046,12 +4983,6 @@ u_int NetworkInterface::purgeIdleHostsMacsASesVlans(bool force_idle) {
 
 /* *************************************** */
 
-void NetworkInterface::setnDPIProtocolCategory(u_int16_t protoId, ndpi_protocol_category_t protoCategory) {
-  ndpi_set_proto_category(get_ndpi_struct(), protoId, protoCategory);
-}
-
-/* *************************************** */
-
 static void guess_all_ndpi_protocols_walker(Flow *flow, NetworkInterface *iface) {
   if(iface->get_ndpi_struct() && flow->get_ndpi_flow()) {
     if(!flow->isDetectionCompleted()) {
@@ -6097,19 +6028,6 @@ void NetworkInterface::processInterfaceStats(sFlowInterfaceStats *stats) {
 
 /* **************************************** */
 
-ndpi_protocol_category_t NetworkInterface::get_ndpi_proto_category(u_int protoid) {
-  ndpi_protocol proto;
-
-  proto.app_protocol = NDPI_PROTOCOL_UNKNOWN;
-  proto.master_protocol = protoid;
-  proto.category = NDPI_PROTOCOL_CATEGORY_UNSPECIFIED;
-  return get_ndpi_proto_category(proto);
-}
-
-/* **************************************** */
-
-/* **************************************** */
-
 static bool host_reload_hide_from_top(GenericHashEntry *host, void *user_data, bool *matched) {
   Host *h = (Host*)host;
 
@@ -7102,35 +7020,6 @@ void NetworkInterface::reloadHostsBlacklist() {
   walker(&begin_slot, walk_all,  walker_hosts, host_reload_blacklist, NULL);
 }
 
-/* **************************************************** */
-
-static bool local_hosts_2_dropbox_walker(GenericHashEntry *h, void *user_data, bool *matched) {
-  Host *host = (Host*)h;
-
-  if(host && (host->getNumDropboxPeers() > 0)) {
-    lua_State *vm = (lua_State*)user_data;
-
-    host->dumpDropbox(vm);
-    *matched = true;
-  }
-
-  return(false); /* false = keep on walking */
-}
-
-/* *************************************** */
-
-int NetworkInterface::dumpDropboxHosts(lua_State *vm) {
-  int rc;
-  u_int32_t begin_slot = 0;
-
-  lua_newtable(vm);
-
-  rc = walker(&begin_slot, true /* walk_all */, walker_hosts,
-	      local_hosts_2_dropbox_walker, vm) ? 0 : -1;
-
-  return(rc);
-}
-
 /* *************************************** */
 
 static bool host_reload_dhcp_host(GenericHashEntry *host, void *user_data, bool *matched) {
@@ -7475,7 +7364,7 @@ bool NetworkInterface::dequeueFlowFromCompanion(ParsedFlow **f) {
 static void handle_entity_alerts(AlertCheckLuaEngine *acle, AlertableEntity *entity) {
   lua_State *L = acle->getState();
 
-  lua_getglobal(L,  ALERT_ENTITY_CALLBACK_CHECK_ALERTS); /* Called function */
+  lua_getglobal(L, USER_SCRIPTS_RUN_CALLBACK); /* Called function */
   lua_pushstring(L, acle->getGranularity());  /* push 1st argument */
   acle->pcall(1 /* num args */, 0);
 }
@@ -7697,7 +7586,7 @@ static bool host_release_engaged_alerts(GenericHashEntry *entity, void *user_dat
   AlertCheckLuaEngine *host_script = (AlertCheckLuaEngine *)user_data;
 
   if(host->getNumTriggeredAlerts()) {
-    lua_getglobal(host_script->getState(), ALERT_ENTITY_CALLBACK_RELEASE_ALERTS);
+    lua_getglobal(host_script->getState(), USER_SCRIPTS_RELEASE_ALERTS_CALLBACK);
     host_script->setHost(host);
     host_script->pcall(0, 0);
   }
@@ -7722,7 +7611,7 @@ void NetworkInterface::releaseAllEngagedAlerts() {
   /* Interface */
   if(getNumTriggeredAlerts()) {
     AlertCheckLuaEngine interface_script(alert_entity_interface, minute_script /* doesn't matter */, this);
-    lua_getglobal(interface_script.getState(), ALERT_ENTITY_CALLBACK_RELEASE_ALERTS);
+    lua_getglobal(interface_script.getState(), USER_SCRIPTS_RELEASE_ALERTS_CALLBACK);
     interface_script.pcall(0, 0);
   }
 
@@ -7731,7 +7620,7 @@ void NetworkInterface::releaseAllEngagedAlerts() {
     NetworkStats *stats = getNetworkStats(network_id);
 
     if(stats->getNumTriggeredAlerts()) {
-      lua_getglobal(network_script.getState(), ALERT_ENTITY_CALLBACK_RELEASE_ALERTS);
+      lua_getglobal(network_script.getState(), USER_SCRIPTS_RELEASE_ALERTS_CALLBACK);
       network_script.setNetwork(stats);
       network_script.pcall(0, 0);
     }

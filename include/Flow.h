@@ -29,21 +29,8 @@ typedef struct {
 } IPPacketStats;
 
 typedef struct {
-  u_int32_t pktRetr, pktOOO, pktLost, pktKeepAlive;
-  u_int64_t last, next;
-} TCPPacketStats;
-
-typedef struct {
   u_int64_t last, next;
 } TCPSeqNum;
-
-typedef struct {
-  u_int32_t cli2srv_packets, srv2cli_packets;
-  u_int64_t cli2srv_bytes, srv2cli_bytes;
-  u_int64_t cli2srv_goodput_bytes, srv2cli_goodput_bytes;
-  TCPPacketStats tcp_stats_s2d, tcp_stats_d2s;
-  ndpi_analyze_struct cli2srv_bytes_stats, srv2cli_bytes_stats;
-} FlowTrafficStats;
 
 class Flow : public GenericHashEntry {
  private:
@@ -74,7 +61,6 @@ class Flow : public GenericHashEntry {
 #ifdef ALERTED_FLOWS_DEBUG
   bool iface_alert_inc, iface_alert_dec;
 #endif
-  u_int16_t diff_num_http_requests;
 #ifdef NTOPNG_PRO
   bool counted_in_aggregated_flow, status_counted_in_aggregated_flow;
   bool ingress2egress_direction;
@@ -93,6 +79,7 @@ class Flow : public GenericHashEntry {
   json_object *json_info;
   ndpi_serializer *tlv_info;
   char *host_server_name, *bt_hash;
+  OperatingSystem operating_system;
 #ifdef HAVE_NEDGE
   u_int32_t last_conntrack_update; 
   u_int32_t marker;
@@ -116,6 +103,19 @@ class Flow : public GenericHashEntry {
       u_int16_t last_return_code;
       bool invalid_chars_in_query;
     } dns;
+
+    struct {
+      char *name, *name_txt, *ssid;
+      char *answer;
+    } mdns;
+
+    struct {
+      char *location;
+    } ssdp;
+
+    struct {
+      char *name;
+    } netbios;
 
     struct {
       char *client_signature, *server_signature;
@@ -142,8 +142,9 @@ class Flow : public GenericHashEntry {
     } tls;
 
     struct {
-      u_int8_t icmp_type, icmp_code;
-      u_int16_t icmp_echo_id;
+      struct {
+	u_int8_t icmp_type, icmp_code;
+      } cli2srv, srv2cli;
       u_int16_t max_icmp_payload_size;
     } icmp;
   } protos;
@@ -180,13 +181,15 @@ class Flow : public GenericHashEntry {
   
   /* Counter values at last host update */
   struct {
-    FlowTrafficStats *partial;
-    FlowTrafficStats delta;
+    PartializableFlowTrafficStats *partial;
+    PartializableFlowTrafficStats delta;
     time_t first_seen, last_seen;
   } last_db_dump;
 
   /* Lazily initialized and used by a possible view interface */
-  FlowTrafficStats *last_partial;
+  PartializableFlowTrafficStats *last_partial;
+  /* Partial used to periodically update stats out of flows */
+  PartializableFlowTrafficStats *periodic_stats_update_partial;
 
 #ifdef HAVE_NEDGE
   struct {
@@ -206,15 +209,6 @@ class Flow : public GenericHashEntry {
   float bytes_thpt_srv2cli, goodput_bytes_thpt_srv2cli;
   float pkts_thpt, pkts_thpt_cli2srv, pkts_thpt_srv2cli;
   ValueTrend bytes_thpt_trend, goodput_bytes_thpt_trend, pkts_thpt_trend;
-  //TimeSeries<float> *bytes_rate;
-  u_int64_t cli2srv_last_packets, srv2cli_last_packets,
-    prev_cli2srv_last_packets, prev_srv2cli_last_packets;
-  u_int64_t cli2srv_last_bytes, srv2cli_last_bytes,
-    cli2srv_last_goodput_bytes, srv2cli_last_goodput_bytes,
-    prev_cli2srv_last_bytes, prev_srv2cli_last_bytes,
-    prev_cli2srv_last_goodput_bytes, prev_srv2cli_last_goodput_bytes;
-
-  //  tcpFlags = tp->th_flags, tcpSeqNum = ntohl(tp->th_seq), tcpAckNum = ntohl(tp->th_ack), tcpWin = ntohs(tp->th_win);
   char* intoaV4(unsigned int addr, char* buf, u_short bufLen);
   void allocDPIMemory();
   bool checkTor(char *hostname);
@@ -222,15 +216,17 @@ class Flow : public GenericHashEntry {
   static void updatePacketStats(InterarrivalStats *stats, const struct timeval *when, bool update_iat);
   bool isReadyToBeMarkedAsIdle();
   char* printTCPflags(u_int8_t flags, char * const buf, u_int buf_len) const;
-  void update_pools_stats(const struct timeval *tv,
+  void update_pools_stats(NetworkInterface *iface,
+			  Host *cli_host, Host *srv_host,
+			  const struct timeval *tv,
 			  u_int64_t diff_sent_packets, u_int64_t diff_sent_bytes,
-			  u_int64_t diff_rcvd_packets, u_int64_t diff_rcvd_bytes);
+			  u_int64_t diff_rcvd_packets, u_int64_t diff_rcvd_bytes) const;
   void periodic_dump_check(const struct timeval *tv);
   void updateCliJA3();
   void updateSrvJA3();
   void updateHASSH(bool as_client);
   const char* cipher_weakness2str(ndpi_cipher_weakness w) const;
-  bool get_partial_traffic_stats(FlowTrafficStats **dst, FlowTrafficStats *delta, bool *first_partial) const;
+  bool get_partial_traffic_stats(PartializableFlowTrafficStats **dst, PartializableFlowTrafficStats *delta, bool *first_partial) const;
   /**
    * @brief Method to call a given lua script on the flow
    * @details This method calls a lua script on the flow if there is time, that is, when quick is false. Otherwise
@@ -280,6 +276,9 @@ class Flow : public GenericHashEntry {
   inline bool isTLS()  const { return(isProto(NDPI_PROTOCOL_TLS));  }
   inline bool isSSH()  const { return(isProto(NDPI_PROTOCOL_SSH));  }
   inline bool isDNS()  const { return(isProto(NDPI_PROTOCOL_DNS));  }
+  inline bool isMDNS() const { return(isProto(NDPI_PROTOCOL_MDNS)); }
+  inline bool isSSDP() const { return(isProto(NDPI_PROTOCOL_SSDP)); }
+  inline bool isNetBIOS() const { return(isProto(NDPI_PROTOCOL_NETBIOS)); }
   inline bool isDHCP() const { return(isProto(NDPI_PROTOCOL_DHCP)); }
   inline bool isHTTP() const { return(isProto(NDPI_PROTOCOL_HTTP)); }
   inline bool isICMP() const { return(isProto(NDPI_PROTOCOL_IP_ICMP) || isProto(NDPI_PROTOCOL_IP_ICMPV6)); }
@@ -288,9 +287,10 @@ class Flow : public GenericHashEntry {
         ((cli_host->getDeviceAllowedProtocolStatus(ndpiDetectedProtocol, true) == device_proto_allowed) &&
          (srv_host->getDeviceAllowedProtocolStatus(ndpiDetectedProtocol, false) == device_proto_allowed)));
   }
-  inline bool isMaskedFlow() {
-    return(!get_cli_host() || Utils::maskHost(get_cli_host()->isLocalHost())
-	   || !get_srv_host() || Utils::maskHost(get_srv_host()->isLocalHost()));
+  inline bool isMaskedFlow() const {
+    int16_t network_id;
+    return(Utils::maskHost(get_cli_ip_addr()->isLocalHost(&network_id))
+	   || Utils::maskHost(get_srv_ip_addr()->isLocalHost(&network_id)));
   };
   inline const char* getServerCipherClass()  const { return(isTLS() ? cipher_weakness2str(protos.tls.ja3.server_unsafe_cipher) : NULL); }
   char* serialize(bool es_json = false);
@@ -328,8 +328,8 @@ class Flow : public GenericHashEntry {
   void updateTcpFlags(const struct bpf_timeval *when,
 		      u_int8_t flags, bool src2dst_direction);
   static void incTcpBadStats(bool src2dst_direction,
-			     FlowTrafficStats *fts,
 			     Host *cli, Host *srv,
+			     NetworkInterface *iface,
 			     u_int32_t ooo_pkts, u_int32_t retr_pkts,
 			     u_int32_t lost_pkts, u_int32_t keep_alive_pkts);
   
@@ -367,7 +367,7 @@ class Flow : public GenericHashEntry {
   inline bool isThreeWayHandshakeOK()    const { return(twh_ok);                          };
   inline bool isDetectionCompleted()     const { return(detection_completed);             };
   inline bool isOneWay()                 const { return(get_packets() && (!get_packets_cli2srv() || !get_packets_srv2cli())); };
-  inline bool isBidirectional()          const { return(get_packets_cli2srv() && get_packets_cli2srv());                      };
+  inline bool isBidirectional()          const { return(get_packets_cli2srv() && get_packets_srv2cli());                      };
   inline void* get_cli_id()              const { return(cli_id);                          };
   inline void* get_srv_id()              const { return(srv_id);                          };
   inline u_int32_t get_cli_ipv4()        const { return(cli_host->get_ip()->get_ipv4());  };
@@ -380,24 +380,25 @@ class Flow : public GenericHashEntry {
   inline u_int16_t get_srv_port()        const { return(ntohs(srv_port));                 };
   inline u_int16_t get_vlan_id()         const { return(vlanId);                          };
   inline u_int8_t  get_protocol()        const { return(protocol);                        };
-  inline u_int64_t get_bytes()           const { return(stats.cli2srv_bytes+stats.srv2cli_bytes);     };
-  inline u_int64_t get_bytes_cli2srv()   const { return(stats.cli2srv_bytes);                   };
-  inline u_int64_t get_bytes_srv2cli()   const { return(stats.srv2cli_bytes);                   };
-  inline u_int64_t get_goodput_bytes()   const { return(stats.cli2srv_goodput_bytes+stats.srv2cli_goodput_bytes);     };
-  inline u_int64_t get_packets()         const { return(stats.cli2srv_packets+stats.srv2cli_packets); };
-  inline u_int64_t get_packets_cli2srv() const { return(stats.cli2srv_packets);                 };
-  inline u_int64_t get_packets_srv2cli() const { return(stats.srv2cli_packets);                 };
-  inline u_int64_t get_partial_bytes()           const { return get_partial_bytes_cli2srv() + get_partial_bytes_srv2cli();     };
-  inline u_int64_t get_partial_packets()         const { return get_partial_packets_cli2srv() + get_partial_packets_srv2cli(); };
-  inline u_int64_t get_partial_goodput_bytes()   const { return last_db_dump.delta.cli2srv_goodput_bytes + last_db_dump.delta.srv2cli_goodput_bytes;       };
-  inline u_int64_t get_partial_bytes_cli2srv()   const { return last_db_dump.delta.cli2srv_bytes;   };
-  inline u_int64_t get_partial_bytes_srv2cli()   const { return last_db_dump.delta.srv2cli_bytes;   };
-  inline u_int64_t get_partial_packets_cli2srv() const { return last_db_dump.delta.cli2srv_packets; };
-  inline u_int64_t get_partial_packets_srv2cli() const { return last_db_dump.delta.srv2cli_packets; };
+  inline u_int64_t get_bytes()           const { return(stats.get_cli2srv_bytes() + stats.get_srv2cli_bytes() );                };
+  inline u_int64_t get_bytes_cli2srv()   const { return(stats.get_cli2srv_bytes());                                             };
+  inline u_int64_t get_bytes_srv2cli()   const { return(stats.get_srv2cli_bytes());                                             };
+  inline u_int64_t get_goodput_bytes()   const { return(stats.get_cli2srv_goodput_bytes() + stats.get_srv2cli_goodput_bytes()); };
+  inline u_int64_t get_goodput_bytes_cli2srv() const { return(stats.get_cli2srv_goodput_bytes()); };
+  inline u_int64_t get_goodput_bytes_srv2cli() const { return(stats.get_srv2cli_goodput_bytes()); };
+  inline u_int64_t get_packets()         const { return(stats.get_cli2srv_packets() + stats.get_srv2cli_packets());             };
+  inline u_int32_t get_packets_cli2srv() const { return(stats.get_cli2srv_packets());                                           };
+  inline u_int32_t get_packets_srv2cli() const { return(stats.get_srv2cli_packets());                                           };
+  inline u_int64_t get_partial_bytes()           const { return get_partial_bytes_cli2srv() + get_partial_bytes_srv2cli();      };
+  inline u_int64_t get_partial_packets()         const { return get_partial_packets_cli2srv() + get_partial_packets_srv2cli();  };
+  inline u_int64_t get_partial_goodput_bytes()   const { return last_db_dump.delta.get_cli2srv_goodput_bytes() + last_db_dump.delta.get_srv2cli_goodput_bytes();       };
+  inline u_int64_t get_partial_bytes_cli2srv()   const { return last_db_dump.delta.get_cli2srv_bytes();   };
+  inline u_int64_t get_partial_bytes_srv2cli()   const { return last_db_dump.delta.get_srv2cli_bytes();   };
+  inline u_int64_t get_partial_packets_cli2srv() const { return last_db_dump.delta.get_cli2srv_packets(); };
+  inline u_int64_t get_partial_packets_srv2cli() const { return last_db_dump.delta.get_srv2cli_packets(); };
   bool needsExtraDissection();
   bool hasDissectedTooManyPackets();
-  bool get_partial_traffic_stats_view(FlowTrafficStats *delta, bool *first_partial);
-  inline FlowTrafficStats * getFlowTrafficStats() { return &stats; };
+  bool get_partial_traffic_stats_view(PartializableFlowTrafficStats *delta, bool *first_partial);
   bool update_partial_traffic_stats_db_dump();
   inline float get_bytes_thpt()          const { return(bytes_thpt);                      };
   inline float get_goodput_bytes_thpt()  const { return(goodput_bytes_thpt);              };
@@ -449,6 +450,7 @@ class Flow : public GenericHashEntry {
   void set_hash_entry_state_idle();
   bool is_hash_entry_state_idle_transition_ready() const;
   void periodic_hash_entry_state_update(void *user_data, bool quick);
+  void hosts_periodic_stats_update(NetworkInterface *iface, Host *cli_host, Host *srv_host, PartializableFlowTrafficStats *partial, bool first_partial, const struct timeval *tv) const;
   void periodic_stats_update(void *user_data, bool quick);
   void  set_hash_entry_id(u_int assigned_hash_entry_id);
   u_int get_hash_entry_id() const;
@@ -464,7 +466,6 @@ class Flow : public GenericHashEntry {
   void lua_get_min_info(lua_State* vm);
   void lua_duration_info(lua_State* vm);
   void lua_device_protocol_allowed_info(lua_State *vm);
-  void lua_get_icmp_info(lua_State *vm) const;
   void lua_get_tcp_stats(lua_State *vm) const;
 
   void lua_get_unicast_info(lua_State* vm) const;
@@ -495,24 +496,37 @@ class Flow : public GenericHashEntry {
   bool dumpFlow(const struct timeval *tv, NetworkInterface *dumper);
   bool match(AddressTree *ptree);
   void dissectHTTP(bool src2dst_direction, char *payload, u_int16_t payload_len);
+  void dissectDNS(bool src2dst_direction, char *payload, u_int16_t payload_len);
   void dissectTLS(char *payload, u_int16_t payload_len);
   void dissectSSDP(bool src2dst_direction, char *payload, u_int16_t payload_len);
   void dissectMDNS(u_int8_t *payload, u_int16_t payload_len);
+  void dissectNetBIOS(u_int8_t *payload, u_int16_t payload_len);
   void dissectBittorrent(char *payload, u_int16_t payload_len);
   void updateInterfaceLocalStats(bool src2dst_direction, u_int num_pkts, u_int pkt_len);
-  void fillZmqFlowCategory();
+  void fillZmqFlowCategory(const ParsedFlow *zflow, ndpi_protocol *res) const;
   inline void setICMP(bool src2dst_direction, u_int8_t icmp_type, u_int8_t icmp_code, u_int8_t *icmpdata) {
     if(isICMP()) {
-      protos.icmp.icmp_type = icmp_type, protos.icmp.icmp_code = icmp_code;
-      if(get_cli_host()) get_cli_host()->incICMP(icmp_type, icmp_code, src2dst_direction ? true : false, get_srv_host());
-      if(get_srv_host()) get_srv_host()->incICMP(icmp_type, icmp_code, src2dst_direction ? false : true, get_cli_host());
-      protos.icmp.icmp_echo_id = ntohs(*((u_int16_t*)&icmpdata[4]));
+      if(src2dst_direction)
+	protos.icmp.cli2srv.icmp_type = icmp_type, protos.icmp.cli2srv.icmp_code = icmp_code;
+      else	
+	protos.icmp.srv2cli.icmp_type = icmp_type, protos.icmp.srv2cli.icmp_code = icmp_code;
+      // if(get_cli_host()) get_cli_host()->incICMP(icmp_type, icmp_code, src2dst_direction ? true : false, get_srv_host());
+      // if(get_srv_host()) get_srv_host()->incICMP(icmp_type, icmp_code, src2dst_direction ? false : true, get_cli_host());
     }
   }
-  inline void getICMP(u_int8_t *_icmp_type, u_int8_t *_icmp_code, u_int16_t *_icmp_echo_id) {
-    *_icmp_type = protos.icmp.icmp_type, *_icmp_code = protos.icmp.icmp_code, *_icmp_echo_id = protos.icmp.icmp_echo_id;
+  inline void getICMP(u_int8_t *_icmp_type, u_int8_t *_icmp_code) {
+    if(isBidirectional())
+      *_icmp_type = protos.icmp.srv2cli.icmp_type, *_icmp_code = protos.icmp.srv2cli.icmp_code;
+    else
+      *_icmp_type = protos.icmp.cli2srv.icmp_type, *_icmp_code = protos.icmp.cli2srv.icmp_code;
   }
-  inline u_int8_t getICMPType()     { return(isICMP() ? protos.icmp.icmp_type : 0); }
+  inline u_int8_t getICMPType() {
+    if(isICMP()) {
+      return isBidirectional() ? protos.icmp.srv2cli.icmp_type : protos.icmp.cli2srv.icmp_type;
+    }
+
+    return 0;
+  }
   inline bool hasInvalidDNSQueryChars() { return(isDNS() && protos.dns.invalid_chars_in_query); }
   inline bool hasMaliciousSignature() { return(has_malicious_cli_signature || has_malicious_srv_signature); }
   inline bool shouldCheckTLSCertificate() { return(isTLS() && !protos.tls.subject_alt_name_match
@@ -523,7 +537,6 @@ class Flow : public GenericHashEntry {
   inline void  setDNSRetCode(u_int16_t c) { if(isDNS()) { protos.dns.last_return_code = c; } }
   inline u_int16_t getLastQueryType() { return(isDNS() ? protos.dns.last_query_type : 0); }
   inline u_int16_t getDNSRetCode()  { return(isDNS() ? protos.dns.last_return_code : 0); }
-  inline bool  isDNSQuery()         { return(isDNS() && ndpiFlow && ndpiFlow->protos.dns.is_query); }
   inline char* getHTTPURL()         { return(isHTTP() ? protos.http.last_url : (char*)"");   }
   inline void  setHTTPURL(char *v)  { if(isHTTP()) { if(protos.http.last_url) free(protos.http.last_url);  protos.http.last_url = v; } }
   inline void  setHTTPMethod(char *v)  { if(isHTTP()) { if(protos.http.last_method) free(protos.http.last_method);  protos.http.last_method = v; } }

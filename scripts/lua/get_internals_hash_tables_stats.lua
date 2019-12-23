@@ -144,7 +144,7 @@ for key, _ in pairsByValues(sort_to_key, sOrder) do
       local idle_perc = idle_entries * 100 / (idle_entries + active_entries + 1)
 
       if(idle_perc >= 50) then
-         warn = "<i class=\"fa fa-warning fa-lg\" title=\"".. i18n("internals.high_idle_entries") .."\" style=\"color: #f0ad4e;\"></i> "
+         warn = "<i class=\"fas fa-exclamation-triangle fa-lg\" title=\"".. i18n("internals.high_idle_entries") .."\" style=\"color: #f0ad4e;\"></i> "
       end
 
       record["column_key"] = key
@@ -157,7 +157,7 @@ for key, _ in pairsByValues(sort_to_key, sOrder) do
 
       if iffilter then
 	 if ts_utils.exists("ht:state", {ifid = iffilter, hash_table = htstats.ht}) then
-	    record["column_chart"] = '<A HREF=\"'..ntop.getHttpPrefix()..'/lua/hash_table_details.lua?hash_table='..htstats.ht..'\"><i class=\'fa fa-area-chart fa-lg\'></i></A>'
+	    record["column_chart"] = '<A HREF=\"'..ntop.getHttpPrefix()..'/lua/hash_table_details.lua?hash_table='..htstats.ht..'\"><i class=\'fas fa-chart-area fa-lg\'></i></A>'
 	 end
       end
 
@@ -165,7 +165,7 @@ for key, _ in pairsByValues(sort_to_key, sOrder) do
       if active_entries > 0 or idle_entries > 0 then
 	 local utiliz = hash_table_utilization(htstats)
 
-	 record["column_hash_table_utilization"] = internals_utils.getDoubleFillBar(utiliz["active_vs_max"], utiliz["idle_vs_max"], utiliz["free"])
+	 record["column_hash_table_utilization"] = internals_utils.getHashTablesFillBar(utiliz["active_vs_max"], utiliz["idle_vs_max"], utiliz["free"])
       end
 
       res[#res + 1] = record

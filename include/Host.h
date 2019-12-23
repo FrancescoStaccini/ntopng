@@ -59,7 +59,6 @@ class Host : public GenericHashEntry, public AlertableEntity {
   AlertCounter *flow_flood_attacker_alert, *flow_flood_victim_alert;
   u_int32_t syn_sent_last_min, synack_recvd_last_min; /* syn scan counters (attacker) */
   u_int32_t syn_recvd_last_min, synack_sent_last_min; /* syn scan counters (victim) */
-  std::vector<u_int32_t> dropbox_namespaces;
   MonitoredGauge<u_int32_t> num_active_flows_as_client, num_active_flows_as_server;
   u_int32_t asn;
   AutonomousSystem *as;
@@ -156,11 +155,13 @@ class Host : public GenericHashEntry, public AlertableEntity {
     if(keep_alive_pkts) stats->incKeepAliveRcvd(keep_alive_pkts);
   }
 
-  inline void incSentStats(u_int pkt_len)           { stats->incSentStats(pkt_len);          };
-  inline void incRecvStats(u_int pkt_len)           { stats->incRecvStats(pkt_len);          };
+  inline void incSentStats(u_int num_pkts, u_int pkt_len)  { stats->incSentStats(num_pkts, pkt_len); };
+  inline void incRecvStats(u_int num_pkts, u_int pkt_len)  { stats->incRecvStats(num_pkts, pkt_len); };
   
   virtual int16_t get_local_network_id() const = 0;
   virtual HTTPstats* getHTTPstats()           const { return(NULL);                  };
+  virtual DnsStats*  getDNSstats()            const { return(NULL);                  };
+  virtual ICMPstats* getICMPstats()           const { return(NULL);                  };
   inline void set_ipv4(u_int32_t _ipv4)             { ip.set(_ipv4);                 };
   inline void set_ipv6(struct ndpi_in6_addr *_ipv6) { ip.set(_ipv6);                 };
   inline u_int32_t key()                            { return(ip.key());              };
@@ -221,7 +222,6 @@ class Host : public GenericHashEntry, public AlertableEntity {
   void periodic_hash_entry_state_update(void *user_data, bool quick);
   void periodic_stats_update(void *user_data, bool quick);
 
-  virtual void incICMP(u_int8_t icmp_type, u_int8_t icmp_code, bool sent, Host *peer) {};
   virtual void lua(lua_State* vm, AddressTree * ptree, bool host_details,
 	   bool verbose, bool returnHost, bool asListElement);
 
@@ -282,12 +282,8 @@ class Host : public GenericHashEntry, public AlertableEntity {
   inline void incnDPIFlows(u_int16_t l7_protocol)    { if(stats) stats->incnDPIFlows(l7_protocol); }
  
   inline void incFlagStats(bool as_client, u_int8_t flags)  { stats->incFlagStats(as_client, flags); };
-  virtual void incNumDNSQueriesSent(u_int16_t query_type) { };
-  virtual void incNumDNSQueriesRcvd(u_int16_t query_type) { };
-  virtual void incNumDNSResponsesSent(u_int32_t ret_code) { };
-  virtual void incNumDNSResponsesRcvd(u_int32_t ret_code) { };
-  virtual void luaHTTP(lua_State *vm) const { };
-  virtual void luaDNS(lua_State *vm) const { };
+  virtual void luaHTTP(lua_State *vm)              const { };
+  virtual void luaDNS(lua_State *vm, bool verbose) const { };
   virtual void luaICMP(lua_State *vm, bool isV4, bool verbose) const    { };
   virtual void luaTCP(lua_State *vm) const { };
   virtual u_int16_t getNumActiveContactsAsClient() const  { return 0; };
@@ -339,16 +335,13 @@ class Host : public GenericHashEntry, public AlertableEntity {
   void checkBroadcastDomain();
   bool hasAnomalies() const;
   void housekeepAlerts(ScriptPeriodicity p);
-  inline u_int getNumDropboxPeers()                      { return(dropbox_namespaces.size()); };
   virtual void inlineSetOSDetail(const char *detail) { }
   virtual const char* getOSDetail(char * const buf, ssize_t buf_len);
-  void inlineSetSSDPLocation(const char * const url);
-  void inlineSetMDNSInfo(char * const s);
-  void inlineSetMDNSName(const char * const n);
-  void inlineSetMDNSTXTName(const char * const n);
+  void offlineSetSSDPLocation(const char * const url);
+  void offlineSetMDNSInfo(char * const s);
+  void offlineSetMDNSName(const char * const n);
+  void offlineSetMDNSTXTName(const char * const n);
   void setResolvedName(const char * const resolved_name);
-  void dissectDropbox(const char *payload, u_int16_t payload_len);
-  void dumpDropbox(lua_State *vm);
   inline Fingerprint* getJA3Fingerprint()   { return(&fingerprints.ja3);   }
   inline Fingerprint* getHASSHFingerprint() { return(&fingerprints.hassh); }
   virtual void setFlowPort(bool as_server, Host *peer, u_int8_t protocol,

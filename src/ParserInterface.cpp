@@ -268,13 +268,13 @@ void ParserInterface::processFlow(ParsedFlow *zflow) {
       flow->setTcpFlags(zflow->tcp.tcp_flags, src2dst_direction);
 
     Flow::incTcpBadStats(true,
-			 flow->getFlowTrafficStats(),
 			 flow->get_cli_host(), flow->get_srv_host(),
+			 this,
 			 zflow->tcp.ooo_in_pkts, zflow->tcp.retr_in_pkts,
 			 zflow->tcp.lost_in_pkts, 0 /* TODO: add keepalive */);
     Flow::incTcpBadStats(false,
-			 flow->getFlowTrafficStats(),
 			 flow->get_cli_host(), flow->get_srv_host(),
+			 this,
 			 zflow->tcp.ooo_out_pkts, zflow->tcp.retr_out_pkts,
 			 zflow->tcp.lost_out_pkts, 0 /* TODO: add keepalive */);
   }
@@ -310,8 +310,32 @@ void ParserInterface::processFlow(ParsedFlow *zflow) {
   p.app_protocol = zflow->l7_proto.app_protocol, p.master_protocol = zflow->l7_proto.master_protocol;
   p.category = NDPI_PROTOCOL_CATEGORY_UNSPECIFIED;
 
-  if(!flow->isDetectionCompleted())
+  if(!flow->isDetectionCompleted()) {
+    ndpi_protocol guessed_protocol = Flow::ndpiUnknownProtocol;
+    u_int8_t is_proto_user_defined;
+
+    /* First, there's an attempt to guess the protocol so that custom protocols
+       defined in ntopng will still be applied to the protocols detected by nprobe. */
+    guessed_protocol.app_protocol = (int16_t)ndpi_guess_protocol_id(get_ndpi_struct(),
+								   NULL, flow->get_protocol(),
+								   flow->get_cli_port(),
+								   flow->get_srv_port(),
+								   &is_proto_user_defined);
+    if(guessed_protocol.app_protocol >= NDPI_MAX_SUPPORTED_PROTOCOLS) {
+      /* If the protocol is greater than NDPI_MAX_SUPPORTED_PROTOCOLS, it means it is
+         a custom protocol so the application protocol received from nprobe can be
+         overridden */
+      p.app_protocol = guessed_protocol.app_protocol;
+    }
+
+    /* Now, depending on the q and on the zflow, there's an additional check
+       to possibly override the category, according to the rules specified
+       in ntopng */
+    flow->fillZmqFlowCategory(zflow, &p);
+
+    /* Here everything is setup and it is possible to set the actual protocol to the flow */
     flow->setDetectedProtocol(p, true);
+  }
 
   flow->setJSONInfo(zflow->getAdditionalFieldsJSON());
   flow->setTLVInfo(zflow->getAdditionalFieldsTLV());
@@ -372,9 +396,6 @@ void ParserInterface::processFlow(ParsedFlow *zflow) {
     json_object *o = json_tokener_parse_verbose(zflow->external_alert, &jerr);
     if(o) flow->setExternalAlert(o);
   }
-
-  // NOTE: fill the category only after the server name is set
-  flow->fillZmqFlowCategory();
 
   /* Do not put incStats before guessing the flow protocol */
   incStats(true /* ingressPacket */,

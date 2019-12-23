@@ -1,5 +1,5 @@
 --
--- (C) 2017-18 - ntop.org
+-- (C) 2017-19 - ntop.org
 --
 
 dirs = ntop.getDirs()
@@ -262,12 +262,12 @@ local ifstats = interface.getStats()
 print [[
 
   <ul id="hostPoolsNav" class="nav nav-tabs" role="tablist">
-    <li><a data-toggle="tab" role="tab" href="#manage">]] print(i18n("host_pools.manage_pools")) print[[</a></li>
-    <li><a data-toggle="tab" role="tab" href="#create">]] print(i18n("host_pools.create_pools")) print[[</a></li>
+    <li class="nav-item"><a class="nav-link" data-toggle="tab" role="tab" href="#manage">]] print(i18n("host_pools.manage_pools")) print[[</a></li>
+    <li class="nav-item"><a class="nav-link" data-toggle="tab" role="tab" href="#create">]] print(i18n("host_pools.create_pools")) print[[</a></li>
 ]]
 
 if ifstats.has_macs then
-  print[[<li><a data-toggle="tab" role="tab" href="#unassigned">]] print(i18n("unknown_devices.unassigned_devices")) print[[</a></li>]]
+  print[[<li class="nav-item"><a class="nav-link" data-toggle="tab" role="tab" href="#unassigned">]] print(i18n("unknown_devices.unassigned_devices")) print[[</a></li>]]
 end
 
 print[[
@@ -285,7 +285,7 @@ local no_pools = (#available_pools <= 1)
 
 if selected_pool.id ~= host_pools_utils.DEFAULT_POOL_ID then
     if ntop.getCache("ntopng.prefs.host_pools_rrd_creation") == "1" and ts_utils.exists("host_pool:traffic", {ifid=ifId, pool=selected_pool.id}) then
-      print("&nbsp; <a href='"..ntop.getHttpPrefix().."/lua/pool_details.lua?pool="..selected_pool.id.."&page=historical' title='Chart'><i class='fa fa-area-chart'></i></a>")
+      print("&nbsp; <a href='"..ntop.getHttpPrefix().."/lua/pool_details.lua?pool="..selected_pool.id.."&page=historical' title='Chart'><i class='fas fa-chart-area'></i></a>")
     end
 end
 
@@ -306,8 +306,8 @@ if members_filtering ~= nil then
       <input type="hidden" name="ifid" value="]] print(ifId.."") print[[" />
       <input type="hidden" name="page" value="pools" />
       <input type="hidden" name="pool" value="]] print(selected_pool.id) print[[" />
-      <button type="button" class="btn btn-default btn-sm" onclick="$(this).closest('form').submit();">
-        <i class="fa fa-close fa-lg" aria-hidden="true" data-original-title="" title=""></i> ]] print(formatMemberFilter()) print[[
+      <button type="button" class="btn btn-secondary btn-sm" onclick="$(this).closest('form').submit();">
+        <i class="fas fa-times fa-lg" aria-hidden="true" data-original-title="" title=""></i> ]] print(formatMemberFilter()) print[[
       </button>
     </form>
   </td>
@@ -365,7 +365,7 @@ end
   end
 
 print[[
-      <button id="emptyPoolButton" class="btn btn-default" onclick="$('#empty_pool_dialog').modal('show');" style="float:right; margin-right:1em;"><i class="fa fa-trash" aria-hidden="true"></i> ]] print(i18n("host_pools.empty_pool")) print[[</button>
+      <button id="emptyPoolButton" class="btn btn-secondary" onclick="$('#empty_pool_dialog').modal('show');" style="float:right; margin-right:1em;"><i class="fas fa-trash" aria-hidden="true"></i> ]] print(i18n("host_pools.empty_pool")) print[[</button>
 ]]
 
 print[[
@@ -626,8 +626,8 @@ print [[
       var newid = "member_" + member_id;
       numPoolMembers++;
 
-      var tr = $('<tr id=' + newid + '><td>]] printMemberAddressField('member_id') print[[</td><td class="text-center">]] printMemberVlanField('member_id') print[[</td><td>]] printAliasField('member_id') print[[</td><td>]] printIconField('member_id') print[[</td><td class="text-center hidden">Persistent</td><td class="text-center"></td></tr>');
-      datatableAddDeleteButtonCallback.bind(tr)(6, "datatableUndoAddRow('#" + newid + "', ']] print(i18n("host_pools.empty_pool")) print[[', '#addPoolMemberBtn', 'decPoolMembers')", "]] print(i18n('undo')) print[[");
+      var tr = $('<tr id=' + newid + '><td>]] printMemberAddressField('member_id') print[[</td><td class="text-center">]] printMemberVlanField('member_id') print[[</td><td>]] printAliasField('member_id') print[[</td><td>]] printIconField('member_id') print[[</td><td class="text-center"></td></tr>');
+      datatableAddDeleteButtonCallback.bind(tr)(5, "datatableUndoAddRow('#" + newid + "', ']] print(i18n("host_pools.empty_pool")) print[[', '#addPoolMemberBtn', 'decPoolMembers')", "]] print(i18n('undo')) print[[");
       $("#table-manage table").append(tr);
       $("input", tr).first().focus();
 
@@ -683,7 +683,7 @@ print [[
       hidePerPage: true,
       
       buttons: [
-         '<a id="addPoolMemberBtn" onclick="addPoolMember()" role="button" class="add-on btn" data-toggle="modal"><i class="fa fa-plus" aria-hidden="true"></i></a>'
+         '<a id="addPoolMemberBtn" onclick="addPoolMember()" role="button" class="add-on btn" data-toggle="modal"><i class="fas fa-plus" aria-hidden="true"></i></a>'
       ], columns: [
          {
             title: "]] print(i18n("host_pools.member_address")) print[[",
@@ -932,10 +932,10 @@ print [[
         /* Add at 'pool_id' position */
         host_pools.splice(pool_id, 0, {id:pool_id});
 
-        var tr = $('<tr id=' + newid + '><td class="text-center hidden">' + pool_id + '</td><td>]]
-printPoolNameField('pool_id') print[[</td><td class="hidden"></td><td class="text-center"></td></tr>');
+        var tr = $('<tr id=' + newid + '><td class="text-center" style="display:none;">' + pool_id + '</td><td>]]
+printPoolNameField('pool_id') print[[</td><td align="center"></td></tr>');
 
-        datatableAddDeleteButtonCallback.bind(tr)(4, "datatableUndoAddRow('#" + newid + "', ']] print(i18n("host_pools.no_pools_defined")) print[[', '#addNewPoolBtn', 'onPoolAddUndo')", "]] print(i18n('undo')) print[[");
+        datatableAddDeleteButtonCallback.bind(tr)(3, "datatableUndoAddRow('#" + newid + "', ']] print(i18n("host_pools.no_pools_defined")) print[[', '#addNewPoolBtn', 'onPoolAddUndo')", "]] print(i18n('undo')) print[[");
         $("#table-create table").append(tr);
         $("input", tr).focus();
 
@@ -969,7 +969,7 @@ printPoolNameField('pool_id') print[[</td><td class="hidden"></td><td class="tex
       perPage: ]] print(perPagePools) print[[,
 
       buttons: [
-         '<a id="addNewPoolBtn" onclick="addPool()" role="button" class="add-on btn" data-toggle="modal"><i class="fa fa-plus" aria-hidden="true"></i></a>'
+         '<a id="addNewPoolBtn" onclick="addPool()" role="button" class="add-on btn" data-toggle="modal"><i class="fas fa-plus" aria-hidden="true"></i></a>'
       ], columns: [
          {
             field: "column_pool_id",

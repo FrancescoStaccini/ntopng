@@ -44,6 +44,12 @@ AlertCheckLuaEngine::AlertCheckLuaEngine(AlertEntity alert_entity, ScriptPeriodi
   case alert_entity_flow:
     lua_file = "flow.lua";
     break;
+  case alert_entity_snmp_device:
+    lua_file = "snmp_device.lua";
+    break;
+  case alert_entity_process:
+    lua_file = "system.lua";
+    break;
   default:
     /* Example: lua_file = "generic.lua" to handle a generic entity */
     break;
@@ -51,8 +57,9 @@ AlertCheckLuaEngine::AlertCheckLuaEngine(AlertEntity alert_entity, ScriptPeriodi
 
   if(lua_file) {
     snprintf(script_path, sizeof(script_path),
-	     "%s/callbacks/interface/%s",
+	     "%s/callbacks/%s/%s",
 	     ntop->getPrefs()->get_scripts_dir(),
+	     iface ? "interface" : "system",
 	     lua_file);
     ntop->fixPath(script_path);
 

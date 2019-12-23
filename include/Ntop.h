@@ -88,6 +88,7 @@ class Ntop {
 
   void loadLocalInterfaceAddress();
   void initAllowedProtocolPresets();
+  void loadProtocolsAssociations(struct ndpi_detection_module_struct *ndpi_str);
   bool checkUserPassword(const char * const user, const char * const password, char *group, bool *localuser) const;
   void cleanShadownDPI();
   
@@ -337,6 +338,14 @@ class Ntop {
   inline char* get_install_dir()                     { return(install_dir);         };
   inline void  set_install_dir(char *id)             { snprintf(install_dir, MAX_PATH, "%s", id); };
 
+  /**
+   * @brief Get the runtime directory, which contains executable lua scripts generated at runtime.
+   * @note Currently an alias for the working directory
+   *
+   * @return The path of runtime directory.
+   */
+  inline char* get_runtime_dir()                     { return(working_dir);         };
+
   inline Bloom*            getResolutionBloom()      { return(resolvedHostsBloom);  };
   inline NtopGlobals*      getGlobals()              { return(globals);             };
   inline Trace*            getTrace()                { return(globals->getTrace()); };
@@ -355,6 +364,8 @@ class Ntop {
   inline NagiosManager*    getNagios()               { return(nagios_manager);      };
 #endif
 #endif
+  void checkSystemScripts(ScriptPeriodicity p);
+  void checkSNMPDeviceAlerts(ScriptPeriodicity p);
   void lua_periodic_activities_stats(NetworkInterface *iface, lua_State* vm);
   void getUsers(lua_State* vm);
   bool isUserAdministrator(lua_State* vm);
@@ -458,6 +469,9 @@ class Ntop {
   void reloadCustomCategories();
   void nDPILoadIPCategory(char *what, ndpi_protocol_category_t id);
   void nDPILoadHostnameCategory(char *what, ndpi_protocol_category_t id);
+  inline ndpi_protocol_category_t get_ndpi_proto_category(ndpi_protocol proto) { return(ndpi_get_proto_category(get_ndpi_struct(), proto)); };
+  ndpi_protocol_category_t get_ndpi_proto_category(u_int protoid);
+  void setnDPIProtocolCategory(u_int16_t protoId, ndpi_protocol_category_t protoCategory);
 };
 
 extern Ntop *ntop;

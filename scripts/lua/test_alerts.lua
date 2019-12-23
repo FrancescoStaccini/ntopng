@@ -14,6 +14,10 @@ local format_utils = require("format_utils")
 sendHTTPContentTypeHeader('text/html')
 page_utils.print_header(i18n("about.about_x", { product=info.product }))
 
+if not isAdministrator() then
+  return
+end
+
 active_page = "about"
 dofile(dirs.installdir .. "/scripts/lua/inc/menu.lua")
 
@@ -25,6 +29,14 @@ interface.checkNetworksAlertsMin()
 
 -- checks the current interface alerts
 interface.checkInterfaceAlertsMin()
+
+-- run the system scripts
+ntop.checkSystemScriptsMin()
+
+--require "snmp_utils"
+--run_5min_snmp_caching(600)
+--dofile(dirs.installdir .. "/pro/scripts/callbacks/system/5min.lua")
+--ntop.checkSNMPDeviceAlerts5Min()
 
 dofile(dirs.installdir .. "/scripts/lua/inc/footer.lua")
 

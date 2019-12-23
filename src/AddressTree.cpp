@@ -185,16 +185,21 @@ bool AddressTree::addAddress(const char * const _what, const int16_t user_data) 
 /* ******************************************* */
 
 /* Format: 131.114.21.0/24,10.0.0.0/255.0.0.0 */
-bool AddressTree::addAddresses(char *rule, const int16_t user_data) {
-  char *tmp, *net = strtok_r(rule, ",", &tmp);
+bool AddressTree::addAddresses(const char *rule, const int16_t user_data) {
+  char *tmp, *net;
+  char * _rule = strdup(rule);
+
+  if(!_rule)
+    return false;
+
+  net = strtok_r(_rule, ",", &tmp);
   
   while(net != NULL) {
-    if(!addAddress(net, user_data))
-      return false;
-    
+    addAddress(net, user_data);
     net = strtok_r(NULL, ",", &tmp);
   }
-  
+
+  free(_rule);
   return true;
 }
 
@@ -239,6 +244,7 @@ patricia_node_t* AddressTree::match(const IpAddress * const ipa, int network_bit
 
 /* ******************************************* */
 
+/* NOTE: this does NOT accept a char* address! Use AddressTree::find() instead. */
 int16_t AddressTree::findAddress(int family, void *addr, u_int8_t *network_mask_bits) {
   patricia_tree_t *p;
   int bits;
@@ -275,6 +281,38 @@ int16_t AddressTree::findMac(const u_int8_t addr[]) {
     return(it->second);
 
   return(-1);
+}
+
+/* **************************************************** */
+
+/* Generic find with IPv4/IPv6/Mac */
+int16_t AddressTree::find(const char *addr, u_int8_t *network_mask_bits) {
+  u_int8_t mac[6];
+  u_int32_t _mac[6];
+
+  if(strchr(addr, '.')) {
+    /* IPv4 */
+    struct in_addr addr4;
+
+    if(inet_pton(AF_INET, addr, &addr4) != 1)
+      return(-1);
+
+    return(findAddress(AF_INET, &addr4, network_mask_bits));
+  } else if(sscanf(addr, "%02X:%02X:%02X:%02X:%02X:%02X",
+	    &_mac[0], &_mac[1], &_mac[2], &_mac[3], &_mac[4], &_mac[5]) == 6) {
+    /* MAC address */
+    for(int i=0; i<6; i++) mac[i] = _mac[i];
+
+    return(findMac(mac));
+  } else {
+    /* IPv6 */
+    struct in6_addr addr6;
+
+    if(inet_pton(AF_INET6, addr, &addr6) != 1)
+      return(-1);
+
+    return(findAddress(AF_INET6, &addr6, network_mask_bits));
+  }
 }
 
 /* **************************************************** */

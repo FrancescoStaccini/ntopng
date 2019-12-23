@@ -48,10 +48,11 @@ class AddressTree {
   bool addAddress(const char * const _net, const int16_t user_data = -1);
   patricia_node_t* addAddress(const IpAddress * const ipa);
   patricia_node_t* addAddress(const IpAddress * const ipa, int network_bits, bool compact_after_add);
-  bool addAddresses(char *net, const int16_t user_data = -1);
+  bool addAddresses(const char *net, const int16_t user_data = -1);
   void getAddresses(lua_State* vm) const;
   int16_t findAddress(int family, void *addr, u_int8_t *network_mask_bits = NULL);
   int16_t findMac(const u_int8_t addr[]);
+  int16_t find(const char *addr, u_int8_t *network_mask_bits = NULL);
   bool match(char *addr);
   patricia_node_t* match(const IpAddress * const ipa, int network_bits) const;
   void dump();

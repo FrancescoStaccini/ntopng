@@ -1,8 +1,8 @@
 --
--- (C) 2013-18 - ntop.org
+-- (C) 2013-19 - ntop.org
 --
 
-dirs = ntop.getDirs()
+local dirs = ntop.getDirs()
 package.path = dirs.installdir .. "/scripts/lua/modules/?.lua;" .. package.path
 
 if(ntop.isPro()) then
@@ -46,44 +46,33 @@ if isEmptyString(asn) then
 end
 
 --[[
-Create Menu Bar with buttons
+   Create Menu Bar with buttons
 --]]
 local nav_url = ntop.getHttpPrefix().."/lua/as_details.lua?asn="..tonumber(asn)
-print [[
-<div class="bs-docs-example">
-            <nav class="navbar navbar-default" role="navigation">
-              <div class="navbar-collapse collapse">
-<ul class="nav navbar-nav">
-]]
 
-print("<li><a href=\"#\">" .. i18n("as_details.as") .. ": "..label.."</A> </li>")
+local title = i18n("as_details.as") .. ": "..label
 
-if(page == "flows") then
-  print("<li class=\"active\"><a href=\"#\">"..i18n("flows").."</a></li>\n")
-else
-   print("<li><a href=\""..nav_url.."&page=flows\">"..i18n("flows").."</a></li>")
-end
-
-if(page == "historical") then
-   print("\n<li class=\"active\"><a href=\"#\"><i class='fa fa-area-chart fa-lg'></i></a></li>\n")
-else
-   print("\n<li><a href=\""..nav_url.."&page=historical\"><i class='fa fa-area-chart fa-lg'></i></a></li>")
-end
-
-print [[
-<li><a href="javascript:history.go(-1)"><i class='fa fa-reply'></i></a></li>
-</ul>
-</div>
-</nav>
-</div>
-]]
+page_utils.print_navbar(title, nav_url,
+			{
+			   {
+			      active = page == "flows" or not page,
+			      page_name = "flows",
+			      label = i18n("flows"),
+			   },
+			   {
+			      active = page == "historical",
+			      page_name = "historical",
+			      label = "<i class='fas fa-lg fa-chart-area'></i>",
+			   },
+			}
+)
 
 if isEmptyString(page) or page == "historical" then   
    local default_schema = "asn:traffic"
 
    if(not ts_utils.exists(default_schema, {ifid=ifId, asn=asn})) then
       print("<div class=\"alert alert alert-danger\"><img src=".. ntop.getHttpPrefix() .. "/img/warning.png> "..i18n("as_details.no_available_data_for_as",{asn = label}))
-      print(" "..i18n("as_details.as_timeseries_enable_message",{url = ntop.getHttpPrefix().."/lua/admin/prefs.lua?tab=on_disk_ts",icon_flask="<i class=\"fa fa-flask\"></i>"})..'</div>')
+      print(" "..i18n("as_details.as_timeseries_enable_message",{url = ntop.getHttpPrefix().."/lua/admin/prefs.lua?tab=on_disk_ts",icon_flask="<i class=\"fas fa-flask\"></i>"})..'</div>')
 
    else
       local schema = _GET["ts_schema"] or default_schema
@@ -146,10 +135,10 @@ end
 
 local application_filter = ''
 if(application ~= nil) then
-   application_filter = '<span class="glyphicon glyphicon-filter"></span>'
+   application_filter = '<span class="fas fa-filter"></span>'
 end
 local dt_buttons = "['<div class=\"btn-group\"><button class=\"btn btn-link dropdown-toggle\" data-toggle=\"dropdown\">"..i18n("flows_page.applications").. " " .. application_filter .. "<span class=\"caret\"></span></button> <ul class=\"dropdown-menu\" role=\"menu\" >"
-dt_buttons = dt_buttons..'<li><a href="'..nav_url..'&page=flows">'..i18n("flows_page.all_proto")..'</a></li>'
+dt_buttons = dt_buttons..'<li><a class="dropdown-item" href="'..nav_url..'&page=flows">'..i18n("flows_page.all_proto")..'</a></li>'
 
 local ndpi_stats = interface.getASInfo(asn)
 
@@ -158,7 +147,7 @@ for key, value in pairsByKeys(ndpi_stats["ndpi"], asc) do
    if(key == application) then
       class_active = ' class="active"'
    end
-   dt_buttons = dt_buttons..'<li '..class_active..'><a href="'..nav_url..'&page=flows&application='..key..'">'..key..'</a></li>'
+   dt_buttons = dt_buttons..'<li '..class_active..'><a class="dropdown-item" href="'..nav_url..'&page=flows&application='..key..'">'..key..'</a></li>'
 end
 
 dt_buttons = dt_buttons .. "</ul></div>']"
@@ -169,7 +158,7 @@ print [[
          url: url_update,
          buttons: ]] print(dt_buttons) print[[,
          rowCallback: function ( row ) { return flow_table_setID(row); },
-         tableCallback: function()  { $("#dt-bottom-details > .pull-left > p").first().append('. ]]
+         tableCallback: function()  { $("#dt-bottom-details > .float-left > p").first().append('. ]]
    print(i18n('flows_page.idle_flows_not_listed'))
    print[['); },
 	       showPagination: true,

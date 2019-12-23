@@ -1,6 +1,6 @@
 
 JQUERY_BOOTSTRAP_MIN_JS=jquery_bootstrap.min.js
-JQUERY_BOOTSTRAP_MIN_JS_SRC=jquery.js jquery-ui.js bootstrap.js\
+JQUERY_BOOTSTRAP_MIN_JS_SRC=jquery.js jquery-ui.js \
 			    bootstrap-datatable.js bootstrap3-typeahead.js\
 			    d3.v3.js jquery.peity.js bootstrap-slider.js			    
 
@@ -8,7 +8,7 @@ DEP_MIN_JS=deps.min.js
 DEP_MIN_JS_SRC=ie_fix.js rickshaw.js pie-chart.js gauge.js \
 		  crossfilter.js validator.js validator.js \
 		  dc.js cal-heatmap.js nv.d3.js jquery.are-you-sure.js \
-		  moment.js bootstrap-datetimepicker.js ASAP.js binary-indicators.js
+		  moment.js ASAP.js binary-indicators.js
 
 NTOP_MIN_JS=ntop.min.js
 NTOP_MIN_JS_SRC=datatable_utils.js ays_utils.js ntopng_utils.js graph_utils.js \

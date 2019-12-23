@@ -107,7 +107,7 @@ if (_POST["action"] == "add") or (_POST["action"] == "edit") then
     end
   end
 elseif not table.empty(_POST) then
-  local custom_categories = getCustomnDPIProtoCategories(ifname)
+  local custom_categories = getCustomnDPIProtoCategories()
 
   for k, new_cat in pairs(_POST) do
     if starts(k, "proto_") then
@@ -119,13 +119,13 @@ elseif not table.empty(_POST) then
       if custom_categories[id] ~= nil then
         old_cat = custom_categories[id]
       else
-        old_cat = interface.getnDPIProtoCategory(tonumber(id))
+        old_cat = ntop.getnDPIProtoCategory(tonumber(id))
         old_cat = old_cat and old_cat.id or 0
       end
 
       if old_cat ~= new_cat then
         -- io.write("Changing nDPI category for " .. id .. ": " .. old_cat .. " -> " .. new_cat .. "\n")
-        setCustomnDPIProtoCategory(ifname, tonumber(id), new_cat)
+        setCustomnDPIProtoCategory(tonumber(id), new_cat)
       end
     end
   end
@@ -168,8 +168,8 @@ print[[
     <div class="modal-dialog">
       <div class="modal-content">
         <div class="modal-header">
-          <button type="button" class="close" data-dismiss="modal">&times;</button>
           <h3 class="modal-title">]] print(i18n("custom_categories.add_custom_app")) print[[</h3>
+          <button type="button" class="close" data-dismiss="modal">&times;</button>
         </div>
         <div class="modal-body">
           <div class="container-fluid">
@@ -213,8 +213,8 @@ if not isEmptyString(proto_filter) then
   print[[<td>
     <form action="]] print(base_url) print [[" method="get">
       <input type="hidden" name="tab" value="protocols" />
-      <button type="button" class="btn btn-default btn-sm" onclick="$(this).closest('form').submit();">
-        <i class="fa fa-close fa-lg" aria-hidden="true" data-original-title="" title=""></i> ]] print(proto_name) print[[
+      <button type="button" class="btn btn-secondary btn-sm" onclick="$(this).closest('form').submit();">
+        <i class="fas fa-times fa-lg" aria-hidden="true" data-original-title="" title=""></i> ]] print(proto_name) print[[
       </button>
     </form>
   </td>]]
@@ -252,7 +252,7 @@ print[[
   <form id="protos_cat_form" lass="form-inline" style="margin-bottom: 0px;" method="post">
     <input type="hidden" name="csrf" value="]] print(ntop.getRandomCSRFValue()) print[[">
     <div id="table-edit-ndpi-applications"></div>
-    <button class="btn btn-primary" style="float:right; margin-right:1em;" disabled="disabled" type="submit">]] print(i18n("save_settings")) print[[</button>
+    <button class="btn btn-primary" style="float:right; margin-right:1em; margin-left: auto" disabled="disabled" type="submit">]] print(i18n("save_settings")) print[[</button>
   </form>
   ]]
 
@@ -295,11 +295,11 @@ print[[
 
   $("#table-edit-ndpi-applications").datatable({
     url: url_update ,
-    class: "table table-striped table-bordered table-condensed",
+    class: "table table-striped table-bordered table-sm",
     buttons: [ ]]
 
   if has_protos_file then
-    print[['<a id="addApplication" onclick="showAddApplicationDialog()" role="button" class="add-on btn pull-right" data-toggle="modal"><i class="fa fa-plus" aria-hidden="true"></i></a>',]]
+    print[['<a id="addApplication" onclick="showAddApplicationDialog()" role="button" class="add-on btn float-right" data-toggle="modal"><i class="fas fa-plus" aria-hidden="true"></i></a>',]]
   end
 
   if isEmptyString(proto_filter) then

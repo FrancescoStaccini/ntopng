@@ -153,7 +153,7 @@ function custom_column_utils.printCustomColumnDropdown(base_url, page_params)
    custom_column_params["custom_column"] = nil
 
    print[[\
-      <button class="btn btn-link dropdown-toggle" data-toggle="dropdown"><i class="fa fa-columns" aria-hidden="true"></i><span class="caret"></span></button>\
+      <button class="btn btn-link dropdown-toggle" data-toggle="dropdown"><i class="fas fa-columns" aria-hidden="true"></i><span class="caret"></span></button>\
       <ul class="dropdown-menu" role="menu" id="custom_column_dropdown">]]
 
    for _, lg in ipairs(custom_column_utils.available_custom_columns) do
@@ -164,7 +164,7 @@ function custom_column_utils.printCustomColumnDropdown(base_url, page_params)
 	 goto continue
       end
 
-      print[[<li><a href="]] custom_column_params["custom_column"] = key; print(getPageUrl(base_url, custom_column_params)); print[[">]] print(label) print[[</a></li>]]
+      print[[<li><a class="dropdown-item" href="]] custom_column_params["custom_column"] = key; print(getPageUrl(base_url, custom_column_params)); print[[">]] print(label) print[[</a></li>]]
 
       ::continue::
    end

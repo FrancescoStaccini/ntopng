@@ -372,7 +372,15 @@ void Utils::setThreadName(const char *name) {
   // Mac OS X: must be set from within the thread (can't specify thread ID)
   char buf[16]; // NOTE: on linux there is a 16 char limit
   int rc;
-  snprintf(buf, sizeof(buf), "%s", name);
+  char *bname = NULL;
+
+  if(Utils::file_exists(name)) {
+    bname = strrchr((char*)name, '/');
+    if(bname) bname++;
+  }
+
+  snprintf(buf, sizeof(buf), "%s", bname ? bname : name);
+
 #if defined(__APPLE__)
   if((rc = pthread_setname_np(buf)))
 #else
@@ -502,7 +510,10 @@ size_t Utils::file_write(const char *path, const char *content, size_t content_l
   if(fd == NULL) {
     ntop->getTrace()->traceEvent(TRACE_WARNING, "Unable to write file %s", path);
   } else {
+#ifndef WIN32
     chmod(path, CONST_DEFAULT_FILE_MODE);
+#endif
+
     ret = fwrite(content, content_len, 1, fd);
     fclose(fd);
   }
@@ -647,7 +658,7 @@ int Utils::mkdir(const char *path, mode_t mode) {
       ntop->getTrace()->traceEvent(TRACE_WARNING, "mkdir(%s) failed [%d/%s]",
 				   path, errno, strerror(errno));
   } else {
-    if(chmod(path, CONST_DEFAULT_DIR_MODE) == -1) /* Ubuntu 18 */
+    if(chmod(path, mode) == -1) /* Ubuntu 18 */
       ntop->getTrace()->traceEvent(TRACE_WARNING, "chmod(%s) failed [%d/%s]",
 				   path, errno, strerror(errno));
   }
@@ -2113,12 +2124,12 @@ ticks Utils::gettickspersec() {
 
   /* computing usleep delay */
   tick_start = Utils::getticks();
-  usleep(1);
+  _usleep(1);
   tick_delta = Utils::getticks() - tick_start;
 
   /* computing CPU freq */
   tick_start = Utils::getticks();
-  usleep(1001);
+  _usleep(1001);
   return (Utils::getticks() - tick_start - tick_delta) * 1000 /*kHz -> Hz*/;
 #else
   return CLOCKS_PER_SEC;
@@ -4098,3 +4109,34 @@ u_int32_t Utils::pow2(u_int32_t v) {
   v++;
   return v;
 }
+
+/* ****************************************************** */
+
+#ifdef __linux__
+void Utils::deferredExec(const char * const command) {
+  char command_buf[256];
+  int res;
+
+  if(!command || command[0] == '\0')
+    return;
+
+  /* Self-restarting service does not restart with systemd:
+     This is a hard limitation imposed by systemd.
+     The best suggestions so far are to use at, cron, or systemd timer units.
+
+     https://unix.stackexchange.com/questions/202048/self-restarting-service-does-not-restart-with-systemd
+   */
+  if((res = snprintf(command_buf, sizeof(command_buf),
+		     "echo \"sleep 1 && %s\" | at now",
+		     command)) < 0
+     || res >= (int)sizeof(command_buf))
+    return;
+
+  printf("%s\n", command_buf);
+  fflush(stdout);
+  system(command_buf);
+}
+#endif
+
+/* ****************************************************** */
+

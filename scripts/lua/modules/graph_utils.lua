@@ -137,11 +137,11 @@ function breakdownBar(sent, sentLabel, rcvd, rcvdLabel, thresholdLow, thresholdH
     if((thresholdLow == nil) or (thresholdLow < 0)) then thresholdLow = 0 end
     if((thresholdHigh == nil) or (thresholdHigh > 100)) then thresholdHigh = 100 end
 
-    if(sent2rcvd < thresholdLow) then sentLabel = '<i class="fa fa-warning fa-lg"></i> '..sentLabel
-    elseif(sent2rcvd > thresholdHigh) then rcvdLabel = '<i class="fa fa-warning fa-lg""></i> '..rcvdLabel end
+    if(sent2rcvd < thresholdLow) then sentLabel = '<i class="fas fa-exclamation-triangle fa-lg"></i> '..sentLabel
+    elseif(sent2rcvd > thresholdHigh) then rcvdLabel = '<i class="fas fa-exclamation-triangle fa-lg""></i> '..rcvdLabel end
 
-      print('<div class="progress"><div class="progress-bar progress-bar-warning" aria-valuenow="'.. sent2rcvd..'" aria-valuemin="0" aria-valuemax="100" style="width: ' .. sent2rcvd.. '%;">'..sentLabel)
-      print('</div><div class="progress-bar progress-bar-info" aria-valuenow="'.. (100-sent2rcvd)..'" aria-valuemin="0" aria-valuemax="100" style="width: ' .. (100-sent2rcvd) .. '%;">' .. rcvdLabel .. '</div></div>')
+      print('<div class="progress"><div class="progress-bar bg-warning" aria-valuenow="'.. sent2rcvd..'" aria-valuemin="0" aria-valuemax="100" style="width: ' .. sent2rcvd.. '%;">'..sentLabel)
+      print('</div><div class="progress-bar bg-info" aria-valuenow="'.. (100-sent2rcvd)..'" aria-valuemin="0" aria-valuemax="100" style="width: ' .. (100-sent2rcvd) .. '%;">' .. rcvdLabel .. '</div></div>')
 
    else
       print('&nbsp;')
@@ -154,7 +154,7 @@ function percentageBar(total, value, valueLabel)
    -- io.write("****>> "..total.."/"..value.."\n")
    if((total ~= nil) and (total > 0)) then
       pctg = round((value * 100) / total, 0)
-      print('<div class="progress"><div class="progress-bar progress-bar-warning" aria-valuenow="'.. pctg..'" aria-valuemin="0" aria-valuemax="100" style="width: ' .. pctg.. '%;">'..valueLabel)
+      print('<div class="progress"><div class="progress-bar bg-warning" aria-valuenow="'.. pctg..'" aria-valuemin="0" aria-valuemax="100" style="width: ' .. pctg.. '%;">'..valueLabel)
       print('</div></div>')
    else
       print('&nbsp;')
@@ -170,7 +170,7 @@ function makeProgressBar(percentage)
    end
 
    local perc_int = round(percentage)
-   return '<span style="width: 70%; float:left"><div class="progress"><div class="progress-bar progress-bar-warning" aria-valuenow="'..
+   return '<span style="width: 70%; float:left"><div class="progress"><div class="progress-bar bg-warning" aria-valuenow="'..
       perc_int ..'" aria-valuemin="0" aria-valuemax="100" style="width: '.. perc_int ..'%;"></div></div></span><span style="width: 30%; margin-left: 15px;">'..
       round(percentage, 1) ..' %</span>'
 end
@@ -208,7 +208,7 @@ function stackedProgressBars(total, bars, other_label, formatter, css_class)
       if bar.style == nil then bar.style = "" end
       if bar.link ~= nil then res[#res + 1] = [[<a href="]] .. bar.link .. [[">]] end
       res[#res + 1] = [[
-         <div class="progress-bar progress-bar-]] .. (bar.class) .. [[" role="progressbar" style="width:]] .. percentage .. [[%;]] .. bar.style .. [["></div></a>]]
+         <div class="progress-bar bg-]] .. (bar.class) .. [[" role="progressbar" style="width:]] .. percentage .. [[%;]] .. bar.style .. [["></div></a>]]
       if bar.link ~= nil then res[#res + 1] = [[</a>]] end
    end
 
@@ -216,7 +216,7 @@ function stackedProgressBars(total, bars, other_label, formatter, css_class)
       </div></div>]]
 
    -- The legend
-   res[#res + 1] = [[<div class="stacked-progress-legend">]]
+   res[#res + 1] = [[<div class="ntop-progress-stacked-legend">]]
 
    local legend_items = bars
 
@@ -236,9 +236,9 @@ function stackedProgressBars(total, bars, other_label, formatter, css_class)
       res[#res + 1] = [[<span>]]
       if(num > 0) then res[#res + 1] = [[<br>]] end
       if bar.link ~= nil then res[#res + 1] = [[<a href="]] .. bar.link .. [[">]] end
-      res[#res + 1] = [[<span class="label label-]].. (bar.class) ..[[" style="]] .. bar.style .. [[">&nbsp;</span>]]
+      res[#res + 1] = [[<span class="badge badge-]].. (bar.class) ..[[" style="]] .. bar.style .. [[">&nbsp;</span>]]
       if bar.link ~= nil then res[#res + 1] = [[</a>]] end
-      res[#res + 1] = [[<span>]] .. bar.title .. " (".. formatter(bar.value) ..")</span></span>"
+      res[#res + 1] = [[<span> ]] .. bar.title .. " (".. formatter(bar.value) ..")</span></span>"
       num = num + 1
    end
 
@@ -359,7 +359,7 @@ function populateGraphMenuEntry(label, base_url, params, tab_id, needs_separator
 end
 
 function makeMenuDivider()
-   return '<li role="separator" class="divider"></li>'
+   return '<div class="dropdown-divider"></div>'
 end
 
 function makeMenuHeader(label)
@@ -876,13 +876,13 @@ font-family: Arial, Helvetica, sans-serif;
 
 <div class="container-fluid">
   <ul class="nav nav-tabs" role="tablist" id="historical-tabs-container">
-    <li class="active"> <a href="#historical-tab-chart" role="tab" data-toggle="tab"> Chart </a> </li>
+    <li class="nav-item active"> <a class="nav-link active" href="#historical-tab-chart" role="tab" data-toggle="tab"> Chart </a> </li>
 ]]
 
 local show_historical_tabs = ntop.getPrefs().is_dump_flows_to_mysql_enabled and options.show_historical
 
 if show_historical_tabs then
-   print('<li><a href="#historical-flows" role="tab" data-toggle="tab" id="tab-flows-summary"> Flows </a> </li>\n')
+   print('<li class="nav-item"><a class="nav-link" href="#historical-flows" role="tab" data-toggle="tab" id="tab-flows-summary"> Flows </a> </li>\n')
 end
 
 print[[
@@ -890,7 +890,7 @@ print[[
 
 
   <div class="tab-content">
-    <div class="tab-pane fade active in" id="historical-tab-chart">
+    <div class="tab-pane active in" id="historical-tab-chart">
 
 <br>
 <table border=0>
@@ -907,7 +907,7 @@ local page_params = {
 if(options.timeseries) then
    print [[
 <div class="btn-group">
-  <button class="btn btn-default btn-sm dropdown-toggle" data-toggle="dropdown">Timeseries <span class="caret"></span></button>
+  <button class="btn btn-light btn-sm dropdown-toggle" data-toggle="dropdown">Timeseries <span class="caret"></span></button>
   <ul class="dropdown-menu">
 ]]
 
@@ -920,7 +920,7 @@ if(options.timeseries) then
 ]]
 end -- options.timeseries
 
-print('&nbsp;Timeframe:  <div class="btn-group" data-toggle="buttons" id="graph_zoom">\n')
+print('&nbsp;Timeframe:  <div class="btn-group btn-group-toggle" data-toggle="buttons" id="graph_zoom">\n')
 
 for k,v in ipairs(zoom_vals) do
    -- display 1 minute button only for networks and interface stats
@@ -1050,7 +1050,7 @@ if show_historical_tabs then
    local l7proto = tags.protocol or ""
    local k2info = hostkey2hostinfo(host)
 
-   print('<div class="tab-pane fade" id="historical-flows">')
+   print('<div class="tab-pane" id="historical-flows">')
    if tonumber(start_time) ~= nil and tonumber(end_time) ~= nil then
       -- if both start_time and end_time are vaid epoch we can print finer-grained top flows
       historicalFlowsTab(ifid, k2info["host"] or '', start_time, end_time, l7proto, '', '', '', k2info["vlan"])
@@ -1322,7 +1322,7 @@ function printProtocolQuota(proto, ndpi_stats, category_stats, quotas_to_show, s
 
       output[#output + 1] = [[
           <div class='progress' style=']]..(quotas_to_show.traffic_style or "")..[['>
-            <div class='progress-bar progress-bar-warning' aria-valuenow=']]..traffic_quota_ratio..'\' aria-valuemin=\'0\' aria-valuemax=\'100\' style=\'width: '..traffic_quota_ratio..'%;\'>'..
+            <div class='progress-bar bg-warning' aria-valuenow=']]..traffic_quota_ratio..'\' aria-valuemin=\'0\' aria-valuemax=\'100\' style=\'width: '..traffic_quota_ratio..'%;\'>'..
               ternary(traffic_quota_ratio == traffic_quota_ratio --[[nan check]], traffic_quota_ratio, 0)..[[%
             </div>
           </div>]]
@@ -1344,7 +1344,7 @@ function printProtocolQuota(proto, ndpi_stats, category_stats, quotas_to_show, s
 
       output[#output + 1] = ([[
           <div class='progress' style=']]..(quotas_to_show.time_style or "")..[['>
-            <div class='progress-bar progress-bar-warning' aria-valuenow=']]..duration_quota_ratio..'\' aria-valuemin=\'0\' aria-valuemax=\'100\' style=\'width: '..duration_quota_ratio..'%;\'>'..
+            <div class='progress-bar bg-warning' aria-valuenow=']]..duration_quota_ratio..'\' aria-valuemin=\'0\' aria-valuemax=\'100\' style=\'width: '..duration_quota_ratio..'%;\'>'..
               ternary(duration_quota_ratio == duration_quota_ratio --[[nan check]], duration_quota_ratio, 0)..[[%
             </div>
           </div>]])
@@ -1405,7 +1405,7 @@ function printPoolChangeDropdown(ifId, pool_id, have_nedge)
 
    output[#output + 1] = [[
             </select>&nbsp;
-        <A HREF="]] .. ntop.getHttpPrefix() .. edit_pools_link .. [["><i class="fa fa-sm fa-cog" aria-hidden="true" title="]]
+        <A HREF="]] .. ntop.getHttpPrefix() .. edit_pools_link .. [["><i class="fas fa-sm fa-cog" aria-hidden="true" title="]]
       ..i18n(ternary(have_nedge, "nedge.edit_users", "host_pools.edit_host_pools"))
       .. [["></i> ]]
       .. i18n(ternary(have_nedge, "nedge.edit_users", "host_pools.edit_host_pools"))
@@ -1427,8 +1427,8 @@ function printCategoryDropdownButton(by_id, cat_id_or_name, base_url, page_param
    count_callback = count_callback or count_all
 
    -- 'Category' button
-   print('\'<div class="btn-group pull-right"><div class="btn btn-link dropdown-toggle" data-toggle="dropdown">'..
-         i18n("category") .. ternary(not isEmptyString(cat_id_or_name), '<span class="glyphicon glyphicon-filter"></span>', '') ..
+   print('\'<div class="btn-group float-right"><div class="btn btn-link dropdown-toggle" data-toggle="dropdown">'..
+         i18n("category") .. ternary(not isEmptyString(cat_id_or_name), '<span class="fas fa-filter"></span>', '') ..
          '<span class="caret"></span></div> <ul class="dropdown-menu" role="menu" style="min-width: 90px;">')
 
    -- 'Category' dropdown menu
@@ -1452,7 +1452,7 @@ function printCategoryDropdownButton(by_id, cat_id_or_name, base_url, page_param
          page_params["category"] = ternary(by_id, ternary(entry.cat_id ~= "", "cat_" .. entry.cat_id, ""), entry.id)
 
          print('<li' .. ternary(cat_id_or_name == ternary(by_id, entry.cat_id, entry.id), ' class="active"', '') ..
-            '><a href="' .. getPageUrl(base_url, page_params) .. '">' .. (entry.icon or "") ..
+            '><a class="dropdown-item" href="' .. getPageUrl(base_url, page_params) .. '">' .. (entry.icon or "") ..
             entry.text .. '</a></li>')
       else
          print(makeMenuDivider())

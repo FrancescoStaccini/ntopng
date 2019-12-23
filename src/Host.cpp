@@ -182,7 +182,6 @@ void Host::initialize(Mac *_mac, u_int16_t _vlanId, bool init_all) {
   nextResolveAttempt = 0, mdns_info = NULL;
   host_label_set = false;
   vlan_id = _vlanId % MAX_NUM_VLAN,
-  first_seen = last_seen = iface->getTimeLastPktRcvd();
   memset(&names, 0, sizeof(names));
   asn = 0, asname = NULL;
   as = NULL, country = NULL;
@@ -629,7 +628,7 @@ void Host::lua(lua_State* vm, AddressTree *ptree,
   lua_get_num_contacts(vm);
   lua_get_num_http_hosts(vm);
 
-  luaDNS(vm);
+  luaDNS(vm, verbose);
   luaTCP(vm);
   luaICMP(vm, get_ip()->isIPv4(), false);
 
@@ -664,8 +663,6 @@ void Host::lua(lua_State* vm, AddressTree *ptree,
   }
 
   lua_get_time(vm);
-
-  lua_push_bool_table_entry(vm, "has_dropbox_shares", dropbox_namespaces.size() > 0 ? true : false);
 
   lua_get_fingerprints(vm);
 
@@ -815,7 +812,7 @@ void Host::periodic_hash_entry_state_update(void *user_data, bool quick) {
       lua_State *L = acle->getState();
       acle->setHost(this);
 
-      lua_getglobal(L, ALERT_ENTITY_CALLBACK_RELEASE_ALERTS); /* Called function */
+      lua_getglobal(L, USER_SCRIPTS_RELEASE_ALERTS_CALLBACK); /* Called function */
 
       acle->pcall(0 /* 0 arguments */, 0 /* 0 results */);
     }
@@ -1155,7 +1152,7 @@ void Host::reloadHostBlacklist() {
 
 /* *************************************** */
 
-void Host::inlineSetMDNSInfo(char * const str) {
+void Host::offlineSetMDNSInfo(char * const str) {
   char *cur_info;
   const char *tokens[] = {
     "._http._tcp.local",
@@ -1195,21 +1192,21 @@ void Host::inlineSetMDNSInfo(char * const str) {
 
 /* *************************************** */
 
-void Host::inlineSetSSDPLocation(const char * const url) {
+void Host::offlineSetSSDPLocation(const char * const url) {
   if(!ssdpLocation && url && (ssdpLocation = strdup(url)))
     ;
 }
 
 /* *************************************** */
 
-void Host::inlineSetMDNSName(const char * const mdns_n) {
+void Host::offlineSetMDNSName(const char * const mdns_n) {
   if(!names.mdns && mdns_n && (names.mdns = strdup(mdns_n)))
     ;
 }
 
 /* *************************************** */
 
-void Host::inlineSetMDNSTXTName(const char * const mdns_n_txt) {
+void Host::offlineSetMDNSTXTName(const char * const mdns_n_txt) {
   if(!names.mdns_txt && mdns_n_txt && (names.mdns_txt = strdup(mdns_n_txt)))
     ;
 }
@@ -1375,73 +1372,4 @@ char* Host::get_tskey(char *buf, size_t bufsize) {
     k = get_hostkey(buf, bufsize);
 
   return(k);
-}
-
-/* **************************************************** */
-
-void Host::dissectDropbox(const char *payload, u_int16_t payload_len) {
-  json_object *o;
-  enum json_tokener_error jerr;
-  char str[1500];
-
-  if ((payload_len + 1) > (u_int16_t)sizeof(str))
-    return; /* Too long: this isn't a valid Dropbox packet */
-
-  strncpy(str, payload, payload_len);
-  str[payload_len] = '\0';
-
-  // ntop->getTrace()->traceEvent(TRACE_NORMAL, "%s", str);
-
-  if((o = json_tokener_parse_verbose(str, &jerr)) != NULL) {
-    json_object *obj;
-
-    if(json_object_object_get_ex(o, "namespaces", &obj)) {
-      struct array_list *l = json_object_get_array(obj);
-      u_int len = (u_int)array_list_length(l);
-
-      dropbox_namespaces.clear();
-
-      for(u_int i=0; i<len; i++) {
-	struct json_object *element = json_object_array_get_idx(obj, i);
-	u_int32_t ns = json_object_get_int(element);
-
-	// ntop->getTrace()->traceEvent(TRACE_NORMAL, "%u", ns);
-	dropbox_namespaces.push_back(ns);
-      }
-
-      json_object_put(o);
-    }
-  }
-}
-
-/* **************************************************** */
-
-void Host::dumpDropbox(lua_State *vm) {
-  char ip_buf[64], *ipaddr = printMask(ip_buf, sizeof(ip_buf));
-
-  lua_newtable(vm);
-
-  lua_push_str_table_entry(vm, "ip", ipaddr);
-  lua_push_uint64_table_entry(vm, "ipkey", ip.key());
-  lua_push_uint64_table_entry(vm, "vlan", vlan_id);
-
-  lua_newtable(vm);
-  for(u_int i=0; i<dropbox_namespaces.size(); i++) {
-    u_int32_t v = dropbox_namespaces[i];
-
-    lua_newtable(vm);
-    /* ntop->getTrace()->traceEvent(TRACE_NORMAL, "%u", v); */
-
-    lua_pushinteger(vm, v);
-    lua_insert(vm, -2);
-    lua_settable(vm, -3);
-  }
-
-  lua_pushstring(vm, "namespaces");
-  lua_insert(vm, -2);
-  lua_settable(vm, -3);
-
-  lua_pushstring(vm, printMask(ip_buf, sizeof(ip_buf)));
-  lua_insert(vm, -2);
-  lua_settable(vm, -3);
 }

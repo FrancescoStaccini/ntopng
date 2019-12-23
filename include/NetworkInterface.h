@@ -325,9 +325,7 @@ class NetworkInterface : public AlertableEntity {
   inline time_t getTimeLastPktRcvdRemote()     { return(last_pkt_rcvd_remote); };
   inline time_t getTimeLastPktRcvd()           { return(last_pkt_rcvd ? last_pkt_rcvd : last_pkt_rcvd_remote); };
   inline void  setTimeLastPktRcvd(time_t t)    { if(t > last_pkt_rcvd) last_pkt_rcvd = t; };
-  inline ndpi_protocol_category_t get_ndpi_proto_category(ndpi_protocol proto) { return(ndpi_get_proto_category(get_ndpi_struct(), proto)); };
   inline const char* get_ndpi_category_name(ndpi_protocol_category_t category) { return(ndpi_category_get_name(get_ndpi_struct(), category)); };
-  ndpi_protocol_category_t get_ndpi_proto_category(u_int protoid);
   inline char* get_ndpi_proto_name(u_int id)   { return(ndpi_get_proto_name(get_ndpi_struct(), id));   };
   inline int   get_ndpi_proto_id(char *proto)  { return(ndpi_get_protocol_id(get_ndpi_struct(), proto));   };
   inline int   get_ndpi_category_id(char *cat) { return(ndpi_get_category_id(get_ndpi_struct(), cat));     };
@@ -364,9 +362,10 @@ class NetworkInterface : public AlertableEntity {
 #endif
   void checkPointHostTalker(lua_State* vm, char *host_ip, u_int16_t vlan_id);
   int dumpLocalHosts2redis(bool disable_purge);
-  inline void incRetransmittedPkts(u_int32_t num)   { tcpPacketStats.incRetr(num); };
-  inline void incOOOPkts(u_int32_t num)             { tcpPacketStats.incOOO(num);  };
-  inline void incLostPkts(u_int32_t num)            { tcpPacketStats.incLost(num); };
+  inline void incRetransmittedPkts(u_int32_t num)   { tcpPacketStats.incRetr(num);      };
+  inline void incOOOPkts(u_int32_t num)             { tcpPacketStats.incOOO(num);       };
+  inline void incLostPkts(u_int32_t num)            { tcpPacketStats.incLost(num);      };
+  inline void incKeepAlivePkts(u_int32_t num)       { tcpPacketStats.incKeepAlive(num); };
   virtual void checkPointCounters(bool drops_only);
   bool registerSubInterface(NetworkInterface *sub_iface, u_int32_t criteria);
 
@@ -384,7 +383,7 @@ class NetworkInterface : public AlertableEntity {
     ndpiStats->incStats(when, ndpi_proto, 0, 0, num_pkts, pkt_len);
     // Note: here we are not currently interested in packet direction, so we tell it is receive
     ndpiStats->incCategoryStats(when, ndpi_category, 0 /* see above comment */, pkt_len);
-    pktStats.incStats(pkt_len);
+    pktStats.incStats(1, pkt_len);
     l4Stats.incStats(when, l4proto,
       ingressPacket ? num_pkts : 0, ingressPacket ? pkt_len : 0,
       !ingressPacket ? num_pkts : 0, !ingressPacket ? pkt_len : 0);
@@ -402,6 +401,12 @@ class NetworkInterface : public AlertableEntity {
     _incStats(ingressPacket, when, eth_proto, ndpi_proto, ndpi_category, l4proto, pkt_len, num_pkts, pkt_overhead);
   };
 
+  inline void incICMPStats(bool is_icmpv6, u_int32_t num_pkts, u_int8_t icmp_type, u_int8_t icmp_code, bool sent) {
+    if(is_icmpv6)
+      icmp_v6.incStats(num_pkts, icmp_type, icmp_code, sent, NULL);
+    else
+      icmp_v4.incStats(num_pkts, icmp_type, icmp_code, sent, NULL);
+  };
   inline void incLocalStats(u_int num_pkts, u_int pkt_len, bool localsender, bool localreceiver) {
     localStats.incStats(num_pkts, pkt_len, localsender, localreceiver);
   };
@@ -466,7 +471,6 @@ class NetworkInterface : public AlertableEntity {
   void lua_hash_tables_stats(lua_State* vm);
   void lua_periodic_activities_stats(lua_State* vm);
   void getnDPIProtocols(lua_State *vm, ndpi_protocol_category_t filter, bool skip_critical);
-  void setnDPIProtocolCategory(u_int16_t protoId, ndpi_protocol_category_t protoCategory);
   void processAllActiveFlows();
   void guessAllBroadcastDomainHosts();
 
@@ -595,7 +599,6 @@ class NetworkInterface : public AlertableEntity {
   bool registerLiveCapture(struct ntopngLuaContext * const luactx, int *id);
   bool deregisterLiveCapture(struct ntopngLuaContext * const luactx);
   void dumpLiveCaptures(lua_State* vm);
-  int  dumpDropboxHosts(lua_State *vm);
   bool stopLiveCapture(int capture_id);
 #ifdef NTOPNG_PRO
 #ifdef HAVE_NEDGE

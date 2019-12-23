@@ -238,7 +238,7 @@
           , that = this;
 
         this.$toolbar = $("<div></div>")
-          .addClass("dt-toolbar btn-toolbar pull-right");
+          .addClass("dt-toolbar btn-toolbar float-right");
 
         this.$button_group = $("<div></div>")
           .addClass("btn-group")
@@ -292,7 +292,7 @@
         end = (o.currentPage * o.perPage);
         if(end > o.totalRows) end = o.totalRows;
 
-        $('<div class="pull-left"><p>' + i18n.showing_x_to_y_rows.sformat(start, end, o.totalRows) + '</p></div>')
+        $('<div class="float-left"><p>' + i18n.showing_x_to_y_rows.sformat(start, end, o.totalRows) + '</p></div>')
           .prependTo(this.$bottom_details);
       }
 
@@ -539,15 +539,16 @@
         if(o.perPage >= res.totalRows) return;
 
         if(!this.$pagination) {
-          this.$pagination = $("<div></div>").addClass("pull-right");
+          this.$pagination = $("<div></div>").addClass("float-right");
 
           // how many pages?
           o.pageCount = Math.ceil(res.totalRows / o.perPage);
 
           // setup the pager container and the quick page buttons
           var $pager = $("<ul></ul>").addClass("pagination")
-            , $first = $("<li></li>").append(
+            , $first = $("<li></li>").addClass("page-item").append(
                 $("<a></a>")
+	          .addClass("page-link")
                   .attr("href", "#")
                   .data("page", 1)
                   .html("&laquo;")
@@ -557,8 +558,9 @@
                     return false;
                   })
               )
-            , $previous = $("<li></li>").append(
+            , $previous = $("<li></li>").addClass("page-item").append(
                 $("<a></a>")
+                  .addClass("page-link")
                   .attr("href", "#")
                   .data("page", o.currentPage - 1)
                   .html("&lt;")
@@ -569,8 +571,9 @@
                     return false;
                   })
               )
-            , $next = $("<li></li>").append(
+            , $next = $("<li></li>").addClass("page-item").append(
                 $("<a></a>")
+		  .addClass("page-link")
                   .attr("href", "#")
                   .data("page", o.currentPage + 1)
                   .html("&gt;")
@@ -581,8 +584,9 @@
                     return false;
                   })
               )
-            , $last = $("<li></li>").append(
+            , $last = $("<li></li>").addClass("page-item").append(
                 $("<a></a>")
+		  .addClass("page-link")
                   .attr("href", "#")
                   .data("page", o.pageCount)
                   .html("&raquo;")
@@ -615,9 +619,10 @@
 
           // append the pagination links
           for(var i = start; i <= end; i++) {
-            var $link = $("<li></li>")
+            var $link = $("<li></li>").addClass("page-item")
               .append(
                 $("<a></a>")
+		  .addClass("page-link") 
                   .attr("href", "#")
                   .data("page", i)
                   .text(i)
@@ -734,7 +739,7 @@
         .addClass("modal-footer")
         .append(
             // show the check 'all / none' columns
-            $('<div class="pull-left"></div>')
+            $('<div class="float-left"></div>')
               .append(
                 $('<div class="btn-group"></div>')
                   .append(
@@ -742,7 +747,7 @@
                       .addClass("btn btn-info")
                       .append(
                         $("<span></span>")
-                          .addClass("glyphicon glyphicon-check")
+                          .addClass("fas fa-check")
                           .text("All")
                       )
                       .click(function () {
@@ -780,7 +785,7 @@
               }) : ""
 
           , $("<button></button>")
-            .addClass("btn btn-default")
+            .addClass("btn btn-secondary")
             .data('dismiss', 'modal')
             .append(
               $("<span></span>")
@@ -823,7 +828,7 @@
       .attr("href", "#" + this.$column_modal.attr("id"))
       .append(
         $("<span></span>")
-          .addClass("glyphicon glyphicon-cog")
+          .addClass("fas fa-cog")
       )
       .click(function(e) {
         that.$column_modal
@@ -858,7 +863,7 @@
       .data("content", "Open the filter dialog.")
       .extend(
         $("<span></span>")
-          .addClass("glyphicon glyphicon-filter")
+          .addClass("fas fa-filter")
       )
       .click(function() {
         if($(o.filterModal).hasClass("modal"))
@@ -906,15 +911,15 @@
       .addClass("dropdown-menu")
       .css({ fontSize: 'initial', fontWeight: 'normal' })
       .append(
-          $('<li data-value="10"><a href="#">10</a></li>')
+          $('<li data-value="10"><a class="dropdown-item" href="#">10</a></li>')
             .click(function() { _updatePerPage.call(this, that); return false; })
-        , $('<li data-value="20"><a href="#">20</a></li>')
+        , $('<li data-value="20"><a class="dropdown-item" href="#">20</a></li>')
             .click(function() { _updatePerPage.call(this, that); return false; })
-        , $('<li data-value="50"><a href="#">50</a></li>')
+        , $('<li data-value="50"><a class="dropdown-item" href="#">50</a></li>')
             .click(function() { _updatePerPage.call(this, that); return false; })
-        , $('<li data-value="100"><a href="#">100</a></li>')
+        , $('<li data-value="100"><a class="dropdown-item" href="#">100</a></li>')
             .click(function() { _updatePerPage.call(this, that); return false; })
-        , $('<li data-value="200"><a href="#">200</a></li>')
+        , $('<li data-value="200"><a class="dropdown-item" href="#">200</a></li>')
             .click(function() { _updatePerPage.call(this, that); return false; })
       );
     this.buttons.push($perpage_values);
@@ -931,7 +936,7 @@
       .attr("href", "#")
       .append(
         $("<span></span>")
-          .addClass("glyphicon glyphicon-info-sign")
+          .addClass("fas fa-info-circle")
       )
       .click(function() {
         return false;
@@ -1259,8 +1264,8 @@
     toggleColumns: true,
     url: '',
     columns: [],
-    ascending: $("<span></span>").addClass("glyphicon glyphicon-chevron-up"),
-    descending: $("<span></span>").addClass("glyphicon glyphicon-chevron-down"),
+    ascending: $("<span></span>").addClass("fas fa-chevron-up"),
+    descending: $("<span></span>").addClass("fas fa-chevron-down"),
     rowCallback: undefined,
     tableCallback: undefined,
     headerCallback: undefined,

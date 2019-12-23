@@ -17,6 +17,7 @@ local tracker = require "tracker"
 local alerts_api = require "alerts_api"
 local alert_endpoints = require "alert_endpoints_utils"
 local flow_consts = require "flow_consts"
+local icmp_utils = require "icmp_utils"
 local user_scripts = require "user_scripts"
 
 local shaper_utils = nil
@@ -24,6 +25,12 @@ local shaper_utils = nil
 if(ntop.isnEdge()) then
    package.path = dirs.installdir .. "/pro/scripts/lua/modules/?.lua;" .. package.path
    shaper_utils = require("shaper_utils")
+end
+
+if ntop.isEnterprise() then
+   local dirs = ntop.getDirs()
+   package.path = dirs.installdir .. "/pro/scripts/lua/enterprise/modules/?.lua;" .. package.path
+   require "enterprise_alert_utils"
 end
 
 -- ##############################################
@@ -48,7 +55,7 @@ function alertSeverityLabel(v, nohtml)
       if(nohtml) then
         return(title)
       else
-        return(string.format('<span class="label %s">%s</span>', severity_info.label, title))
+        return(string.format('<span class="badge %s">%s</span>', severity_info.label, title))
       end
    end
 end
@@ -79,7 +86,7 @@ function alertTypeLabel(v, nohtml)
       if(nohtml) then
         return(title)
       else
-        return(string.format('<i class="fa %s"></i> %s', type_info.icon, title))
+        return(string.format('<i class="fas %s"></i> %s', type_info.icon, title))
       end
    end
 
@@ -87,6 +94,10 @@ function alertTypeLabel(v, nohtml)
 end
 
 function alertType(v)
+  if(alert_consts.alert_types[v] == nil) then
+     tprint(debug.traceback())
+  end
+
   return(alert_consts.alert_types[v].alert_id)
 end
 
@@ -112,6 +123,10 @@ function alertEngineRaw(granularity_id)
 end
 
 function alertEngine(v)
+   if(alert_consts.alerts_granularities[v] == nil) then
+      tprint(debug.traceback())
+   end
+
    return(alert_consts.alerts_granularities[v].granularity_id)
 end
 
@@ -132,6 +147,10 @@ function alertEngineDescription(v)
 end
 
 function granularity2sec(v)
+   if(alert_consts.alerts_granularities[v] == nil) then
+      tprint(debug.traceback())
+   end
+
   return(alert_consts.alerts_granularities[v].granularity_seconds)
 end
 
@@ -152,51 +171,6 @@ function sec2granularity(seconds)
 end
 
 -- ##############################################################################
-
-function getInterfacePacketDropPercAlertKey(ifname)
-   return "ntopng.prefs.iface_" .. getInterfaceId(ifname) .. ".packet_drops_alert"
-end
-
--- ##############################################################################
-
-if ntop.isEnterprise() then
-   local dirs = ntop.getDirs()
-   package.path = dirs.installdir .. "/pro/scripts/lua/enterprise/modules/?.lua;" .. package.path
-   require "enterprise_alert_utils"
-end
-
-j = require("dkjson")
-require "persistence"
-
-function is_allowed_timespan(timespan)
-   return(alert_consts.alerts_granularities[timespan] ~= nil)
-end
-
-function get_alerts_hash_name(timespan, ifname, entity_type)
-   local ifid = getInterfaceId(ifname)
-   if not is_allowed_timespan(timespan) or tonumber(ifid) == nil then
-      return nil
-   end
-
-   return "ntopng.prefs.alerts_"..timespan..".".. entity_type ..".ifid_"..tostring(ifid)
-end
-
--- Get the hash key used for saving global settings
-local function get_global_alerts_hash_key(entity_type, local_hosts)
-   if entity_type == "host" then
-      if local_hosts then
-        return "local_hosts"
-      else
-        return "remote_hosts"
-      end
-   elseif entity_type == "interface" then
-      return "interfaces"
-   elseif entity_type == "network" then
-      return "local_networks"
-   else
-      return "*"
-   end
-end
 
 function get_make_room_keys(ifId)
    return {flows="ntopng.cache.alerts.ifid_"..ifId..".make_room_flow_alerts",
@@ -413,11 +387,11 @@ local function engagedAlertsQuery(params)
   local entity_type_filter = tonumber(params.entity)
   local entity_value_filter = params.entity_val
 
-  local perPage = tonumber(params.perPage)
-  local sortColumn = params.sortColumn
-  local sortOrder = params.sortOrder
+  local perPage = tonumber(params.perPage or 10)
+  local sortColumn = params.sortColumn or "column_"
+  local sortOrder = params.sortOrder or "desc"
   local sOrder = ternary(sortOrder == "desc", rev_insensitive, asc_insensitive)
-  local currentPage = tonumber(params.currentPage)
+  local currentPage = tonumber(params.currentPage or 1)
   local totalRows = 0
 
   --~ tprint(string.format("type=%s sev=%s entity=%s val=%s", type_filter, severity_filter, entity_type_filter, entity_value_filter))
@@ -626,7 +600,7 @@ local function getFlowStatusInfo(record, status_info)
       elseif status_info["icmp"] and status_info["icmp"]["unreach"] then -- New format
 	 res = string.format("[%s]", i18n("icmp_page.icmp_port_unreachable_extra", {unreach_host=status_info["icmp"]["unreach"]["dst_ip"], unreach_port=status_info["icmp"]["unreach"]["dst_port"], unreach_protocol = l4_proto_to_string(status_info["icmp"]["unreach"]["protocol"])}))
       else
-	 res = string.format("[%s]", getICMPTypeCode(type_code))
+	 res = string.format("[%s]", icmp_utils.get_icmp_label(4 --[[ ipv4 --]], type_code["type"], type_code["code"]))
       end
    end
 
@@ -663,7 +637,7 @@ local function formatRawFlow(record, flow_json, skip_add_links)
       local active_flow = interface.findFlowByKeyAndHashId(status_info["ntopng.key"], status_info["hash_entry_id"])
 
       if active_flow and active_flow["seen.first"] < tonumber(record["alert_tstamp"]) then
-	 return string.format("%s [%s: <A HREF='%s/lua/flow_details.lua?flow_key=%u&flow_hash_id=%u'><span class='label label-info'>Info</span></A> %s]",
+	 return string.format("%s [%s: <A HREF='%s/lua/flow_details.lua?flow_key=%u&flow_hash_id=%u'><span class='badge badge-info'>Info</span></A> %s]",
 			      flow_consts.getStatusDescription(tonumber(record["flow_status"]), status_info),
 			      i18n("flow"), ntop.getHttpPrefix(), active_flow["ntopng.key"], active_flow["hash_entry_id"],
 			      getFlowLabel(active_flow, true, true))
@@ -716,7 +690,7 @@ local function formatRawFlow(record, flow_json, skip_add_links)
          local lb = ""
          if (record["flow_status"] == "13") -- blacklisted flow
                   and (not flow["srv.blacklisted"]) and (not flow["cli.blacklisted"]) then
-            lb = " <i class='fa fa-ban' aria-hidden='true' title='Blacklisted'></i>"
+            lb = " <i class='fas fa-ban' aria-hidden='true' title='Blacklisted'></i>"
          end
          msg = msg.."["..i18n("info")..": "..decoded["info"]..lb.."] "
       end
@@ -782,7 +756,7 @@ local function drawDropdown(status, selection_name, active_entry, entries_table,
 
    button_label = button_label or firstToUpper(selection_name)
    if active_entry ~= nil and active_entry ~= "" then
-      button_label = firstToUpper(active_entry)..'<span class="glyphicon glyphicon-filter"></span>'
+      button_label = firstToUpper(active_entry)..'<span class="fas fa-filter"></span>'
    end
 
    buttons = buttons..'<button class="btn btn-link dropdown-toggle" data-toggle="dropdown">'..button_label
@@ -792,7 +766,7 @@ local function drawDropdown(status, selection_name, active_entry, entries_table,
 
    local class_active = ""
    if active_entry == nil then class_active = ' class="active"' end
-   buttons = buttons..'<li'..class_active..'><a href="?status='..status..dropdownUrlParams(get_params)..'">All</a></i>'
+   buttons = buttons..'<li'..class_active..'><a class="dropdown-item" href="?status='..status..dropdownUrlParams(get_params)..'">All</a></i>'
 
    for _, entry in pairs(actual_entries) do
       local id = tonumber(entry["id"])
@@ -803,8 +777,8 @@ local function drawDropdown(status, selection_name, active_entry, entries_table,
 
         class_active = ""
         if label == active_entry then class_active = ' class="active"' end
-        -- buttons = buttons..'<li'..class_active..'><a href="'..ntop.getHttpPrefix()..'/lua/show_alerts.lua?status='..status
-        buttons = buttons..'<li'..class_active..'><a href="?status='..status
+        -- buttons = buttons..'<li'..class_active..'><a class="dropdown-item" href="'..ntop.getHttpPrefix()..'/lua/show_alerts.lua?status='..status
+        buttons = buttons..'<li'..class_active..'><a class="dropdown-item" href="?status='..status
         buttons = buttons..dropdownUrlParams(get_params)
         buttons = buttons..'&alert_'..selection_name..'='..id..'">'
         buttons = buttons..firstToUpper(label)..' ('..count..')</a></li>'
@@ -818,37 +792,30 @@ end
 
 -- #################################
 
-local function getGlobalAlertsConfigurationHash(granularity, entity_type, local_hosts)
-   return 'ntopng.prefs.alerts_global.'..granularity.."."..get_global_alerts_hash_key(entity_type, local_hosts)
-end
-
-local global_redis_thresholds_key = "thresholds"
-
--- #################################
-
 local function printProbesTab(entity_probes, entity_type, entity_value, page_name, page_params, alt_name, options)
-   local system_scripts = require("system_scripts_utils")
+   -- TODO migrate probes
+   --~ local system_scripts = require("system_scripts_utils")
 
-   if #entity_probes > 0 then
-      print[[
-   <br>
-   <table class="table table-bordered table-striped">
-     <tr>
-       <th width="10%">]] print(i18n("system_stats.probe")) print[[</th>
-       <th width="25%">]] print(i18n("system_stats.probe_config")) print[[</th>
-     </tr>]]
+   --~ if #entity_probes > 0 then
+      --~ print[[
+   --~ <br>
+   --~ <table class="table table-bordered table-striped">
+     --~ <tr>
+       --~ <th width="10%">]] print(i18n("system_stats.probe")) print[[</th>
+       --~ <th width="25%">]] print(i18n("system_stats.probe_config")) print[[</th>
+     --~ </tr>]]
 
-      for _, probe in ipairs(entity_probes) do
-      print[[
-     <tr>
-       <td>]] print(probe["probe"]["name"]) print[[</td>
-       <td><a href="]] print(probe["config"]["url"]) print[["><i class="fa fa-cog" aria-hidden="true"></i></a></td>
-     </tr>]]
+      --~ for _, probe in ipairs(entity_probes) do
+      --~ print[[
+     --~ <tr>
+       --~ <td>]] print(probe["probe"]["name"]) print[[</td>
+       --~ <td><a href="]] print(probe["config"]["url"]) print[["><i class="fas fa-cog" aria-hidden="true"></i></a></td>
+     --~ </tr>]]
 	 
-      end
+      --~ end
 
-      print[[</table>]]
-   end
+      --~ print[[</table>]]
+   --~ end
 end
 
 -- #################################
@@ -912,7 +879,7 @@ local function printConfigTab(entity_type, entity_value, page_name, page_params,
          <th width="25%">]] print(i18n("device_protocols.alert")) print[[</th>
          <td>
                <input type="checkbox" name="trigger_alerts" value="1" ]] print(trigger_alerts_checked) print[[>
-                  <i class="fa fa-exclamation-triangle fa-lg"></i>
+                  <i class="fas fa-exclamation-triangle fa-lg"></i>
                   ]] print(enable_label) print[[
                </input>
          </td>
@@ -921,7 +888,7 @@ local function printConfigTab(entity_type, entity_value, page_name, page_params,
    if(entity_type == "host") then
       print[[<tr>
          <td width="30%">
-           <b>]] print(i18n("host_details.status_ignore")) print[[</b> <i class="fa fa-info-circle" title="]] print(i18n("host_details.disabled_flow_status_help")) print[["></i>
+           <b>]] print(i18n("host_details.status_ignore")) print[[</b> <i class="fas fa-info-circle" title="]] print(i18n("host_details.disabled_flow_status_help")) print[["></i>
          </td>
          <td>
            <input id="status_trigger_alert" name="disabled_status" type="hidden" />
@@ -946,7 +913,7 @@ local function printConfigTab(entity_type, entity_value, page_name, page_params,
       end
 
       print[[</select><div style="margin-top:1em;"><i>]] print(i18n("host_details.multiple_selection")) print[[</i></div>
-         <button type="button" class="btn btn-default" style="margin-top:1em;" onclick="resetMultiSelect()">]] print(i18n("reset")) print[[</button>
+         <button type="button" class="btn btn-secondary" style="margin-top:1em;" onclick="resetMultiSelect()">]] print(i18n("reset")) print[[</button>
          </td>
       </tr>]]
    end
@@ -983,67 +950,13 @@ end
 
 -- #################################
 
-local function thresholdStr2Val(threshold)
-  local parts = string.split(threshold, ";") or {threshold}
-
-  if(#parts >= 2) then
-    return {metric=parts[1], operator=parts[2], edge=parts[3] --[[can be nil]]}
-  end
-end
-
-local function getEntityConfiguredAlertThresholds(ifname, granularity, entity_type, local_hosts, available_modules)
-   local thresholds_key = get_alerts_hash_name(granularity, ifname, entity_type)
-   local thresholds_config = {}
-   local skip_defaults = {}
-   local res = {}
-
-   -- Handle the global configuration
-   local thresholds_str = ntop.getHashCache(getGlobalAlertsConfigurationHash(granularity, entity_type, local_hosts), global_redis_thresholds_key)
-   local global_key = get_global_alerts_hash_key(entity_type, local_hosts)
-
-   if not isEmptyString(thresholds_str) then
-     thresholds_config[global_key] = thresholds_str
-   end
-
-   -- Entity specific/global alerts
-   for entity_val, thresholds_str in pairs(table.merge(thresholds_config, ntop.getHashAllCache(thresholds_key) or {})) do
-      local thresholds = split(thresholds_str, ",")
-      res[entity_val] = {}
-
-      for _, threshold in pairs(thresholds) do
-        local val = thresholdStr2Val(threshold)
-
-        if(val) then
-          if(val.edge) then
-            res[entity_val][val.metric] = val
-          else
-            skip_defaults[val.metric] = true
-          end
-        end
-      end
-   end
-
-   res[global_key] = res[global_key] or {}
-
-   -- Add defaults
-   for modname, user_script in pairs(available_modules) do
-     local default_value = user_scripts.getDefaultConfigValue(user_script, granularity)
-
-     if((res[global_key][modname] == nil) and (default_value ~= nil) and (not skip_defaults[modname])) then
-       res[global_key][modname] = thresholdStr2Val(default_value)
-     end
-   end
-
-   return res
-end
-
--- #################################
-
 function drawAlertSourceSettings(entity_type, alert_source, delete_button_msg, delete_confirm_msg, page_name, page_params, alt_name, show_entity, options)
    options = options or {}
    local tab = _GET["tab"] or "min"
    local ts_utils = require("ts_utils")
    local ifid = interface.getId()
+   local entity_value = alert_source
+   local subdir = entity_type
 
    if interface.isPcapDumpInterface() then
       if entity_type == "interface" then
@@ -1053,8 +966,8 @@ function drawAlertSourceSettings(entity_type, alert_source, delete_button_msg, d
       end
    else
       local function printTab(tab, content, sel_tab)
-         if(tab == sel_tab) then print("\t<li class=active>") else print("\t<li>") end
-         print("<a href=\""..ntop.getHttpPrefix().."/lua/"..page_name.."?page=callbacks&tab="..tab)
+         if(tab == sel_tab) then print("\t<li class='nav-item active show'>") else print("\t<li class='nav-item'>") end
+         print("<a class='nav-link' href=\""..ntop.getHttpPrefix().."/lua/"..page_name.."?page=callbacks&tab="..tab)
          for param, value in pairs(page_params) do
             print("&"..param.."="..value)
          end
@@ -1068,7 +981,7 @@ function drawAlertSourceSettings(entity_type, alert_source, delete_button_msg, d
          local resolution = granularity.granularity_seconds
 
          if (not options.remote_host) or resolution <= 60 then
-	    --~ l = '<i class="fa fa-cog" aria-hidden="true"></i>&nbsp;'..l
+	    --~ l = '<i class="fas fa-cog" aria-hidden="true"></i>&nbsp;'..l
 	    printTab(k, l, tab)
          end
       end
@@ -1108,121 +1021,21 @@ function drawAlertSourceSettings(entity_type, alert_source, delete_button_msg, d
       print('</ul>')
    end -- !isPcapDumpInterface
 
-   local global_redis_hash = getGlobalAlertsConfigurationHash(tab, entity_type, not options.remote_host)
-
    if((tab == "flows") and (entity_type == "interface")) then
       local flow_callbacks_utils = require "flow_callbacks_utils"
       flow_callbacks_utils.print_callbacks_config()
    else
-      -- Before doing anything we need to check if we need to save values
-      local vals = { }
-      local alerts = ""
-      local global_alerts = ""
-      local to_save = false
-
-      -- Needed to handle the defaults
-      local available_modules = user_scripts.load(user_scripts.script_types.traffic_element, interface.getId(), entity_type, nil, true --[[ ignore disabled ]])
+      local available_modules = user_scripts.load(interface.getId(), user_scripts.script_types.traffic_element, entity_type)
       local no_modules_available = table.len(available_modules.modules) == 0
 
       if((_POST["to_delete"] ~= nil) and (_POST["SaveAlerts"] == nil)) then
          if _POST["to_delete"] == "local" then
-            -- Delete threshold configuration
-            ntop.delHashCache(get_alerts_hash_name(tab, ifname, entity_type), alert_source)
-            alerts = nil
-
-            -- Load the global settings normally
-            global_alerts = ntop.getHashCache(global_redis_hash, global_redis_thresholds_key)
+	    user_scripts.deleteSpecificConfiguration(subdir, available_modules, tab, entity_value)
          else
-            -- Only delete global configuration
-            ntop.delCache(global_redis_hash)
+	    user_scripts.deleteGlobalConfiguration(subdir, available_modules, tab, options.remote_host)
          end
-      end
-
-      if _POST["to_delete"] ~= "local" then
-    if not table.empty(_POST) then
-       to_save = true
-    end
-
-         -- TODO refactor this into the threshold cross checker
-         for _, user_script in pairs(available_modules.modules) do
-            k = user_script.key
-            value    = _POST["value_"..k]
-            operator = _POST["op_"..k] or "gt"
-            if value == "on" then value = "1" end
-            if value == "off" then value = "0" end
-            value = tonumber(value)
-
-            -- Handle global settings
-            local global_value = _POST["value_global_"..k]
-            local global_operator = _POST["op_global_"..k] or "gt"
-            if global_value == "on" then global_value = "1" end
-            global_value = tonumber(global_value)
-
-            local default_value = user_scripts.getDefaultConfigValue(available_modules.modules[k], tab)
-
-            if((global_value == nil) and (default_value ~= nil)) then
-               -- save an empty value to differentiate it from the default
-               global_value = ""
-            end
-
-            if(global_value ~= nil) then
-               local cur_value = k..";"..global_operator..";"..global_value
-
-               -- Do not save default values
-               if(cur_value ~= default_value) then
-                  if(global_alerts ~= "") then global_alerts = global_alerts .. "," end
-                  global_alerts = global_alerts..cur_value
-               end
-            end
-
-	    -- Handle Entity Specific settings
-	    if(value == global_value) then
-	       -- Do not save global values
-	       value = nil
-	    elseif(value == nil) then
-	       -- save an empty value to differentiate it from the global default
-	       value = ""
-	    end
-
-            if(value ~= nil) then
-               if(alerts ~= "") then alerts = alerts .. "," end
-               alerts = alerts .. k .. ";" .. operator .. ";" .. value
-            end
-         end --END for k,_ in pairs(available_modules) do
-
-         --print(alerts)
-
-         if(to_save and (_POST["to_delete"] == nil)) then
-            -- This specific entity alerts
-            if(alerts == "") then
-               ntop.delHashCache(get_alerts_hash_name(tab, ifname, entity_type), alert_source)
-            else
-               ntop.setHashCache(get_alerts_hash_name(tab, ifname, entity_type), alert_source, alerts)
-            end
-
-            -- Global alerts
-            if(global_alerts ~= "") then
-               ntop.setHashCache(global_redis_hash, global_redis_thresholds_key, global_alerts)
-            else
-               ntop.delHashCache(global_redis_hash, global_redis_thresholds_key)
-            end
-         end
-      end -- END if _POST["to_delete"] ~= nil
-
-      -- Reuse getEntityConfiguredAlertThresholds instead of directly read from hash to handle defaults
-      local alert_config = getEntityConfiguredAlertThresholds(ifname, tab, entity_type, not options.remote_host, available_modules.modules) or {}
-      alerts = alert_config[alert_source]
-      global_alerts = alert_config[get_global_alerts_hash_key(entity_type, not options.remote_host)]
-
-      for _, al in pairs({
-       {prefix = "", config = alerts},
-       {prefix = "global_", config = global_alerts},
-      }) do
-    if al.config ~= nil then
-      for k, v in pairs(al.config) do
-        vals[(al.prefix)..k] = v
-      end
-    end
+      elseif(not table.empty(_POST)) then
+	 user_scripts.handlePOST(subdir, available_modules, tab, entity_value, options.remote_host)
       end
 
       local label
@@ -1242,7 +1055,7 @@ function drawAlertSourceSettings(entity_type, alert_source, delete_button_msg, d
        <form method="post">
        <br>
        <table id="user" class="table table-bordered table-striped" style="clear: both"> <tbody>
-       <tr><th width="40%">]] print(i18n("alerts_thresholds_config.threshold_type")) print[[</th>]]
+       <tr><th width"40%">]] print(i18n("alerts_thresholds_config.threshold_type")) print[[</th>]]
       if(tab == "min") then
          print[[<th class="text-center" width=5%>]] print(i18n("chart")) print[[</th>]]
       end
@@ -1285,40 +1098,44 @@ function drawAlertSourceSettings(entity_type, alert_source, delete_button_msg, d
 	       goto next_module
 	    end
 
-	    print("<tr><td><b>".. (i18n(gui_conf.i18n_title) or gui_conf.i18n_title) .."</b><br>")
+	    local url = ''
+
+	    if(user_script.plugin.edition == "community") then
+	       local path = string.sub(user_script.source_path, string.len(ntop.getDirs().scriptdir)+1)
+	       url = '<A HREF="/lua/code_viewer.lua?lua_script_path='..path..'"><i class="fas fa-lg fa-binoculars"></i></A>'
+	    end
+            
+	    print("<tr><td><b>".. (i18n(gui_conf.i18n_title) or gui_conf.i18n_title) .. " " .. url .."</b><br>")
 	    print("<small>".. (i18n(gui_conf.i18n_description) or gui_conf.i18n_description) .."</small>\n")
 
 	    if(tab == "min") then
 	       print("<td class='text-center'>")
 	       if ts_utils.exists("elem_user_script:duration", {ifid=ifid, user_script=mod_k, subdir=entity_type}) then
 		  print('<a href="'.. ntop.getHttpPrefix() ..'/lua/user_script_details.lua?ifid='..ifid..'&user_script='..
-			   mod_k..'&subdir='..entity_type..'"><i class="fa fa-area-chart fa-lg"></i></a>')
+			   mod_k..'&subdir='..entity_type..'"><i class="fas fa-chart-area fa-lg"></i></a>')
 	       end
 	    end
 
 	    for _, prefix in pairs({"", "global_"}) do
 	       if user_script.gui.input_builder then
 		  local k = prefix..key
-		  local value = vals[k]
 		  local is_global = (prefix == "global_")
-
-		  if((not is_global) and (value == nil)) then
-		     -- No value specified for the entity, use the global value if any
-		     value = vals["global_" .. k]
-		  end
-
-		  if(user_script.gui.input_builder ~= user_scripts.threshold_cross_input_builder) then
-		     -- Temporary fix to handle non-thresholds
-		     k = "value_" .. k
-
-		     if(value ~= nil) then
-			value = tonumber(value.edge)
-		     end
-		  end
+		  local conf
 
 		  print("</td><td>")
 
-		  print(user_script.gui.input_builder(user_script.gui or {}, k, value))
+		  if is_global then
+		     conf = user_scripts.getGlobalConfiguration(user_script, tab, options.remote_host)
+		  else
+		     conf = user_scripts.getConfiguration(user_script, tab, entity_value, options.remote_host)
+		  end
+
+		  if(conf ~= nil) then
+		     -- TODO remove after implementing the new gui
+		     local value = ternary(user_script.gui.post_handler == user_scripts.checkbox_post_handler, conf.enabled, conf.script_conf)
+
+		     print(user_script.gui.input_builder(user_script.gui or {}, k, value))
+		  end
 	       end
 	    end
 	    print("</td><td align='center'>\n")
@@ -1355,8 +1172,8 @@ function drawAlertSourceSettings(entity_type, alert_source, delete_button_msg, d
       <button class="btn btn-primary" style="float:right; margin-right:1em;" disabled="disabled" type="submit">]] print(i18n("save_configuration")) print[[</button>
       </form>
 
-      <button class="btn btn-default" onclick="$('#deleteGlobalAlertConfig').modal('show');" style="float:right; margin-right:1em;"><i class="fa fa-trash" aria-hidden="true" data-original-title="" title=""></i> ]] print(i18n("show_alerts.delete_config_btn",{conf=firstToUpper(entity_type)})) print[[</button>
-      <button class="btn btn-default" onclick="$('#deleteAlertSourceSettings').modal('show');" style="float:right; margin-right:1em;"><i class="fa fa-trash" aria-hidden="true" data-original-title="" title=""></i> ]] print(delete_button_msg) print[[</button>
+      <button type="button" class="btn btn-secondary" data-toggle="modal" data-target="#deleteGlobalAlertConfig" style="float:right; margin-right:1em;"> ]] print(i18n("show_alerts.delete_config_btn",{conf=firstToUpper(entity_type)})) print[[</button>
+      <button type="button" class="btn btn-secondary" data-toggle="modal" data-target="#deleteAlertSourceSettings" style="float:right; margin-right:1em;"> ]] print(delete_button_msg) print[[</button>
       ]]
       end
 
@@ -1425,8 +1242,8 @@ function printAlertTables(entity_type, alert_source, page_name, page_params, alt
    print('<ul class="nav nav-tabs">')
 
    local function printTab(tab, content, sel_tab)
-      if(tab == sel_tab) then print("\t<li class=active>") else print("\t<li>") end
-      print("<a href=\""..ntop.getHttpPrefix().."/lua/"..page_name.."?page=alerts&tab="..tab)
+      if(tab == sel_tab) then print("\t<li class='nav-item active show'>") else print("\t<li class='nav-item'>") end
+      print("<a class='nav-link' href=\""..ntop.getHttpPrefix().."/lua/"..page_name.."?page=alerts&tab="..tab)
       for param, value in pairs(page_params) do
          print("&"..param.."="..value)
       end
@@ -1471,14 +1288,16 @@ function printAlertTables(entity_type, alert_source, page_name, page_params, alt
    if(tab == nil) then tab = "config" end
    local is_alert_list_tab = ((tab == "alert_list") or (tab == "past_alert_list") or (tab == "flow_alert_list"))
 
+   --[[ TODO migrate probes
    local system_scripts = require("system_scripts_utils")
    local entity_probes = system_scripts.getEntityProbes(entity_type, alert_source)
 
    if #entity_probes > 0 then
       printTab("probes", i18n("system_stats.probes"), tab)
    end
+   ]]
 
-   printTab("config", '<i class="fa fa-cog" aria-hidden="true"></i> ' .. i18n("traffic_recording.settings"), tab)
+   printTab("config", '<i class="fas fa-cog" aria-hidden="true"></i> ' .. i18n("traffic_recording.settings"), tab)
 
    print('</ul>')
 
@@ -1729,7 +1548,7 @@ $(function() {
 });
 
 function getActiveTabId() {
-   return $("#]] print(nav_tab_id) print[[ > li.active > a").attr('href').substr(1);
+   return $("#]] print(nav_tab_id) print[[ > li > a.active").attr('href').substr(1);
 }
 
 function updateDeleteLabel(tabid) {
@@ -1878,12 +1697,12 @@ function toggleAlert(disable) {
 	    clicked = "1"
 	 end
 	 print [[
-      <div class="tab-pane fade in" id="tab-]] print(t["div-id"]) print[[">
+      <div class="tab-pane in" id="tab-]] print(t["div-id"]) print[[">
 	<div id="]] print(t["div-id"]) print[["></div>
       </div>
 
       <script type="text/javascript">
-      $("#]] print(nav_tab_id) print[[").append('<li class="]] print(ternary(options.dont_nest_alerts, 'hidden', '')) print[["><a href="#tab-]] print(t["div-id"]) print[[" clicked="]] print(clicked) print[[" role="tab" data-toggle="tab">]] print(t["label"]) print[[</a></li>')
+      $("#]] print(nav_tab_id) print[[").append('<li class="nav-item ]] print(ternary(options.dont_nest_alerts, 'hidden', '')) print[["><a class="nav-link" href="#tab-]] print(t["div-id"]) print[[" clicked="]] print(clicked) print[[" role="tab" data-toggle="tab">]] print(t["label"]) print[[</a></li>')
       </script>
    ]]
 
@@ -1903,7 +1722,7 @@ function toggleAlert(disable) {
 	       showPagination: true,
                buttons: [']]
 
-   local title = t["label"]..ternary(t["chart"] ~= "", " <small><A HREF='"..ntop.getHttpPrefix().."/lua/if_stats.lua?ifid="..string.format("%d", ifid).."&page=historical&ts_schema="..t["chart"].."'><i class='fa fa-area-chart fa-sm'></i></A></small>", "")
+   local title = t["label"]..ternary(t["chart"] ~= "", " <small><A HREF='"..ntop.getHttpPrefix().."/lua/if_stats.lua?ifid="..string.format("%d", ifid).."&page=historical&ts_schema="..t["chart"].."'><i class='fas fa-chart-area fa-sm'></i></A></small>", "")
 
 	 if(options.hide_filters ~= true)  then
 	    -- alert_consts.alert_severity_keys and alert_consts.alert_type_keys are defined in lua_utils
@@ -2147,7 +1966,7 @@ $("[clicked=1]").trigger("click");
 	 local delete_params = getTabParameters(url_params, nil)
 	 delete_params.epoch_end = -1
 
-	 print[[<button id="buttonOpenDeleteModal" data-toggle="modal" data-target="#myModal" class="btn btn-default"><i type="submit" class="fa fa-trash-o"></i> <span id="purgeBtnMessage">]]
+	 print[[<button id="buttonOpenDeleteModal" data-toggle="modal" data-target="#myModal" class="btn btn-secondary"> <span id="purgeBtnMessage">]]
 	 print(i18n("show_alerts.purge_subj_alerts", {subj='<span id="purgeBtnLabel"></span>'}))
 	 print[[</span></button>
    </div> <!-- closes alertsActionsPanel -->
@@ -2254,42 +2073,6 @@ end
 
 -- #################################
 
--- Get all the configured threasholds for the specified interface
--- NOTE: an additional "interfaces" key is added if there are globally
--- configured threasholds (threasholds active for all the interfaces)
-function getInterfaceConfiguredAlertThresholds(ifname, granularity, available_modules)
-  return(getEntityConfiguredAlertThresholds(ifname, granularity, "interface", nil, available_modules))
-end
-
--- #################################
-
--- Get all the configured threasholds for local hosts on the specified interface
--- NOTE: an additional "local_hosts" key is added if there are globally
--- configured threasholds (threasholds active for all the hosts of the interface)
-function getLocalHostsConfiguredAlertThresholds(ifname, granularity, available_modules)
-  return(getEntityConfiguredAlertThresholds(ifname, granularity, "host", true, available_modules))
-end
-
--- #################################
-
--- Get all the configured threasholds for remote hosts on the specified interface
--- NOTE: an additional "local_hosts" key is added if there are globally
--- configured threasholds (threasholds active for all the hosts of the interface)
-function getRemoteHostsConfiguredAlertThresholds(ifname, granularity, available_modules)
-  return(getEntityConfiguredAlertThresholds(ifname, granularity, "host", false, available_modules))
-end
-
--- #################################
-
--- Get all the configured threasholds for networks on the specified interface
--- NOTE: an additional "local_networks" key is added if there are globally
--- configured threasholds (threasholds active for all the hosts of the interface)
-function getNetworksConfiguredAlertThresholds(ifname, granularity, available_modules)
-  return(getEntityConfiguredAlertThresholds(ifname, granularity, "network", nil, available_modules))
-end
-
--- #################################
-
 function newAlertsWorkingStatus(ifstats, granularity)
    local res = {
       granularity = granularity,
@@ -2329,72 +2112,82 @@ local function getSavedDeviceName(mac)
 end
 
 function check_macs_alerts(ifid)
-   local active_devices_set = getActiveDevicesHashKey(ifid)
-   local seen_devices_hash = getFirstSeenDevicesHashKey(ifid)
-   local seen_devices = ntop.getHashAllCache(seen_devices_hash) or {}
-   local max_active_devices_cardinality = 16384
-   local prev_active_devices = swapKeysValues(ntop.getMembersCache(active_devices_set) or {})
    local alert_new_devices_enabled = ntop.getPref("ntopng.prefs.alerts.device_first_seen_alert") == "1"
    local alert_device_connection_enabled = ntop.getPref("ntopng.prefs.alerts.device_connection_alert") == "1"
-   local new_active_devices = {}
-   local num_devices = table.len(seen_devices)
 
-   if(num_devices >= max_active_devices_cardinality) then
-      traceError(TRACE_INFO, TRACE_CONSOLE, string.format("Too many active devices, discarding %u devices", num_devices))
+   local active_devices_set = getActiveDevicesHashKey(ifid)
+   local prev_active_devices = swapKeysValues(ntop.getMembersCache(active_devices_set) or {})
+   local num_prev_active_devices = table.len(prev_active_devices)
+
+   local seen_devices_hash = getFirstSeenDevicesHashKey(ifid)
+   local seen_devices = ntop.getHashAllCache(seen_devices_hash) or {}
+   local num_seen_devices = table.len(seen_devices)
+
+   local max_active_devices_cardinality = 16384
+   if(num_seen_devices >= max_active_devices_cardinality) then
+      traceError(TRACE_INFO, TRACE_CONSOLE, string.format("Too many active devices, discarding %u devices", num_seen_devices))
       ntop.delCache(active_devices_set)
       prev_active_devices = {}
    end
 
+   local active_devices = {}
    callback_utils.foreachDevice(getInterfaceName(ifid), nil, function(devicename, devicestats, devicebase)
-				   -- note: location is always lan when capturing from a local interface
-				   if (not devicestats.special_mac) and (devicestats.location == "lan") then
-				      local mac = devicestats.mac
+      -- note: location is always lan when capturing from a local interface
+      if (not devicestats.special_mac) and (devicestats.location == "lan") then
+         local mac = devicestats.mac
 
-				      if not seen_devices[mac] then
-					 -- First time we see a device
-					 ntop.setHashCache(seen_devices_hash, mac, tostring(os.time()))
+	 active_devices[mac] = 1
 
-					 if alert_new_devices_enabled then
-					    local name = getDeviceName(mac)
-					    setSavedDeviceName(mac, name)
+         if not seen_devices[mac] then
+	    -- First time we see a device
+	    ntop.setHashCache(seen_devices_hash, mac, tostring(os.time()))
 
-              alerts_api.store(
-                alerts_api.macEntity(mac),
-                alerts_api.newDeviceType(name)
-              )
-					 end
-				      end
+	    if alert_new_devices_enabled then
+	       local name = getDeviceName(mac)
+	       setSavedDeviceName(mac, name)
 
-				      if not prev_active_devices[mac] then
-					 -- Device connection
-					 ntop.setMembersCache(active_devices_set, mac)
+	       alerts_api.store(
+	          alerts_api.macEntity(mac),
+	          alerts_api.newDeviceType(name))
+	    end
+         end
 
-					 if alert_device_connection_enabled then
-					    local name = getDeviceName(mac)
-					    setSavedDeviceName(mac, name)
+         if not prev_active_devices[mac] then
+	    -- Device connection
+	    ntop.setMembersCache(active_devices_set, mac)
 
-              alerts_api.store(
-                alerts_api.macEntity(mac),
-                alerts_api.deviceHasConnectedType(name)
-              )
-					 end
-				      else
-					 new_active_devices[mac] = 1
-				      end
-				   end
+            -- Do not nofify new connected devices if the prev_active_devices
+            -- set was empty (cleared or on startup)
+            if num_prev_active_devices > 0 then
+
+	       if alert_device_connection_enabled then
+	          local name = getDeviceName(mac)
+	          setSavedDeviceName(mac, name)
+
+	          alerts_api.store(
+	             alerts_api.macEntity(mac),
+	             alerts_api.deviceHasConnectedType(name))
+               end
+	    end
+         end
+      end
    end)
 
-   for mac in pairs(prev_active_devices) do
-      if not new_active_devices[mac] then
-         -- Device disconnection
-         local name = getSavedDeviceName(mac)
-         ntop.delMembersCache(active_devices_set, mac)
+   -- Safety check to avoid notifying disconnected devices 
+   -- during shutdown when they are no longer active in ntopng.
+   if not ntop.isShutdown() then
 
-         if alert_device_connection_enabled then
-            alerts_api.store(
-              alerts_api.macEntity(mac),
-              alerts_api.deviceHasDisconnectedType(name)
-            )
+      for mac in pairs(prev_active_devices) do
+         if not active_devices[mac] then
+            -- Device disconnection
+            local name = getSavedDeviceName(mac)
+            ntop.delMembersCache(active_devices_set, mac)
+
+            if alert_device_connection_enabled then
+               alerts_api.store(
+                 alerts_api.macEntity(mac),
+                 alerts_api.deviceHasDisconnectedType(name))
+            end
          end
       end
    end
@@ -2583,8 +2376,7 @@ function flushAlertsData()
    if(verbose) then io.write("[Alerts] Flushing Redis configuration...\n") end
    deleteCachePattern("ntopng.prefs.*alert*")
    deleteCachePattern("ntopng.alerts.*")
-   deleteCachePattern(getGlobalAlertsConfigurationHash("*", "*", true))
-   deleteCachePattern(getGlobalAlertsConfigurationHash("*", "*", false))
+   user_scripts.deleteConfigurations()
    alerts_api.purgeAlertsPrefs()
    for _, key in pairs(get_make_room_keys("*")) do deleteCachePattern(key) end
 
@@ -2636,6 +2428,10 @@ function formatAlertMessage(ifid, alert)
     elseif(type(description) == "function") then
       msg = description(ifid, alert, msg)
     end
+  end
+
+  if(type(msg) == "table") then
+   return("")
   end
 
   return(msg)
@@ -2870,39 +2666,6 @@ local function notify_ntopng_status(started)
   local type_info = alerts_api.processNotificationType(event, severity, msg_details)
 
   interface.select(getSystemInterfaceId())  
-  return(alerts_api.store(entity_info, type_info))
-end
-
-function notify_snmp_device_interface_status_change(snmp_host, snmp_interface)
-  local entity_info = alerts_api.snmpInterfaceEntity(snmp_host, snmp_interface["index"])
-  local type_info = alerts_api.snmpInterfaceStatusChangeType(snmp_host, snmp_interface["index"], snmp_interface["name"], snmp_interface["status"])
-
-  interface.select(getSystemInterfaceId())  
-  return(alerts_api.store(entity_info, type_info))
-end
-
-function notify_snmp_device_interface_duplexstatus_change(snmp_host, snmp_interface)
-  local entity_info = alerts_api.snmpInterfaceEntity(snmp_host, snmp_interface["index"])
-  local type_info = alerts_api.snmpInterfaceDuplexStatusChangeType(snmp_host, snmp_interface["index"], snmp_interface["name"], snmp_interface["duplexstatus"])
-
-  interface.select(getSystemInterfaceId())
-  return(alerts_api.store(entity_info, type_info))
-end
-
-function notify_snmp_device_interface_errors(snmp_host, snmp_interface)
-  local entity_info = alerts_api.snmpInterfaceEntity(snmp_host, snmp_interface["index"])
-  local type_info = alerts_api.snmpInterfaceErrorsType(snmp_host, snmp_interface["index"], snmp_interface["name"])
-
-  interface.select(getSystemInterfaceId())
-  return(alerts_api.store(entity_info, type_info))
-end
-
-function notify_snmp_device_interface_load_threshold_exceeded(snmp_host, snmp_interface, interface_load, in_direction)
-  local entity_info = alerts_api.snmpInterfaceEntity(snmp_host, snmp_interface["index"])
-  local type_info = alerts_api.snmpPortLoadThresholdExceededType(snmp_host, snmp_interface["index"], snmp_interface["name"],
-    interface_load, in_direction)
-
-  interface.select(getSystemInterfaceId())
   return(alerts_api.store(entity_info, type_info))
 end
 

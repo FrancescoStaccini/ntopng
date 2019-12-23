@@ -49,7 +49,7 @@ if(info["pro.systemid"] and (info["pro.systemid"] ~= "")) then
       print("pro")
    end
 
-   print("\" target=\"_blank\">".. info["pro.systemid"] .."</A> <i class='fa fa-external-link'></i> ]")
+   print("\" target=\"_blank\">".. info["pro.systemid"] .."</A> <i class='fas fa-external-link-alt'></i> ]")
 
 print [[
     <br><small>]]
@@ -71,7 +71,7 @@ print[[</small>
 	 print(info["ntopng.license"])
 	 
 	 print [["></input>
-		  &nbsp;<button type="submit" style="position: absolute; margin-top: 0; height: 26px" class="btn btn-default btn-xs">]] print(i18n("about.save_licence")) print[[</button>	       
+		  &nbsp;<button type="submit" style="position: absolute; margin-top: 0; height: 26px" class="btn btn-secondary btn-xs">]] print(i18n("about.save_licence")) print[[</button>	       
 		  </form>
           <script>
             function trimLicenceSpaces() {
@@ -97,7 +97,7 @@ print("</td></tr>")
 
 vers = string.split(info["version.git"], ":")
 if((vers ~= nil) and (vers[2] ~= nil)) then
-   ntopng_git_url = "<A HREF=\"https://github.com/ntop/ntopng/commit/".. vers[2] .."\">"..info["version"].."</A>"
+   ntopng_git_url = "<A HREF=\"https://github.com/ntop/ntopng/commit/".. vers[2] .."\">"..info["version"].." ("..info["revision"]..")</A>"
 else
    ntopng_git_url = info["version"]
 end
@@ -131,8 +131,8 @@ end
 
 print("<tr><th><a href=\"https://curl.haxx.se\" target=\"_blank\">cURL</A></th><td colspan=2>"..info["version.curl"].."</td></tr>\n")
 
-print("<tr><th><a href=\"http://twitter.github.io/\" target=\"_blank\"><i class=\'fa fa-twitter fa-lg'></i> Twitter Bootstrap</A></th><td colspan=2>3.x</td></tr>\n")
-print("<tr><th><a href=\"http://fortawesome.github.io/Font-Awesome/\" target=\"_blank\"><i class=\'fa fa-flag fa-lg'></i> Font Awesome</A></th><td colspan=2>4.x</td></tr>\n")
+print("<tr><th><a href=\"https://twitter.github.io/\" target=\"_blank\"><i class=\'fab fa-twitter fa-lg'></i> Twitter Bootstrap</A></th><td colspan=2>4.4.0</td></tr>\n")
+print("<tr><th><a href=\"https://github.com/FortAwesome/Font-Awesome\" target=\"_blank\"><i class=\'fab fa-font-awesome fa-lg'></i> Font Awesome</A></th><td colspan=2>5.11.2</td></tr>\n")
 print("<tr><th><a href=\"http://www.rrdtool.org/\" target=\"_blank\">RRDtool</A></th><td colspan=2>"..info["version.rrd"].."</td></tr>\n")
 
 if(info["version.nindex"] ~= nil) then

@@ -45,7 +45,7 @@ end
 local hosts_filter = ''
 
 if ((mode ~= "all") or (not isEmptyString(pool))) then
-   hosts_filter = '<span class="glyphicon glyphicon-filter"></span>'
+   hosts_filter = '<span class="fas fa-filter"></span>'
 end
 
 local active_page = "hosts"
@@ -60,16 +60,16 @@ if (_GET["page"] ~= "historical") then
       print [[
 <div class="container-fluid">
   <ul class="nav nav-tabs">
-    <li class="active"><a data-toggle="tab" href="#home">]] print(i18n("hosts_stats.hosts")) print[[</a></li>
+    <li class="nav-item" class="active"><a class="nav-link active" data-toggle="tab" href="#home">]] print(i18n("hosts_stats.hosts")) print[[</a></li>
 ]]
 
       if(asn ~= "0") then
 	 print [[
-    <li><a data-toggle="tab" href="#asinfo">]] print(i18n("hosts_stats.as_info")) print[[</a></li>
-    <li><a data-toggle="tab" href="#aspath">]] print(i18n("hosts_stats.as_path")) print[[</a></li>
-    <li><a data-toggle="tab" href="#geoloc">]] print(i18n("hosts_stats.as_geolocation")) print[[</a></li>
-    <li><a data-toggle="tab" href="#prefix">]] print(i18n("hosts_stats.as_prefixes")) print[[</a></li>
-    <li><a data-toggle="tab" href="#bgp">]] print(i18n("hosts_stats.bgp_updates")) print[[</a></li>
+    <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#asinfo">]] print(i18n("hosts_stats.as_info")) print[[</a></li>
+    <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#aspath">]] print(i18n("hosts_stats.as_path")) print[[</a></li>
+    <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#geoloc">]] print(i18n("hosts_stats.as_geolocation")) print[[</a></li>
+    <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#prefix">]] print(i18n("hosts_stats.as_prefixes")) print[[</a></li>
+    <li class="nav-item"><a class="nav-link" data-toggle="tab" href="#bgp">]] print(i18n("hosts_stats.bgp_updates")) print[[</a></li>
 ]]
       end
    end
@@ -79,7 +79,7 @@ if (_GET["page"] ~= "historical") then
    if(asn ~= nil) then
       print [[
   <div class="tab-content">
-<div id="home" class="tab-pane fade in active">
+<div id="home" class="tab-pane in active">
 ]]
    end
 
@@ -113,11 +113,11 @@ if (_GET["page"] ~= "historical") then
          local charts_available = ts_utils.exists("subnet:traffic", {ifid=ifstats.id, subnet=network_key})
 
          charts_icon = " <small><a href='".. ntop.getHttpPrefix() .."/lua/network_details.lua?network="..
-            network .. "&page=config'><i class='fa fa-sm fa-cog'></i></a>"
+            network .. "&page=config'><i class='fas fa-sm fa-cog'></i></a>"
 
          if charts_available then
             charts_icon = charts_icon.."&nbsp; <a href='".. ntop.getHttpPrefix() .."/lua/network_details.lua?network="..
-               network .. "&page=historical'><i class='fa fa-sm fa-area-chart'></i></a>"
+               network .. "&page=historical'><i class='fas fa-sm fa-chart-area'></i></a>"
          end
 
          charts_icon = charts_icon.."</small>"
@@ -153,7 +153,6 @@ if (_GET["page"] ~= "historical") then
    local custom_name, custom_key, custom_align = custom_column_utils.getCustomColumnName()
 
    print [[
-      <hr>
       <div id="table-hosts"></div>
 	 <script>
 	 var url_update = "]] print(getPageUrl(ntop.getHttpPrefix() .. "/lua/get_hosts_data.lua", page_params)) print[[";]]
@@ -176,8 +175,8 @@ if (_GET["page"] ~= "historical") then
 
    if(asn ~= nil) then 
       asninfo = " " .. i18n("hosts_stats.asn_title",{asn=asn}) ..
-	 "<small>&nbsp;<i class='fa fa-info-circle fa-sm' aria-hidden='true'></i> <A HREF='https://stat.ripe.net/AS"..
-	 asn .. "'><i class='fa fa-external-link fa-sm' title=\\\"".. i18n("hosts_stats.more_info_about_as_popup_msg") ..
+	 "<small>&nbsp;<i class='fas fa-info-circle fa-sm' aria-hidden='true'></i> <A HREF='https://stat.ripe.net/AS"..
+	 asn .. "'><i class='fas fa-external-link-alt fa-sm' title=\\\"".. i18n("hosts_stats.more_info_about_as_popup_msg") ..
 	 "\\\"></i></A></small>"
    end
 
@@ -210,14 +209,14 @@ if (_GET["page"] ~= "historical") then
        title = i18n("host_pools.manage_pools")
 	 end
 
-	 pool_edit = "&nbsp; <A HREF='"..ntop.getHttpPrefix()..pool_link.."'><i class='fa fa-cog fa-sm' title='"..title .. "'></i></A>"
+	 pool_edit = "&nbsp; <A HREF='"..ntop.getHttpPrefix()..pool_link.."'><i class='fas fa-cog fa-sm' title='"..title .. "'></i></A>"
 
       end
 
       pool_ = " "..i18n(ternary(have_nedge, "hosts_stats.user_title", "hosts_stats.pool_title"),
 			{poolname=host_pools_utils.getPoolName(ifstats.id, _GET["pool"])})
 	 .."<small>".. pool_edit ..
-	 ternary(charts_available, "&nbsp; <A HREF='"..ntop.getHttpPrefix().."/lua/pool_details.lua?page=historical&pool=".._GET["pool"].."'><i class='fa fa-area-chart fa-sm' title='"..i18n("chart") .. "'></i></A>", "")..
+	 ternary(charts_available, "&nbsp; <A HREF='"..ntop.getHttpPrefix().."/lua/pool_details.lua?page=historical&pool=".._GET["pool"].."'><i class='fas fa-chart-area fa-sm' title='"..i18n("chart") .. "'></i></A>", "")..
 	 "</small>"
    end
 
@@ -236,7 +235,7 @@ if (_GET["page"] ~= "historical") then
    if not isEmptyString(protocol_name) then
       charts_icon = " <a href='".. ntop.getHttpPrefix() .."/lua/if_stats.lua?ifid="..
          ifstats.id .. "&page=historical&ts_schema=iface:ndpi&protocol=" .. protocol_name..
-         "'><i class='fa fa-sm fa-area-chart'></i></a>"
+         "'><i class='fas fa-sm fa-chart-area'></i></a>"
    end
 
    function getPageTitle()
@@ -273,7 +272,7 @@ if (_GET["page"] ~= "historical") then
    print ('rowCallback: function ( row ) { return host_table_setID(row); },')
 
    print [[
-       tableCallback: function()  { $("#dt-bottom-details > .pull-left > p").first().append('. ]]
+       tableCallback: function()  { $("#dt-bottom-details > .float-left > p").first().append('. ]]
    print(i18n('hosts_stats.idle_hosts_not_listed'))
    print[['); },
 ]]
@@ -291,37 +290,37 @@ if (_GET["page"] ~= "historical") then
 
    
    --[[ if((page_params.network ~= nil) and (page_params.network ~= "-1")) then
-      print('\'<div class="btn-group pull-right"><A HREF="'..ntop.getHttpPrefix()..'/lua/network_details.lua?page=historical&network='..network..'"><i class=\"fa fa-area-chart fa-lg\"></i></A></div>\', ')
+      print('\'<div class="btn-group float-right"><A HREF="'..ntop.getHttpPrefix()..'/lua/network_details.lua?page=historical&network='..network..'"><i class=\"fas fa-chart-area fa-lg\"></i></A></div>\', ')
       elseif (page_params.pool ~= nil) and (isAdministrator()) and (pool ~= host_pools_utils.DEFAULT_POOL_ID) then
-      print('\'<div class="btn-group pull-right"><A HREF="'..ntop.getHttpPrefix()..'/lua/if_stats.lua?page=pools&pool='..pool..'#manage"><i class=\"fa fa-users fa-lg\"></i></A></div>\', ')
+      print('\'<div class="btn-group float-right"><A HREF="'..ntop.getHttpPrefix()..'/lua/if_stats.lua?page=pools&pool='..pool..'#manage"><i class=\"fas fa-users fa-lg\"></i></A></div>\', ')
       end]]
 
    -- Ip version selector
-   print[['<div class="btn-group pull-right">]]
+   print[['<div class="btn-group float-right">]]
    custom_column_utils.printCustomColumnDropdown(base_url, page_params)
    print[[</div>']]
    
 
    -- Ip version selector
-   print[[, '<div class="btn-group pull-right">]]
+   print[[, '<div class="btn-group float-right">]]
    printIpVersionDropdown(base_url, page_params)
    print[[</div>']]
 
    -- VLAN selector
    if ifstats.vlan then
-      print[[, '<div class="btn-group pull-right">]]
+      print[[, '<div class="btn-group float-right">]]
       printVLANFilterDropdown(base_url, page_params)
       print[[</div>']]
    end
 
-   print[[, '<div class="btn-group pull-right">]]
+   print[[, '<div class="btn-group float-right">]]
    printTrafficTypeFilterDropdown(base_url, page_params)
    print[[</div>']]
 
    -- Hosts filter
    local hosts_filter_params = table.clone(page_params)
 
-   print(', \'<div class="btn-group"><button class="btn btn-link dropdown-toggle" data-toggle="dropdown">'..i18n("hosts_stats.filter_hosts")..hosts_filter..'<span class="caret"></span></button> <ul class="dropdown-menu" role="menu" style="min-width: 90px;"><li><a href="')
+   print(', \'<div class="btn-group"><button class="btn btn-link dropdown-toggle" data-toggle="dropdown">'..i18n("hosts_stats.filter_hosts")..hosts_filter..'<span class="caret"></span></button> <ul class="dropdown-menu" role="menu" style="min-width: 90px;"><li"><a class="dropdown-item" href="')
 
    hosts_filter_params.mode = nil
    hosts_filter_params.pool = nil
@@ -329,47 +328,41 @@ if (_GET["page"] ~= "historical") then
    print ('">'..i18n("hosts_stats.all_hosts")..'</a></li>')
 
    hosts_filter_params.mode = "local"
-   print('<li')
-   if mode == hosts_filter_params.mode then print(' class="active"') end
-   print('><a href="')
+   print('<li ')
+   print('"><a class="dropdown-item" href="')
    print (getPageUrl(base_url, hosts_filter_params))
    print ('">'..i18n("hosts_stats.local_hosts_only")..'</a></li>')
 
    hosts_filter_params.mode = "remote"
-   print('<li')
-   if mode == hosts_filter_params.mode then print(' class="active"') end
-   print('><a href="')
+   print('<li ')
+   print('"><a class="dropdown-item" href="')
    print (getPageUrl(base_url, hosts_filter_params))
    print ('">'..i18n("hosts_stats.remote_hosts_only")..'</a></li>')
 
    if interface.isPacketInterface() and not interface.isPcapDumpInterface() then
       hosts_filter_params.mode = "dhcp"
-      print('<li')
-      if mode == hosts_filter_params.mode then print(' class="active"') end
-      print('><a href="')
+      print('<li ')
+      print('"><a class="dropdown-item" href="')
       print (getPageUrl(base_url, hosts_filter_params))
       print ('">'..i18n("mac_stats.dhcp_only")..'</a></li>')
 
       hosts_filter_params.mode = "broadcast_domain"
-      print('<li')
-      if mode == hosts_filter_params.mode then print(' class="active"') end
-      print('><a href="')
+      print('<li ')
+      print('"><a class="dropdown-item" href="')
       print (getPageUrl(base_url, hosts_filter_params))
       print ('">'..i18n("hosts_stats.broadcast_domain_hosts_only")..'</a></li>')
    end
 
    hosts_filter_params.mode = "blacklisted"
-   print('<li')
-   if mode == hosts_filter_params.mode then print(' class="active"') end
-   print('><a href="')
+   print('<li ')
+   print('"><a class="dropdown-item" href="')
    print (getPageUrl(base_url, hosts_filter_params))
    print ('">'..i18n("hosts_stats.blacklisted_hosts_only")..'</a></li>')
 
    if isBridgeInterface(ifstats) then
       hosts_filter_params.mode = "filtered"
-      print('<li')
-      if mode == hosts_filter_params.mode then print(' class="active"') end
-      print('><a href="')
+      print('<li ')
+      print('"><a class="dropdown-item" href="')
       print (getPageUrl(base_url, hosts_filter_params))
       print ('">'..i18n("hosts_stats.filtered_hosts_only")..'</a></li>')
    end
@@ -381,9 +374,8 @@ if (_GET["page"] ~= "historical") then
       print('<li role="separator" class="divider"></li>')
       for _, _pool in ipairs(host_pools_utils.getPoolsList(ifstats.id)) do
 	 hosts_filter_params.pool = _pool.id
-	 print('<li')
-	 if pool == _pool.id then print(' class="active"') end
-	 print('><a href="'..getPageUrl(base_url, hosts_filter_params)..'">'
+	 print('<li ')
+	 print('"><a class="dropdown-item" href="'..getPageUrl(base_url, hosts_filter_params)..'">'
 		  ..i18n(ternary(have_nedge, "hosts_stats.user", "hosts_stats.host_pool"),
 			 {pool_name=string.gsub(_pool.name, "'", "\\'")}) ..'</li>')
       end
@@ -544,11 +536,11 @@ if (_GET["page"] ~= "historical") then
         block_host_csrf = data.csrf;
         if (data.status == "BLOCKED") {
           $('#'+host_key+'_info').find('.block-badge')
-            .removeClass('label-default').addClass('label-danger');
+            .removeClass('badge-secondary').addClass('badge-danger');
           $('#'+host_key+'_ip').find('a').css("text-decoration", "line-through");
         } else if (data.status == "UNBLOCKED") {
           $('#'+host_key+'_info').find('.block-badge')
-            .removeClass('label-danger').addClass('label-default');
+            .removeClass('badge-danger').addClass('badge-secondary');
           $('#'+host_key+'_ip').find('a').css("text-decoration", "none");
         }
       },
@@ -568,11 +560,11 @@ if (_GET["page"] ~= "historical") then
 
 <script src="/js/ripe_widget_api.js"></script>
 
-<div id="asinfo" class="tab-pane fade"></div>
-<div id="aspath" class="tab-pane fade"></div>
-<div id="geoloc" class="tab-pane fade"></div>
-<div id="prefix" class="tab-pane fade"></div>
-<div id="bgp" class="tab-pane fade"></div>
+<div id="asinfo" class="tab-pane"></div>
+<div id="aspath" class="tab-pane"></div>
+<div id="geoloc" class="tab-pane"></div>
+<div id="prefix" class="tab-pane"></div>
+<div id="bgp" class="tab-pane"></div>
 
 </div>
 
@@ -611,30 +603,6 @@ if (_GET["page"] ~= "historical") then
 </script>
 ]]
    end -- if(asn ~= nil)
-else
-   -- historical page
-   require "graph_utils"
-
-   local title = ""
-   if asn ~= nil then
-      title = i18n("asn")..": "..asn
-   elseif vlan ~= nil then
-      title = i18n("vlan")..": "..vlan
-   end
-
-   print[[
-   <div class="bs-docs-example">
-      <nav class="navbar navbar-default" role="navigation">
-      <div class="navbar-collapse collapse">
-      <ul class="nav navbar-nav">
-        <li><a href="#">]] print(title) print[[</a> </li>]]
-   print("\n<li class=\"active\"><a href=\"#\"><i class='fa fa-area-chart fa-lg'></i></a></li>\n")
-   print[[
-      <li><a href="javascript:history.go(-1)"><i class='fa fa-reply'></i></a></li>
-      </ul>
-      </div>
-      </nav>
-   </div>]]
 end
 
 dofile(dirs.installdir .. "/scripts/lua/inc/footer.lua")

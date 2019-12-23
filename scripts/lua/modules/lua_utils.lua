@@ -275,7 +275,7 @@ end
 function printASN(asn, asname)
   asname = asname:gsub('"','')
   if(asn > 0) then
-    return("<A HREF='http://as.robtex.com/as"..asn..".html' title='"..asname.."'>"..asname.."</A> <i class='fa fa-external-link fa-lg'></i>")
+    return("<A HREF='http://as.robtex.com/as"..asn..".html' title='"..asname.."'>"..asname.."</A> <i class='fas fa-external-link-alt fa-lg'></i>")
   else
     return(asname)
   end
@@ -318,7 +318,7 @@ function printIpVersionDropdown(base_url, page_params)
    local ipversion = _GET["version"]
    local ipversion_filter
    if not isEmptyString(ipversion) then
-      ipversion_filter = '<span class="glyphicon glyphicon-filter"></span>'
+      ipversion_filter = '<span class="fas fa-filter"></span>'
    else
       ipversion_filter = ''
    end
@@ -328,9 +328,9 @@ function printIpVersionDropdown(base_url, page_params)
    print[[\
       <button class="btn btn-link dropdown-toggle" data-toggle="dropdown">]] print(i18n("flows_page.ip_version")) print[[]] print(ipversion_filter) print[[<span class="caret"></span></button>\
       <ul class="dropdown-menu" role="menu" id="flow_dropdown">\
-         <li><a href="]] print(getPageUrl(base_url, ipversion_params)) print[[">]] print(i18n("flows_page.all_ip_versions")) print[[</a></li>\
-         <li]] if ipversion == "4" then print(' class="active"') end print[[><a href="]] ipversion_params["version"] = "4"; print(getPageUrl(base_url, ipversion_params)); print[[">]] print(i18n("flows_page.ipv4_only")) print[[</a></li>\
-         <li]] if ipversion == "6" then print(' class="active"') end print[[><a href="]] ipversion_params["version"] = "6"; print(getPageUrl(base_url, ipversion_params)); print[[">]] print(i18n("flows_page.ipv6_only")) print[[</a></li>\
+         <li><a class="dropdown-item" href="]] print(getPageUrl(base_url, ipversion_params)) print[[">]] print(i18n("flows_page.all_ip_versions")) print[[</a></li>\
+         <li]] if ipversion == "4" then print(' class="active"') end print[[><a class="dropdown-item" href="]] ipversion_params["version"] = "4"; print(getPageUrl(base_url, ipversion_params)); print[[">]] print(i18n("flows_page.ipv4_only")) print[[</a></li>\
+         <li]] if ipversion == "6" then print(' class="active"') end print[[><a class="dropdown-item" href="]] ipversion_params["version"] = "6"; print(getPageUrl(base_url, ipversion_params)); print[[">]] print(i18n("flows_page.ipv6_only")) print[[</a></li>\
       </ul>]]
 end
 
@@ -350,7 +350,7 @@ function printVLANFilterDropdown(base_url, page_params)
    local vlan_id = _GET["vlan"]
    local vlan_id_filter = ''
    if not isEmptyString(vlan_id) then
-      vlan_id_filter = '<span class="glyphicon glyphicon-filter"></span>'
+      vlan_id_filter = '<span class="fas fa-filter"></span>'
    end
 
    local vlan_id_params = table.clone(page_params)
@@ -359,12 +359,12 @@ function printVLANFilterDropdown(base_url, page_params)
    print[[\
       <button class="btn btn-link dropdown-toggle" data-toggle="dropdown">]] print(i18n("flows_page.vlan")) print[[]] print(vlan_id_filter) print[[<span class="caret"></span></button>\
       <ul class="dropdown-menu" role="menu" id="flow_dropdown">\
-         <li><a href="]] print(getPageUrl(base_url, vlan_id_params)) print[[">]] print(i18n("flows_page.all_vlan_ids")) print[[</a></li>\]]
+         <li><a class="dropdown-item" href="]] print(getPageUrl(base_url, vlan_id_params)) print[[">]] print(i18n("flows_page.all_vlan_ids")) print[[</a></li>\]]
    for _, vid in ipairs(ids) do
       vlan_id_params["vlan"] = vid
       print[[
          <li>\
-           <a href="]] print(getPageUrl(base_url, vlan_id_params)) print[[">VLAN ]] print(tostring(vid)) print[[</a></li>\]]
+           <a class="dropdown-item" href="]] print(getPageUrl(base_url, vlan_id_params)) print[[">VLAN ]] print(tostring(vid)) print[[</a></li>\]]
    end
    print[[
 
@@ -377,7 +377,7 @@ function printTrafficTypeFilterDropdown(base_url, page_params)
    local traffic_type = _GET["traffic_type"]
    local traffic_type_filter = ''
    if not isEmptyString(traffic_type) then
-      traffic_type_filter = '<span class="glyphicon glyphicon-filter"></span>'
+      traffic_type_filter = '<span class="fas fa-filter"></span>'
    end
 
    local traffic_type_params = table.clone(page_params)
@@ -386,17 +386,17 @@ function printTrafficTypeFilterDropdown(base_url, page_params)
    print[[\
       <button class="btn btn-link dropdown-toggle" data-toggle="dropdown">]] print(i18n("flows_page.direction")) print[[]] print(traffic_type_filter) print[[<span class="caret"></span></button>\
       <ul class="dropdown-menu" role="menu" id="flow_dropdown">\
-         <li><a href="]] print(getPageUrl(base_url, traffic_type_params)) print[[">]] print(i18n("hosts_stats.traffic_type_all")) print[[</a></li>\]]
+         <li><a class="dropdown-item" href="]] print(getPageUrl(base_url, traffic_type_params)) print[[">]] print(i18n("hosts_stats.traffic_type_all")) print[[</a></li>\]]
 
    -- now forthe one-way
    traffic_type_params["traffic_type"] = "one_way"
    print[[
          <li]] if traffic_type == "one_way" then print(' class="active"') end print[[>\
-           <a href="]] print(getPageUrl(base_url, traffic_type_params)) print[[">]] print(i18n("hosts_stats.traffic_type_one_way")) print[[</a></li>\]]
+           <a class="dropdown-item" href="]] print(getPageUrl(base_url, traffic_type_params)) print[[">]] print(i18n("hosts_stats.traffic_type_one_way")) print[[</a></li>\]]
    traffic_type_params["traffic_type"] = "bidirectional"
    print[[
          <li]] if traffic_type == "bidirectional" then print(' class="active"') end print[[>\
-           <a href="]] print(getPageUrl(base_url, traffic_type_params)) print[[">]] print(i18n("hosts_stats.traffic_type_two_ways")) print[[</a></li>\]]
+           <a class="dropdown-item" href="]] print(getPageUrl(base_url, traffic_type_params)) print[[">]] print(i18n("hosts_stats.traffic_type_two_ways")) print[[</a></li>\]]
    print[[
       </ul>]]
 end
@@ -424,7 +424,7 @@ function printFlowDevicesFilterDropdown(base_url, page_params)
    local cur_dev_filter = ''
    local snmp_community = ''
    if not isEmptyString(cur_dev) then
-      cur_dev_filter = '<span class="glyphicon glyphicon-filter"></span>'
+      cur_dev_filter = '<span class="fas fa-filter"></span>'
    end
 
    local dev_params = table.clone(page_params)
@@ -432,10 +432,10 @@ function printFlowDevicesFilterDropdown(base_url, page_params)
       dev_params[p] = nil
    end
 
-   print[[, '<div class="btn-group pull-right">\
+   print[[, '<div class="btn-group float-right">\
       <button class="btn btn-link dropdown-toggle" data-toggle="dropdown">]] print(i18n("flows_page.device_ip")) print[[]] print(cur_dev_filter) print[[<span class="caret"></span></button>\
       <ul class="dropdown-menu" role="menu" id="flow_dropdown">\
-         <li><a href="]] print(getPageUrl(base_url, dev_params)) print[[">]] print(i18n("flows_page.all_devices")) print[[</a></li>\]]
+         <li><a class="dropdown-item" href="]] print(getPageUrl(base_url, dev_params)) print[[">]] print(i18n("flows_page.all_devices")) print[[</a></li>\]]
    for _, dip in ipairs(devips) do
       dev_params["deviceIP"] = dip
       local snmp_community = get_snmp_community(dip, true --[[ no default --]])
@@ -453,7 +453,7 @@ function printFlowDevicesFilterDropdown(base_url, page_params)
 
       print[[
          <li>\
-           <a href="]] print(getPageUrl(base_url, dev_params)) print[[">]] print(i18n("flows_page.device_ip").." "..dip) print[[</a></li>\]]
+           <a class="dropdown-item" href="]] print(getPageUrl(base_url, dev_params)) print[[">]] print(i18n("flows_page.device_ip").." "..dip) print[[</a></li>\]]
    end
    print[[
       </ul>\
@@ -466,22 +466,22 @@ function printFlowDevicesFilterDropdown(base_url, page_params)
 	 local cur_if = _GET[direction]
 	 local cur_if_filter = ''
 	 if not isEmptyString(cur_if) then
-	    cur_if_filter = '<span class="glyphicon glyphicon-filter"></span>'
+	    cur_if_filter = '<span class="fas fa-filter"></span>'
 	 end
 
 	 local if_params = table.clone(page_params)
 
 	 if_params[direction] = nil
-	    print[[, '<div class="btn-group pull-right">\
+	    print[[, '<div class="btn-group float-right">\
       <button class="btn btn-link dropdown-toggle" data-toggle="dropdown">]] print(i18n("flows_page."..direction)) print[[]] print(cur_if_filter) print[[<span class="caret"></span></button>\
       <ul class="dropdown-menu" role="menu" id="flow_dropdown">\
-         <li><a href="]] print(getPageUrl(base_url, if_params)) print[[">]] print(i18n("flows_page.all_"..direction)) print[[</a></li>\]]
+         <li><a class="dropdown-item" href="]] print(getPageUrl(base_url, if_params)) print[[">]] print(i18n("flows_page.all_"..direction)) print[[</a></li>\]]
 
 	    for portidx, _ in pairsByKeys(ports, asc) do
 	       if_params[direction] = portidx
 	       print[[
          <li>\
-           <a href="]] print(getPageUrl(base_url, if_params)) print[[">]] print(i18n("flows_page."..direction).." "..tostring(portidx)) print[[</a></li>\]]
+           <a class="dropdown-item" href="]] print(getPageUrl(base_url, if_params)) print[[">]] print(i18n("flows_page."..direction).." "..tostring(portidx)) print[[</a></li>\]]
 	    end
 	    print[[
       </ul>\
@@ -917,7 +917,7 @@ function addGauge(name, url, maxValue, width, height)
   if(url ~= nil) then print('<A HREF="'..url..'">') end
   print [[
   <div class="progress">
-       <div id="]] print(name) print [[" class="progress-bar progress-bar-warning"></div>
+       <div id="]] print(name) print [[" class="progress-bar bg-warning"></div>
   </div>
   ]]
   if(url ~= nil) then print('</A>\n') end
@@ -1093,9 +1093,15 @@ end
 
 -- #################################
 
-function hostVisualization(ip, name)
-   if (ip ~= name) and isIPv6(ip) then
-      return name.." [IPv6]"
+function hostVisualization(ip, name, vlan)
+   if (ip ~= name) then
+      if isIPv6(ip) then
+        name = name.." [IPv6]"
+      end
+   else
+      if vlan ~= nil and tonumber(vlan) > 0 then
+        name = name.."@"..vlan
+      end
    end
    return name
 end
@@ -1114,7 +1120,7 @@ function resolveAddress(hostinfo, allow_empty)
          return getResolvedAddress(hostinfo)
       end
    end
-   return hostVisualization(hostinfo["host"], hostname)
+   return hostVisualization(hostinfo["host"], hostname, hostinfo["vlan"])
 end
 
 -- #################################
@@ -1122,7 +1128,7 @@ end
 -- NOTE: use host2name when possible
 function getResolvedAddress(hostinfo)
    local hostname = ntop.getResolvedName(hostinfo["host"])
-   return hostVisualization(hostinfo["host"], hostname)
+   return hostVisualization(hostinfo["host"], hostname, hostinfo["vlan"])
 end
 
 -- #################################
@@ -1141,17 +1147,17 @@ function getApplicationIcon(name)
   local icon = ""
   if(name == nil) then name = "" end
 
-  if(findString(name, "Skype")) then icon = '<i class=\'fa fa-skype fa-lg\'></i>'
-  elseif(findString(name, "Unknown")) then icon = '<i class=\'fa fa-question fa-lg\'></i>'
-  elseif(findString(name, "Twitter")) then icon = '<i class=\'fa fa-twitter fa-lg\'></i>'
-  elseif(findString(name, "DropBox")) then icon = '<i class=\'fa fa-dropbox fa-lg\'></i>'
-  elseif(findString(name, "Spotify")) then icon = '<i class=\'fa fa-spotify fa-lg\'></i>'
-  elseif(findString(name, "Apple")) then icon = '<i class=\'fa fa-apple fa-lg\'></i>'
+  if(findString(name, "Skype")) then icon = '<i class=\'fas fa-skype\'></i>'
+  elseif(findString(name, "Unknown")) then icon = '<i class=\'fas fa-question\'></i>'
+  elseif(findString(name, "Twitter")) then icon = '<i class=\'fab fa-twitter\'></i>'
+  elseif(findString(name, "DropBox")) then icon = '<i class=\'fab fa-dropbox\'></i>'
+  elseif(findString(name, "Spotify")) then icon = '<i class=\'fab fa-spotify\'></i>'
+  elseif(findString(name, "Apple")) then icon = '<i class=\'fab fa-apple\'></i>'
   elseif(findString(name, "Google") or
-    findString(name, "Chrome")) then icon = '<i class=\'fa fa-google-plus fa-lg\'></i>'
-  elseif(findString(name, "FaceBook")) then icon = '<i class=\'fa fa-facebook-square fa-lg\'></i>'
-  elseif(findString(name, "Youtube")) then icon = '<i class=\'fa fa-youtube-square fa-lg\'></i>'
-  elseif(findString(name, "thunderbird")) then icon = '<i class=\'fa fa-paper-plane fa-lg\'></i>'
+    findString(name, "Chrome")) then icon = '<i class=\'fab fa-google-plus-g\'></i>'
+  elseif(findString(name, "FaceBook")) then icon = '<i class=\'fab fa-facebook\'></i>'
+  elseif(findString(name, "Youtube")) then icon = '<i class=\'fab fa-youtube\'></i>'
+  elseif(findString(name, "thunderbird")) then icon = '<i class=\'fas fa-paper-plane\'></i>'
   end
 
   return(icon)
@@ -1200,6 +1206,16 @@ function splitNetworkPrefix(net)
    local prefix = tonumber(net:match("/(.+)"))
    local address = net:gsub("/.+","")
    return address, prefix
+end
+
+-- ##############################################
+
+function splitNetworkWithVLANPrefix(net_mask_vlan)
+   local vlan = tonumber(net_mask_vlan:match("@(.+)"))
+   local net_mask = net_mask_vlan:gsub("@.+","")
+   local prefix = tonumber(net_mask:match("/(.+)"))
+   local address = net_mask:gsub("/.+","")
+   return address, prefix, vlan
 end
 
 -- ##############################################
@@ -1405,7 +1421,7 @@ function flowinfo2process(process, host_info_to_url)
 	 
 	 clean_name = t[#t]
 
-	 proc_name = string.format("<A HREF='%s/lua/process_details.lua?%s&pid_name=%s&pid=%u'><i class='fa fa-terminal'></i> %s</A>",
+	 proc_name = string.format("<A HREF='%s/lua/process_details.lua?%s&pid_name=%s&pid=%u'><i class='fas fa-terminal'></i> %s</A>",
 				   ntop.getHttpPrefix(),
 				   host_info_to_url,
 				   full_clean_name,
@@ -1416,7 +1432,7 @@ function flowinfo2process(process, host_info_to_url)
       -- if not isEmptyString(process["user_name"]) then
       -- 	 local clean_user_name = process["user_name"]:gsub("'", '')
 
-      -- 	 proc_user_name = string.format("<A HREF='%s/lua/username_details.lua?%s&username=%s&uid=%u'><i class='fa fa-linux'></i> %s</A>",
+      -- 	 proc_user_name = string.format("<A HREF='%s/lua/username_details.lua?%s&username=%s&uid=%u'><i class='fas fa-linux'></i> %s</A>",
       -- 					ntop.getHttpPrefix(),
       -- 					host_info_to_url,
       -- 					clean_user_name,
@@ -1436,13 +1452,13 @@ function flowinfo2container(container)
    local fmt, cont_name, pod_name = '', '', ''
 
    if container then
-      cont_name = string.format("<A HREF='%s/lua/flows_stats.lua?container=%s'><i class='fa fa-ship'></i> %s</A>",
+      cont_name = string.format("<A HREF='%s/lua/flows_stats.lua?container=%s'><i class='fas fa-ship'></i> %s</A>",
 				ntop.getHttpPrefix(),
 				container["id"], format_utils.formatContainer(container))
 
       -- local formatted_pod = format_utils.formatPod(container)
       -- if not isEmptyString(formatted_pod) then
-      -- 	 pod_name = string.format("<A HREF='%s/lua/containers_stats.lua?pod=%s'><i class='fa fa-crosshairs'></i> %s</A>",
+      -- 	 pod_name = string.format("<A HREF='%s/lua/containers_stats.lua?pod=%s'><i class='fas fa-crosshairs'></i> %s</A>",
       -- 				  ntop.getHttpPrefix(),
       -- 				  formatted_pod,
       -- 				  formatted_pod)
@@ -1744,39 +1760,6 @@ function hostinfo2jqueryid(host_info,host_type)
   return rsp
 end
 
--- version is major.minor.veryminor
-function version2int(v)
-   if(v == nil) then return(0) end
-
-  e = string.split(v, "%.");
-  if(e ~= nil) then
-    major = e[1]
-    minor = e[2]
-    veryminor = e[3]
-
-    if(major == nil or tonumber(major) == nil or type(major) ~= "string")     then major = 0 end
-    if(minor == nil or tonumber(minor) == nil or type(minor) ~= "string")     then minor = 0 end
-    if(veryminor == nil or tonumber(veryminor) == nil or type(veryminor) ~= "string") then veryminor = 0 end
-
-    version = tonumber(major)*1000 + tonumber(minor)*100 -- + tonumber(veryminor)
-    return(version)
-  else
-    return(0)
-  end
-end
-
-function get_version_update_msg(info, latest_version)
-  version_elems = split(info["version"], " ")
-  new_version = version2int(latest_version)
-  this_version = version2int(version_elems[1])
-
-  if(new_version > this_version) then
-   return [[<div class='alert alert-warning'><font color=red><i class='fa fa-cloud-download fa-lg'></i> A new ]]..info["product"]..[[ (v.]]..(latest_version)..[[) is available for <A HREF='http://www.ntop.org/get-started/download/'>download</A>: please upgrade.</font></div>]]
-  else
-   return ""
-  end
-end
-
 -- NOTE: on index based tables using #table is much more performant
 function table.len(table)
  local count = 0
@@ -1842,14 +1825,6 @@ function getThroughputType()
     throughput_type = "bps"
   end
   return throughput_type
-end
-
-function isLoopback(name)
-  if((name == "lo") or (name == "lo0")) then
-    return(true)
-  else
-    return(false)
-  end
 end
 
 function processColor(proc)
@@ -1943,14 +1918,13 @@ function setInterfaceRegreshRate(ifid, refreshrate)
    end
 end
 
-local function getCustomnDPIProtoCategoriesKey(ifid)
-   return getRedisIfacePrefix(ifid)..".custom_nDPI_proto_categories"
+local function getCustomnDPIProtoCategoriesKey()
+   return "ntop.prefs.custom_nDPI_proto_categories"
 end
 
-function getCustomnDPIProtoCategories(if_name)
-   local ifid = getInterfaceId(if_name)
+function getCustomnDPIProtoCategories()
    local ndpi_protos = interface.getnDPIProtocols()
-   local key = getCustomnDPIProtoCategoriesKey(ifid)
+   local key = getCustomnDPIProtoCategoriesKey()
 
    local res = {}
    for _, app_id in pairs(ndpi_protos) do
@@ -1963,24 +1937,13 @@ function getCustomnDPIProtoCategories(if_name)
    return res
 end
 
-function initCustomnDPIProtoCategories()
-   for _, ifname in pairs(interface.getIfNames()) do
-      interface.select(ifname)
-      local custom = getCustomnDPIProtoCategories(ifname)
+function setCustomnDPIProtoCategory(app_id, new_cat_id)
+   ntop.setnDPIProtoCategory(app_id, new_cat_id)
 
-      for app_id, cat_id in pairs(custom) do
-	 interface.setnDPIProtoCategory(app_id, cat_id)
-      end
-   end
-end
-
-function setCustomnDPIProtoCategory(if_name, app_id, new_cat_id)
-   interface.select(if_name)
-   interface.setnDPIProtoCategory(app_id, new_cat_id)
-
-   local ifid = getInterfaceId(if_name)
    local key = getCustomnDPIProtoCategoriesKey(ifid)
 
+   -- NOTE: when the ndpi struct changes, the custom associations are
+   -- reloaded by Ntop::loadProtocolsAssociations
    ntop.setHashCache(key, tostring(app_id), tostring(new_cat_id));
 end
 
@@ -2130,15 +2093,15 @@ end
 
 function formatBreed(breed)
    if(breed == "Safe") then
-      return("<i class='fa fa-lock' alt='Safe Protocol'></i>")
+      return("<i class='fas fa-lock' alt='Safe Protocol'></i>")
    elseif(breed == "Acceptable") then
-      return("<i class='fa fa-thumbs-o-up' alt='Acceptable Protocol'></i>")
+      return("<i class='fas fa-thumbs-up' alt='Acceptable Protocol'></i>")
    elseif(breed == "Fun") then
-      return("<i class='fa fa-smile-o' alt='Fun Protocol'></i>")
+      return("<i class='fas fa-smile' alt='Fun Protocol'></i>")
    elseif(breed == "Unsafe") then
-      return("<i class='fa fa-thumbs-o-down'></i>")
+      return("<i class='fas fa-thumbs-down'></i>")
    elseif(breed == "Dangerous") then
-      return("<i class='fa fa-warning'></i>")
+      return("<i class='fas fa-exclamation-triangle'></i>")
    else
       return("")
    end
@@ -2382,7 +2345,7 @@ end
 -- ###############################################
 
 function formatWebSite(site)
-   return("<A target=\"_blank\" HREF=\"http://"..site.."\">"..site.."</A> <i class=\"fa fa-external-link\"></i></th>")
+   return("<A target=\"_blank\" HREF=\"http://"..site.."\">"..site.."</A> <i class=\"fas fa-external-link-alt\"></i></th>")
 end
 
 -- ###############################################
@@ -2409,7 +2372,7 @@ function formatElephantFlowStatus(status, flowstatus_info, local2remote)
       end
    end
 
-   res = string.format("%s<sup><i class='fa fa-info-circle' aria-hidden='true' title='"..i18n("flow_details.elephant_flow_descr").."'></i></sup>", res)
+   res = string.format("%s<sup><i class='fas fa-info-circle' aria-hidden='true' title='"..i18n("flow_details.elephant_flow_descr").."'></i></sup>", res)
 
    if threshold ~= "" then
       res = string.format("%s [%s]", res, i18n("flow_details.elephant_exceeded", {vol = bytesToSize(threshold)}))
@@ -2428,12 +2391,12 @@ end
 
 -- print TCP flags
 function printTCPFlags(flags)
-   if(hasbit(flags,0x01)) then print('<span class="label label-info">FIN</span> ') end
-   if(hasbit(flags,0x02)) then print('<span class="label label-info">SYN</span> ')  end
-   if(hasbit(flags,0x04)) then print('<span class="label label-danger">RST</span> ') end
-   if(hasbit(flags,0x08)) then print('<span class="label label-info">PUSH</span> ') end
-   if(hasbit(flags,0x10)) then print('<span class="label label-info">ACK</span> ')  end
-   if(hasbit(flags,0x20)) then print('<span class="label label-info">URG</span> ')  end
+   if(hasbit(flags,0x01)) then print('<span class="badge badge-info">FIN</span> ') end
+   if(hasbit(flags,0x02)) then print('<span class="badge badge-info">SYN</span> ')  end
+   if(hasbit(flags,0x04)) then print('<span class="badge badge-danger">RST</span> ') end
+   if(hasbit(flags,0x08)) then print('<span class="badge badge-info">PUSH</span> ') end
+   if(hasbit(flags,0x10)) then print('<span class="badge badge-info">ACK</span> ')  end
+   if(hasbit(flags,0x20)) then print('<span class="badge badge-info">URG</span> ')  end
 end
 
 -- convert the integer carrying TCP flags in a more convenient lua table
@@ -2464,141 +2427,10 @@ function historicalProtoHostHref(ifId, host, l4_proto, ndpi_proto_id, info)
       if((ndpi_proto_id ~= nil) and (ndpi_proto_id ~= "")) then hist_url = hist_url.."&protocol="..ndpi_proto_id end
       if((info ~= nil) and (info ~= "")) then hist_url = hist_url.."&info="..info end
       print('&nbsp;')
-      -- print('<span class="label label-info">')
-      print('<a href="'..hist_url..'&epoch_begin='..tostring(ago1h)..'" title="Flows seen in the last hour"><i class="fa fa-history fa-lg"></i></a>')
+      -- print('<span class="badge badge-info">')
+      print('<a href="'..hist_url..'&epoch_begin='..tostring(ago1h)..'" title="Flows seen in the last hour"><i class="fas fa-history fa-lg"></i></a>')
       -- print('</span>')
    end
-end
-
--- ##########################################
-
-local _icmp_types = {
-   { 0, 0, "icmp_v4_types.type_0_0_echo_reply" },
-   { 3, 0, "icmp_v4_types.type_3_0_network_unreachable" },
-   { 3, 1, "icmp_v4_types.type_3_1_host_unreachable" },
-   { 3, 2, "icmp_v4_types.type_3_2_protocol_unreachable" },
-   { 3, 3, "icmp_v4_types.type_3_3_port_unreachable" },
-   { 3, 4, "icmp_v4_types.type_3_4_fragmentation_needed_but_no_fragment_bit_set" },
-   { 3, 5, "icmp_v4_types.type_3_5_source_routing_failed" },
-   { 3, 6, "icmp_v4_types.type_3_6_destination_network_unknown" },
-   { 3, 7, "icmp_v4_types.type_3_7_destination_host_unknown" },
-   { 3, 8, "icmp_v4_types.type_3_8_source_host_isolated" },
-   { 3, 9, "icmp_v4_types.type_3_9_destination_network_administratively_prohibited" },
-   { 3, 10, "icmp_v4_types.type_3_10_destination_host_administratively_prohibited" },
-   { 3, 11, "icmp_v4_types.type_3_11_network_unreachable_for_tos" },
-   { 3, 12, "icmp_v4_types.type_3_12_host_unreachable_for_tos" },
-   { 3, 13, "icmp_v4_types.type_3_13_communication_administratively_prohibited_by_filtering" },
-   { 3, 14, "icmp_v4_types.type_3_14_host_precedence_violation" },
-   { 3, 15, "icmp_v4_types.type_3_15_precedence_cutoff_in_effect" },
-   { 4, 0, "icmp_v4_types.type_4_0_source_quench" },
-   { 5, 0, "icmp_v4_types.type_5_0_redirect_for_network" },
-   { 5, 1, "icmp_v4_types.type_5_1_redirect_for_host" },
-   { 5, 2, "icmp_v4_types.type_5_2_redirect_for_tos_and_network" },
-   { 5, 3, "icmp_v4_types.type_5_3_redirect_for_tos_and_host" },
-   { 8, 0, "icmp_v4_types.type_8_0_echo_request" },
-   { 9, 0, "icmp_v4_types.type_9_0_router_advertisement" },
-   { 10, 0, "icmp_v4_types.type_10_0_route_solicitation" },
-   { 11, 0, "icmp_v4_types.type_11_0_ttl_equals_0_during_transit" },
-   { 11, 1, "icmp_v4_types.type_11_1_ttl_equals_0_during_reassembly" },
-   { 12, 0, "icmp_v4_types.type_12_0_ip_header_bad" },
-   { 12, 1, "icmp_v4_types.type_12_1_required_options_missing" },
-   { 13, 0, "icmp_v4_types.type_13_0_timestamp_request" },
-   { 14, 0, "icmp_v4_types.type_14_0_timestamp_reply" },
-   { 15, 0, "icmp_v4_types.type_15_0_information_request" },
-   { 16, 0, "icmp_v4_types.type_16_0_information_reply" },
-   { 17, 0, "icmp_v4_types.type_17_0_address_mask_request" },
-   { 18, 0, "icmp_v4_types.type_18_0_address_mask_reply" }
-}
-
--- Code is currently ignored on IVMPv6
-local _icmpv6_types = {
-   { 0, i18n("icmp_v6_types.type_0_reserved") },
-   { 1, i18n("icmp_v6_types.type_1_destination_unreachable") },
-   { 2, i18n("icmp_v6_types.type_2_packet_too_big") },
-   { 3, i18n("icmp_v6_types.type_3_time_exceeded") },
-   { 4, i18n("icmp_v6_types.type_4_parameter_problem") },
-   { 100, i18n("icmp_v6_types.type_100_private_experimentation") },
-   { 101, i18n("icmp_v6_types.type_101_private_experimentation") },
-   --{ 102-126, i18n("icmp_v6_types.type_102-126_unassigned") },
-   { 127, i18n("icmp_v6_types.type_127_reserved_for_expansion_of_icmpv6_error_messages") },
-   { 128, i18n("icmp_v6_types.type_128_echo_request") },
-   { 129, i18n("icmp_v6_types.type_129_echo_reply") },
-   { 130, i18n("icmp_v6_types.type_130_multicast_listener_query") },
-   { 131, i18n("icmp_v6_types.type_131_multicast_listener_report") },
-   { 132, i18n("icmp_v6_types.type_132_multicast_listener_done") },
-   { 133, i18n("icmp_v6_types.type_133_router_solicitation") },
-   { 134, i18n("icmp_v6_types.type_134_router_advertisement") },
-   { 135, i18n("icmp_v6_types.type_135_neighbor_solicitation") },
-   { 136, i18n("icmp_v6_types.type_136_neighbor_advertisement") },
-   { 137, i18n("icmp_v6_types.type_137_redirect_message") },
-   { 138, i18n("icmp_v6_types.type_138_router_renumbering") },
-   { 139, i18n("icmp_v6_types.type_139_icmp_node_information_query") },
-   { 140, i18n("icmp_v6_types.type_140_icmp_node_information_response") },
-   { 141, i18n("icmp_v6_types.type_141_inverse_neighbor_discovery_solicitation_message") },
-   { 142, i18n("icmp_v6_types.type_142_inverse_neighbor_discovery_advertisement_message") },
-   { 143, i18n("icmp_v6_types.type_143_version_2_multicast_listener_report") },
-   { 144, i18n("icmp_v6_types.type_144_home_agent_address_discovery_request_message") },
-   { 145, i18n("icmp_v6_types.type_145_home_agent_address_discovery_reply_message") },
-   { 146, i18n("icmp_v6_types.type_146_mobile_prefix_solicitation") },
-   { 147, i18n("icmp_v6_types.type_147_mobile_prefix_advertisement") },
-   { 148, i18n("icmp_v6_types.type_148_certification_path_solicitation_message") },
-   { 149, i18n("icmp_v6_types.type_149_certification_path_advertisement_message") },
-   { 150, i18n("icmp_v6_types.type_150_icmp_messages_utilized_by_experimental_mobility_protocols") },
-   { 151, i18n("icmp_v6_types.type_151_multicast_router_advertisement") },
-   { 152, i18n("icmp_v6_types.type_152_multicast_router_solicitation") },
-   { 153, i18n("icmp_v6_types.type_153_multicast_router_termination") },
-   { 154, i18n("icmp_v6_types.type_154_fmipv6_messages") },
-   { 155, i18n("icmp_v6_types.type_155_rpl_control_message") },
-   { 156, i18n("icmp_v6_types.type_156_ilnpv6_locator_update_message") },
-   { 157, i18n("icmp_v6_types.type_157_duplicate_address_request") },
-   { 158, i18n("icmp_v6_types.type_158_duplicate_address_confirmation") },
-   { 159, i18n("icmp_v6_types.type_159_mpl_control_message") },
-   --{ 160-199, i18n("icmp_v6_types.type_160-199_unassigned") },
-   { 200, i18n("icmp_v6_types.type_200_private_experimentation") },
-   { 201, i18n("icmp_v6_types.type_201_private_experimentation") },
-   { 255, i18n("icmp_v6_types.type_255_reserved_for_expansion_of_icmpv6_informational_messages") }
-}
-
--- #############################################
-
-function getICMPV6TypeCode(icmp)
-  local t = icmp.type
-  local c = icmp.code
-
-  for _, _e in ipairs(_icmpv6_types) do
-    if(_e[1] == t) then
-    	return(_e[2])
-    end
-  end
-
-  if t and c then
-     return (t or '').."/"..(c or '')
-  else
-     return ''
-  end
-end
-
--- #############################################
-
-function getICMPTypeCode(icmp)
-  local t = icmp.type
-  local c = icmp.code
-  local extra = {src_port = '', dst_port = '', protocol = ''}
-
-  if icmp["unreach"] then
-     extra["src_port"] = icmp["unreach"]["src_port"]..''
-     extra["dst_port"] = icmp["unreach"]["dst_port"]..''
-     extra["protocol"] = getL4ProtoName(icmp["unreach"]["protocol"])
-  end
-
-  for _, _e in ipairs(_icmp_types) do
-    if((_e[1] == t) and (_e[2] == c)) then
-       local res = _e[3]
-       return i18n(res, extra)
-    end
-  end
-
- return(getICMPV6TypeCode(icmp))
 end
 
 -- #############################################
@@ -2606,23 +2438,23 @@ end
 -- Add here the icons you guess based on the Mac address
 -- TODO move to discovery stuff
 local guess_icon_keys = {
-  ["dell inc."] = "fa-desktop",
-  ["vmware, inc."] = "fa-desktop",
-  ["xensource, inc."] = "fa-desktop",
-  ["lanner electronics, inc."] = "fa-desktop",
-  ["nexcom international co., ltd."] = "fa-desktop",
-  ["apple, inc."] = "fa-apple",
-  ["cisco systems, inc"] = "fa-arrows",
-  ["juniper networks"] = "fa-arrows",
-  ["brocade communications systems, inc."] = "fa-arrows",
-  ["force10 networks, inc."] = "fa-arrows",
-  ["huawei technologies co.,ltd"] = "fa-arrows",
-  ["alcatel-lucent ipd"] = "fa-arrows",
-  ["arista networks, inc."] = "fa-arrows",
-  ["3com corporation"] = "fa-arrows",
-  ["routerboard.com"] = "fa-arrows",
-  ["extreme networks"] = "fa-arrows",
-  ["xerox corporation"] = "fa-print"
+  ["dell inc."] = "fas fa-desktop",
+  ["vmware, inc."] = "fas fa-desktop",
+  ["xensource, inc."] = "fas fa-desktop",
+  ["lanner electronics, inc."] = "fas fa-desktop",
+  ["nexcom international co., ltd."] = "fas fa-desktop",
+  ["apple, inc."] = "fab fa-apple",
+  ["cisco systems, inc"] = "fas fa-arrows-alt",
+  ["juniper networks"] = "fas fa-arrows-alt",
+  ["brocade communications systems, inc."] = "fas fa-arrows-alt",
+  ["force10 networks, inc."] = "fas fa-arrows-alt",
+  ["huawei technologies co.,ltd"] = "fas fa-arrows-alt",
+  ["alcatel-lucent ipd"] = "fas fa-arrows-alt",
+  ["arista networks, inc."] = "fas fa-arrows-alt",
+  ["3com corporation"] = "fas fa-arrows-alt",
+  ["routerboard.com"] = "fas fa-arrows-alt",
+  ["extreme networks"] = "fas fa-arrows-alt",
+  ["xerox corporation"] = "fas fa-print"
 }
 
 function guessHostIcon(key)
@@ -2630,7 +2462,7 @@ function guessHostIcon(key)
    local icon = guess_icon_keys[m]
 
    if((icon ~= nil) and (icon ~= "")) then
-      return(" <i class='fa "..icon.." fa-lg'></i>")
+      return(" <i class='"..icon.." fa-lg'></i>")
    else
       return ""
    end
@@ -2780,9 +2612,9 @@ function table.compare(t1, t2, ignore_mt)
 end
 
 function toboolean(s)
-  if s == "true" then
+  if((s == "true") or (s == true)) then
     return true
-  elseif s == "false" then
+  elseif((s == "false") or (s == false)) then
     return false
   else
     return nil
@@ -2869,7 +2701,7 @@ function makeResolutionButtons(fmt_to_data, ctrl_id, fmt, value, extra, max_val)
   end
 
   local style = table.merge({display="flex"}, extra.style or {})
-  html_lines[#html_lines+1] = [[<div class="btn-group ]] .. table.concat(extra.classes or {}, "") .. [[" id="]] .. ctrl_id .. [[" data-toggle="buttons" style="]] .. table.tconcat(style, ":", "; ", ";") .. [[">]]
+  html_lines[#html_lines+1] = [[<div class="btn-group btn-group-toggle ]] .. table.concat(extra.classes or {}, "") .. [[" id="]] .. ctrl_id .. [[" data-toggle="buttons" style="]] .. table.tconcat(style, ":", "; ", ";") .. [[">]]
 
   -- foreach character in format
   string.gsub(fmt, ".", function(k)
@@ -2882,7 +2714,7 @@ function makeResolutionButtons(fmt_to_data, ctrl_id, fmt, value, extra, max_val)
 	  if selected == k then
 	     line[#line+1] = [[ btn-primary active]]
 	  else
-	     line[#line+1] = [[ btn-default]]
+	     line[#line+1] = [[ btn-secondary]]
 	  end
 	  line[#line+1] = [[ btn-sm"><input data-resol="]] .. k .. [[" value="]] .. truncate(v.value) .. [[" title="]] .. v.label .. [[" name="opt_resbt_]] .. k .. [[_]] .. ctrl_id .. [[" autocomplete="off" type="radio"]]
 	  if selected == k then line[#line+1] = [[ checked="checked"]] end
@@ -2935,8 +2767,8 @@ function makeResolutionButtons(fmt_to_data, ctrl_id, fmt, value, extra, max_val)
 
       function resol_selector_change_selection(selected) {
          selected.attr('checked', 'checked')
-          .closest("label").removeClass('btn-default').addClass('btn-primary')
-          .siblings().removeClass('active').removeClass('btn-primary').addClass('btn-default').find("input").removeAttr('checked');
+          .closest("label").removeClass('btn-secondary').addClass('btn-primary')
+          .siblings().removeClass('active').removeClass('btn-primary').addClass('btn-secondary').find("input").removeAttr('checked');
 
         resol_selector_reset_input_range(selected);
       }
@@ -3138,7 +2970,7 @@ function stripVlan(name)
 end
 
 function getSafeChildIcon()
-   return("&nbsp;<font color='#5cb85c'><i class='fa fa-lg fa-child' aria-hidden='true'></i></font>")
+   return("&nbsp;<font color='#5cb85c'><i class='fas fa-lg fa-child' aria-hidden='true'></i></font>")
 end
 
 -- ###########################################
@@ -3213,7 +3045,7 @@ end
 function printWarningAlert(message)
    print[[<div class="alert alert-warning alert-dismissable" role="alert">]]
    print[[<a class="close" data-dismiss="alert" aria-label="close">&times;</a>]]
-   print[[<i class="fa fa-warning fa-sm"></i> ]]
+   print[[<i class="fas fa-exclamation-triangle fa-sm"></i> ]]
    print[[<strong>]] print(i18n("warning")) print[[</strong> ]]
    print(message)
    print[[</div>]]

@@ -98,6 +98,7 @@
 
 #ifdef WIN32
 #undef PACKAGE_OSNAME
+#define localtime_r(a,b)	localtime(a)
 #ifdef _WIN64
 #define PACKAGE_OSNAME            "Win64"
 #else
@@ -187,12 +188,12 @@
 #define DOMAIN_WHITELIST_CAT    "ntopng.domain.whitelist"
 #define DNS_CACHE               "ntopng.dns.cache"
 #define DHCP_CACHE              "ntopng.dhcp.%d.cache"
-#define DNS_TO_RESOLVE          "ntopng.dns.toresolve"
 #define NTOPNG_TRACE            "ntopng.trace"
 #define TRACES_PER_LOG_FILE_HIGH_WATERMARK 10000
 #define MAX_NUM_NTOPNG_LOG_FILES           5
 #define MAX_NUM_NTOPNG_TRACES              32
 #define PCAP_DUMP_INTERFACES_DELETE_HASH   "ntopng.prefs.delete_pcap_dump_interfaces_data"
+#define CUSTOM_NDPI_PROTOCOLS_ASSOCIATIONS_HASH "ntop.prefs.custom_nDPI_proto_categories"
 #define TRAFFIC_FILTERING_CACHE            "ntopng.trafficfiltering.cache"
 #define TRAFFIC_FILTERING_TO_RESOLVE       "ntopng.trafficfiltering.toresolve"
 #define PREFS_CHANGED            "ntopng.prefs_changed"
@@ -495,8 +496,8 @@
 #define CONST_AGGREGATIONS            "aggregations"
 #define CONST_HOST_CONTACTS           "host_contacts"
 
-#define ALERT_ENTITY_CALLBACK_CHECK_ALERTS    "checkAlerts"
-#define ALERT_ENTITY_CALLBACK_RELEASE_ALERTS  "releaseAlerts"
+#define USER_SCRIPTS_RUN_CALLBACK             "runScripts"
+#define USER_SCRIPTS_RELEASE_ALERTS_CALLBACK  "releaseAlerts"
 
 #define CONST_INFLUXDB_FILE_QUEUE          "ntopng.influx_file_queue"
 #define CONST_INFLUXDB_FLUSH_TIME          10 /* sec */
@@ -629,6 +630,7 @@
 #define CONST_TREND_TIME_GRANULARITY   1 /* sec */
 #define CONST_DEFAULT_PRIVATE_NETS     "192.168.0.0/16,172.16.0.0/12,10.0.0.0/8,127.0.0.0/8"
 #define CONST_DEFAULT_LOCAL_NETS       "127.0.0.0/8"
+#define CONST_DEFAULT_ALL_NETS         "0.0.0.0/0,::/0"
 
 #define CONST_NUM_RESOLVERS            2
 
@@ -855,13 +857,17 @@
 #define HOURLY_SCRIPT_PATH           "hourly.lua"
 #define DAILY_SCRIPT_PATH            "daily.lua"
 
-#define SYSLOG_SCRIPT_PATH         "callbacks/syslog.lua"
-#define SYSLOG_SCRIPTS_PATH        "callbacks/syslog"
+#define SYSLOG_SCRIPT_PATH           "callbacks/system/syslog.lua"
 #define SYSLOG_SCRIPT_CALLBACK_EVENT "handleEvent"
 
 /* GRE (Generic Route Encapsulation) */
 #ifndef IPPROTO_GRE
 #define IPPROTO_GRE 47
+#endif
+
+/* 6-in-4 Tunnels */
+#ifndef IPPROTO_IPV6
+#define IPPROTO_IPV6 41
 #endif
 
 #define GRE_HEADER_CHECKSUM      0x8000 /* 32 bit */

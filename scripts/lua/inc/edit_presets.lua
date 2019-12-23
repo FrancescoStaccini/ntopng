@@ -139,8 +139,8 @@ local function printDeviceProtocolsPage()
          print[[<input type="hidden" name="]] print(k) print[[" value="]] print(v) print[[" />]]
       end
       print[[
-        <button type="button" class="btn btn-default btn-sm" style="margin-bottom: 18px;" onclick="$(this).closest('form').submit();">
-          <i class="fa fa-close fa-lg" aria-hidden="true" data-original-title="" title=""></i> ]] print(proto_name) print[[
+        <button type="button" class="btn btn-secondary btn-sm" style="margin-bottom: 18px;" onclick="$(this).closest('form').submit();">
+          <i class="fas fa-times fa-lg" aria-hidden="true" data-original-title="" title=""></i> ]] print(proto_name) print[[
         </button>
       </form>
     </td>]]
@@ -201,10 +201,10 @@ local function printDeviceProtocolsPage()
    print[[<form id="]] print(form_id) print[[" lass="form-inline" style="margin-bottom: 0px;" method="post">
       <input type="hidden" name="csrf" value="]] print(ntop.getRandomCSRFValue()) print[[">
       <div id="]] print(table_id) print[["></div>
-      <button class="btn btn-primary" style="float:right; margin-right:1em;" disabled="disabled" type="submit">]] print(i18n("save_settings")) print[[</button>
+      <button class="btn btn-primary" style="float:right; margin-right:1em; margin-left: auto" disabled="disabled" type="submit">]] print(i18n("save_settings")) print[[</button>
    </form>
 
-   <button class="btn btn-default" onclick="$('#to_reset_devtype').html($('#device_type_selector option:selected').text()); $('#presetsResetDefaults').modal('show');" style="float:right; margin-right:1em;"><i class="fa fa-undo" aria-hidden="true" data-original-title="" title=""></i> ]] print(i18n("users.reset_to_defaults")) print[[</button>
+   <button class="btn btn-secondary" onclick="$('#to_reset_devtype').html($('#device_type_selector option:selected').text()); $('#presetsResetDefaults').modal('show');" style="float:right; margin-right:1em;"><i class="fas fa-undo" aria-hidden="true" data-original-title="" title=""></i> ]] print(i18n("users.reset_to_defaults")) print[[</button>
 
    <br>]]
  
@@ -271,7 +271,7 @@ local function printDeviceProtocolsPage()
 
     $("#]] print(table_id) print[[").datatable({
       url: url_update ,
-      class: "table table-striped table-bordered table-condensed",
+      class: "table table-striped table-bordered table-sm",
 ]]
 
    -- Table preferences
@@ -299,8 +299,8 @@ local function printDeviceProtocolsPage()
       buttons: []]
 
    -- 'Filter Policies' button
-   print('\'<div class="btn-group pull-right"><div class="btn btn-link dropdown-toggle" data-toggle="dropdown">'..
-         i18n("nedge.filter_policies") .. ternary(not isEmptyString(policy_filter), '<span class="glyphicon glyphicon-filter"></span>', '') ..
+   print('\'<div class="btn-group float-right"><div class="btn btn-link dropdown-toggle" data-toggle="dropdown">'..
+         i18n("nedge.filter_policies") .. ternary(not isEmptyString(policy_filter), '<span class="fas fa-filter"></span>', '') ..
          '<span class="caret"></span></div> <ul class="dropdown-menu" role="menu" style="min-width: 90px;">')
 
    -- 'Filter Policies' dropdown menu
@@ -312,7 +312,7 @@ local function printDeviceProtocolsPage()
    for _, entry in pairs(entries) do
       if entry ~= "" then
          page_params["policy_filter"] = entry.id
-         print('<li' .. ternary(policy_filter == entry.id, ' class="active"', '') .. '><a href="' .. getPageUrl(base_url, page_params) .. '">' .. (entry.icon or "") .. entry.text .. '</a></li>')
+         print('<li' .. ternary(policy_filter == entry.id, ' class="active"', '') .. '><a class="dropdown-item" href="' .. getPageUrl(base_url, page_params) .. '">' .. (entry.icon or "") .. entry.text .. '</a></li>')
       else
          print('<li role="separator" class="divider"></li>')
       end
@@ -326,7 +326,7 @@ local function printDeviceProtocolsPage()
    local function categoryCountCallback(cat_id, cat_name)
       local cat_count = 0
       for proto_id,p in pairs(device_policies) do
-         local cat = interface.getnDPIProtoCategory(tonumber(proto_id))
+         local cat = ntop.getnDPIProtoCategory(tonumber(proto_id))
          if cat.name == cat_name and (isEmptyString(policy_filter) 
               or policy_filter == p.clientActionId or policy_filter == p.serverActionId) then
             cat_count = cat_count + 1
